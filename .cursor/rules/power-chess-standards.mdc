@@ -1,0 +1,46 @@
+---
+description: Global Power Chess context and coding standards
+alwaysApply: true
+---
+
+# Power Chess - Global Rules
+
+## Product Context
+- 1v1 multiplayer chess game with card-based powers.
+- Core chess movement and check/checkmate logic must be preserved.
+- Never allow an instant checkmate caused directly by a power.
+
+## Source of Truth
+- Treat `PROJECT.md` as the primary business-rules reference.
+- In ambiguous cases, prioritize gameplay consistency and backend validation.
+
+## Backend (Go)
+- Keep authoritative game rules on the server.
+- WebSocket events are the source of truth for turn, mana, strikes, ignition, and cooldown state.
+- Write clear, testable code with explicit naming and small functions.
+- Design the power/ability system for extensibility (new cards and effects without refactoring core turn logic).
+- Prefer effect-based architecture (card definition + resolver + validation pipeline) over hard-coded per-card branching in many places.
+
+## Database and Persistence
+- Use PostgreSQL as the primary database.
+- Use GORM as the default ORM for Go services.
+- Use `golang-migrate` for versioned SQL migrations.
+- Run migrations automatically during service startup (safe, idempotent) and in containerized environments.
+- Initial table design is flexible and should be defined when implementation begins.
+
+## Frontend (HTML/CSS/JS)
+- Keep the HUD simple and readable.
+- Do not duplicate critical game-rule authority in the client.
+- Client-side validation can improve UX, but final decisions belong to the backend.
+
+## Code Standards
+- Prefer single-responsibility functions and small modules.
+- Avoid coupling business rules to presentation layers.
+- Add comments only for non-obvious logic.
+- Default to ASCII in source files unless there is a clear reason not to.
+
+## Delivery Discipline
+- Document rule changes in `PROJECT.md` when they affect gameplay.
+- Update `README.md` when setup, tooling, or run instructions change.
+- Always create tests for each new functionality and bug fix.
+- Only commit when tests are passing (expected 100% pass rate for the relevant suite in CI/local runs).
