@@ -1,0 +1,255 @@
+package server
+
+import (
+	"testing"
+	"time"
+
+	"power-chess/internal/chess"
+	"power-chess/internal/gameplay"
+)
+
+const newRoomFailedFmt = "new room failed: %v"
+
+// TestMarkRequestOnce ensures request idempotency keys are accepted only once.
+func TestMarkRequestOnce(t *testing.T) {
+	room, err := NewRoomSession("room-test")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	key := "room-test|A|submit_move|req-1"
+	if ok := room.MarkRequestOnce(key); !ok {
+		t.Fatalf("first mark should succeed")
+	}
+	if ok := room.MarkRequestOnce(key); ok {
+		t.Fatalf("second mark should be rejected as duplicate")
+	}
+}
+
+// TestDisconnectTimeoutGivesWinToConnectedPlayer validates single disconnect timeout rule.
+func TestDisconnectTimeoutGivesWinToConnectedPlayer(t *testing.T) {
+	room, err := NewRoomSession("room-disconnect")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	room.DisconnectGrace = 20 * time.Millisecond
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	room.RegisterPlayerConnection(gameplay.PlayerB)
+
+	room.HandlePlayerDisconnect(gameplay.PlayerA)
+	time.Sleep(40 * time.Millisecond)
+
+	s := room.SnapshotSafe()
+	if !s.MatchEnded || s.Winner != string(gameplay.PlayerB) || s.EndReason != "disconnect_timeout" {
+		t.Fatalf("expected disconnect timeout win for B, got %+v", s)
+	}
+}
+
+// TestBothDisconnectedCancelsMatch validates no-winner cancellation when both leave.
+func TestBothDisconnectedCancelsMatch(t *testing.T) {
+	room, err := NewRoomSession("room-cancel")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	room.DisconnectGrace = 20 * time.Millisecond
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	room.RegisterPlayerConnection(gameplay.PlayerB)
+
+	room.HandlePlayerDisconnect(gameplay.PlayerA)
+	room.HandlePlayerDisconnect(gameplay.PlayerB)
+	time.Sleep(25 * time.Millisecond)
+
+	s := room.SnapshotSafe()
+	if !s.MatchEnded || s.Winner != "" || s.EndReason != "both_disconnected_cancelled" {
+		t.Fatalf("expected cancelled match with no winner, got %+v", s)
+	}
+}
+
+// TestHandlePlayerLeaveGivesImmediateWin validates explicit room leave immediate winner rule.
+func TestHandlePlayerLeaveGivesImmediateWin(t *testing.T) {
+	room, err := NewRoomSession("room-leave")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	room.RegisterPlayerConnection(gameplay.PlayerB)
+
+	room.HandlePlayerLeave(gameplay.PlayerA)
+	s := room.SnapshotSafe()
+	if !s.MatchEnded || s.Winner != string(gameplay.PlayerB) || s.EndReason != "left_room" {
+		t.Fatalf("expected immediate leave win for B, got %+v", s)
+	}
+}
+
+// TestHandlePlayerDisconnectPrefersCheckmateOverCancel ends by board when both leave after mate.
+func TestHandlePlayerDisconnectPrefersCheckmateOverCancel(t *testing.T) {
+	room, err := NewRoomSession("room-disconnect-mate")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	g := chess.NewEmptyGame(chess.White)
+	g.SetPiece(chess.Pos{Row: 7, Col: 0}, chess.Piece{Type: chess.King, Color: chess.White})
+	g.SetPiece(chess.Pos{Row: 5, Col: 2}, chess.Piece{Type: chess.King, Color: chess.Black})
+	g.SetPiece(chess.Pos{Row: 6, Col: 1}, chess.Piece{Type: chess.Queen, Color: chess.Black})
+	g.SetPiece(chess.Pos{Row: 6, Col: 0}, chess.Piece{Type: chess.Rook, Color: chess.Black})
+	room.Engine.Chess = g
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	room.RegisterPlayerConnection(gameplay.PlayerB)
+	room.HandlePlayerDisconnect(gameplay.PlayerA)
+	room.HandlePlayerDisconnect(gameplay.PlayerB)
+	s := room.SnapshotSafe()
+	if !s.MatchEnded || s.EndReason != "checkmate" || s.Winner != string(gameplay.PlayerB) {
+		t.Fatalf("expected checkmate for B, got %+v", s)
+	}
+}
+
+// TestSnapshotUpgradesBothDisconnectedToCheckmate replaces abandonment with board truth.
+func TestSnapshotUpgradesBothDisconnectedToCheckmate(t *testing.T) {
+	room, err := NewRoomSession("room-upgrade-end")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	g := chess.NewEmptyGame(chess.White)
+	g.SetPiece(chess.Pos{Row: 7, Col: 0}, chess.Piece{Type: chess.King, Color: chess.White})
+	g.SetPiece(chess.Pos{Row: 5, Col: 2}, chess.Piece{Type: chess.King, Color: chess.Black})
+	g.SetPiece(chess.Pos{Row: 6, Col: 1}, chess.Piece{Type: chess.Queen, Color: chess.Black})
+	g.SetPiece(chess.Pos{Row: 6, Col: 0}, chess.Piece{Type: chess.Rook, Color: chess.Black})
+	room.Engine.Chess = g
+	room.stateM.Lock()
+	room.matchEnded = true
+	room.endReason = "both_disconnected_cancelled"
+	room.winner = ""
+	room.stateM.Unlock()
+
+	s := room.SnapshotSafe()
+	if !s.MatchEnded || s.EndReason != "checkmate" || s.Winner != string(gameplay.PlayerB) {
+		t.Fatalf("expected checkmate win for B after upgrade, got %+v", s)
+	}
+}
+
+// TestEvaluateMatchOutcomeCheckmate marks match end and winner from board state.
+func TestEvaluateMatchOutcomeCheckmate(t *testing.T) {
+	room, err := NewRoomSession("room-checkmate")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	g := chess.NewEmptyGame(chess.White)
+	g.SetPiece(chess.Pos{Row: 7, Col: 0}, chess.Piece{Type: chess.King, Color: chess.White})
+	g.SetPiece(chess.Pos{Row: 5, Col: 2}, chess.Piece{Type: chess.King, Color: chess.Black})
+	g.SetPiece(chess.Pos{Row: 6, Col: 1}, chess.Piece{Type: chess.Queen, Color: chess.Black})
+	g.SetPiece(chess.Pos{Row: 6, Col: 0}, chess.Piece{Type: chess.Rook, Color: chess.Black})
+	room.Engine.Chess = g
+
+	room.EvaluateMatchOutcome()
+	s := room.SnapshotSafe()
+	if !s.MatchEnded || s.Winner != string(gameplay.PlayerB) || s.EndReason != "checkmate" {
+		t.Fatalf("expected checkmate win for B, got %+v", s)
+	}
+}
+
+// TestResolveReactionTimeoutIfExpired auto-resolves capture window after timeout.
+func TestResolveReactionTimeoutIfExpired(t *testing.T) {
+	room, err := NewRoomSession("room-reaction-timeout")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 5, Col: 5}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
+	room.Engine.Chess = board
+	room.reactionTimeout = 5 * time.Millisecond
+
+	if err := room.Engine.SubmitMove(gameplay.PlayerA, chess.Move{
+		From: chess.Pos{Row: 6, Col: 4},
+		To:   chess.Pos{Row: 5, Col: 5},
+	}); err != nil {
+		t.Fatalf("submit move failed: %v", err)
+	}
+
+	// First pass starts timeout window, second pass after sleep should resolve it.
+	resolved, err := room.ResolveReactionTimeoutIfExpired(time.Now())
+	if err != nil || resolved {
+		t.Fatalf("expected unresolved on first pass, resolved=%v err=%v", resolved, err)
+	}
+	time.Sleep(8 * time.Millisecond)
+	resolved, err = room.ResolveReactionTimeoutIfExpired(time.Now())
+	if err != nil {
+		t.Fatalf("timeout resolve failed: %v", err)
+	}
+	if !resolved {
+		t.Fatalf("expected reaction timeout to auto-resolve")
+	}
+	if room.Engine.Chess.PieceAt(chess.Pos{Row: 5, Col: 5}).Color != chess.White {
+		t.Fatalf("expected pending capture applied after timeout")
+	}
+}
+
+// TestResolveTurnTimeoutIfExpiredAddsStrikeAndPassesTurn validates timeout strike and turn handoff.
+func TestResolveTurnTimeoutIfExpiredAddsStrikeAndPassesTurn(t *testing.T) {
+	room, err := NewRoomSession("room-turn-timeout")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	room.Engine.State.TurnSeconds = 1
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	room.RegisterPlayerConnection(gameplay.PlayerB)
+
+	// First call initializes deadline.
+	resolved, err := room.ResolveTurnTimeoutIfExpired(time.Now())
+	if err != nil {
+		t.Fatalf("init timeout failed: %v", err)
+	}
+	if resolved {
+		t.Fatalf("first pass should not resolve timeout")
+	}
+
+	time.Sleep(1100 * time.Millisecond)
+	resolved, err = room.ResolveTurnTimeoutIfExpired(time.Now())
+	if err != nil {
+		t.Fatalf("timeout resolve failed: %v", err)
+	}
+	if !resolved {
+		t.Fatalf("expected timeout resolution")
+	}
+	s := room.SnapshotSafe()
+	if s.TurnPlayer != string(gameplay.PlayerB) {
+		t.Fatalf("expected turn passed to B, got %+v", s)
+	}
+	strikesA := -1
+	for _, p := range s.Players {
+		if p.PlayerID == string(gameplay.PlayerA) {
+			strikesA = p.Strikes
+			break
+		}
+	}
+	if strikesA != 1 {
+		t.Fatalf("expected A to have 1 strike, got %+v", s.Players)
+	}
+}
+
+// TestResolveTurnTimeoutIfExpiredLosesOnThirdStrike validates strike-limit end condition.
+func TestResolveTurnTimeoutIfExpiredLosesOnThirdStrike(t *testing.T) {
+	room, err := NewRoomSession("room-turn-timeout-loss")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	room.Engine.State.Players[gameplay.PlayerA].Strikes = 2
+	room.Engine.State.TurnSeconds = 1
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	room.RegisterPlayerConnection(gameplay.PlayerB)
+
+	_, _ = room.ResolveTurnTimeoutIfExpired(time.Now())
+	time.Sleep(1100 * time.Millisecond)
+	resolved, err := room.ResolveTurnTimeoutIfExpired(time.Now())
+	if err != nil {
+		t.Fatalf("timeout loss resolve failed: %v", err)
+	}
+	if !resolved {
+		t.Fatalf("expected timeout loss resolution")
+	}
+	s := room.SnapshotSafe()
+	if !s.MatchEnded || s.Winner != string(gameplay.PlayerB) || s.EndReason != "strike_limit" {
+		t.Fatalf("expected strike_limit win for B, got %+v", s)
+	}
+}

@@ -1,0 +1,1 @@
+{"rule":"CONDITIONAL_CLAUSE","sentence":"^\\QIf a piece would be pushed off the board,\nExample:\\E$"}

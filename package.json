@@ -1,0 +1,12 @@
+{
+  "name": "power-chess",
+  "private": true,
+  "scripts": {
+    "lint:css": "stylelint \"web/**/*.css\"",
+    "lint:css:fix": "stylelint \"web/**/*.css\" --fix"
+  },
+  "devDependencies": {
+    "stylelint": "^16.14.1",
+    "stylelint-config-standard": "^37.0.0"
+  }
+}

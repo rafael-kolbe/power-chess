@@ -12,7 +12,8 @@
 - Se o jogador nao agir no tempo: recebe 1 strike e passa o turno.
 - Com 3 strikes, derrota automatica.
 - Vitoria ocorre por checkmate.
-- Nenhum poder pode causar checkmate instantaneo; esta jogada deve ser invalidada.
+- Poderes podem causar checkmate, exceto quando texto da carta disser o contrario.
+- O rei nunca pode ser capturado diretamente; tentativas devem ser rejeitadas como jogada ilegal.
 - Pecas capturadas vao para o Graveyard e podem retornar conforme poderes.
 
 ## Sistema de Mana e Mana Energizada
@@ -30,6 +31,9 @@
 - Essa ativacao consome toda mana energizada.
 - A cada uso, o maximo da pool de mana energizada aumenta em +10 para a proxima ativacao.
 - Exemplo: 20 -> 30 -> 40...
+- Habilidade de jogador so pode ser ativada no turno do proprio jogador.
+- A ativacao da habilidade de jogador consome o turno.
+- Habilidades de jogador nao podem ser negadas por cartas.
 
 ## Sistema de Poderes (Cartas)
 - Cada carta possui: custo de mana, tempo de ignicao (0 a 5 turnos) e recarga (em turnos).
@@ -39,6 +43,29 @@
   3. Adversario pode influenciar se a ativacao tera sucesso.
   4. Com sucesso ou falha, carta vai para slot de recarga.
   5. Ao terminar recarga, carta retorna ao deck.
+
+### Trigger Windows e Ativacao
+- Cartas `Power` so podem ser ativadas no turno do jogador da vez.
+- Cartas `Continuous` so podem ser ativadas no turno do jogador da vez.
+- Cartas `Retribution` so podem ser ativadas dentro de reaction windows apropriadas (cadeia de resposta).
+- Cartas `Counter` so podem ser ativadas dentro de reaction windows apropriadas para resposta de captura e condicoes da carta.
+- Em tentativa de captura valida, abre automaticamente uma `capture_attempt` reaction window.
+- Captura por `en passant` tambem dispara `capture_attempt`.
+- Na `capture_attempt` chain, a primeira resposta deve vir do oponente com carta `Counter` valida para o trigger.
+- Apenas carta `Counter` pode responder uma carta `Counter` em uma chain.
+- `Counterattack` exige tentativa de captura por peca atacante buffada por carta `Power`.
+- Se `Counterattack` for valida, a captura pendente e cancelada e a peca atacante e capturada.
+- `Blockade` so pode responder diretamente a `Counterattack` durante `capture_attempt`.
+- `Blockade` nega o efeito de `Counterattack`, cancela a captura pendente e mantem a peca atacante na casa original para escolher outra jogada.
+- Se o slot de ignicao estiver ocupado, nenhuma carta pode ser ativada nele, exceto `Save It For Later`.
+- `Save It For Later` exige slot ocupado: remove a carta atual da ignicao sem ativar seu efeito, devolve essa carta para a mao do dono, ganha mana igual ao custo da carta removida e entao usa o slot.
+- Cartas com `Ignition: 0` resolvem imediatamente e liberam o slot no mesmo turno.
+- Enquanto houver mana e slot livre, o jogador pode ativar multiplas cartas de `Ignition: 0` no mesmo turno.
+
+## Regras de Desconexao de Partida
+- Se ambos jogadores desconectarem, a partida e cancelada sem vencedor.
+- Se apenas um jogador desconectar, inicia janela de reconexao de 60 segundos.
+- Se nao houver reconexao dentro do prazo, o outro jogador vence por timeout de desconexao.
 
 ## Exemplos de Poderes e Habilidades (Inicial)
 - Mover uma peca 2x.
@@ -86,9 +113,9 @@
 ## Diretrizes de Implementacao
 - Validar jogadas no servidor (autoridade do estado da partida).
 - Garantir consistencia de turno, strike e timers em ambos clientes.
-- Bloquear ativacoes de poderes que resultem em checkmate instantaneo.
 - Tratar recursos (mana, mana energizada, cooldowns e ignicao) como estado sincronizado de jogo.
 - Cobrir regras criticas com testes automatizados no backend.
+- Garantir persistencia minima de estado em Postgres para reconexao e retomada de sala.
 
 ## Arquitetura Sugerida para Sistema Adaptavel de Poderes
 - Modelar cada carta com metadados e efeitos desacoplados:
@@ -100,7 +127,7 @@
   2. consumo de recursos;
   3. aplicacao de efeitos;
   4. eventos para cliente (WebSocket);
-  5. validacao pos-efeito (incluindo bloqueio de checkmate instantaneo).
+  5. validacao pos-efeito (incluindo regra de nao-captura direta do rei).
 - Evitar `if/else` gigante por carta; usar registrador de efeitos por tipo.
 - Manter efeitos temporarios em estado por turno (buffs/debuffs), com expiracao automatica.
 - Persistir estado de partida para reconexao e auditoria de jogadas.

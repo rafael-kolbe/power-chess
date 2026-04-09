@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>POWER CHESS (Alpha)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Oxanium:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <h2 id="titleLabel">POWER CHESS (Alpha)</h2>
+
+  <div id="lobbyScreen" class="lobby-layout">
+    <div class="lobby-main">
+      <div class="row lobby-row-primary">
+        <label class="field">
+          <span id="languageLabel">Language</span>
+          <select id="localeSelect">
+            <option value="en-US">English (US)</option>
+            <option value="pt-BR">Português (Brasil)</option>
+          </select>
+        </label>
+        <label class="field">
+          <span id="roomNameLabel">Room Name</span>
+          <input id="roomName" value="Let's Play!" placeholder="Let's Play!">
+        </label>
+        <label class="field">
+          <span id="pieceTypeLabel">Piece Type</span>
+          <select id="pieceType">
+            <option value="random">Random</option>
+            <option value="white">White</option>
+            <option value="black">Black</option>
+          </select>
+        </label>
+        <input id="playerId" type="hidden" value="A">
+        <button id="connectBtn" class="connect-btn">Create</button>
+      </div>
+      <div class="row">
+        <label class="row-label">
+          <span id="privateRoomLabel">Private Room</span>
+          <input id="privateRoom" type="checkbox" />
+        </label>
+        <label id="roomPasswordField" class="field hidden">
+          <span id="passwordLabel">Password</span>
+          <div class="password-input-wrap">
+            <input id="roomPassword" type="password" value="" placeholder="Room password" aria-describedby="lobbyPrivatePasswordError">
+            <button id="roomPasswordToggle" type="button" class="icon-btn" aria-label="Mostrar senha" title="Mostrar senha">👁</button>
+          </div>
+        </label>
+      </div>
+      <p id="lobbyPrivatePasswordError" class="lobby-private-password-error hidden" role="alert"></p>
+      <p id="lobbyHint" class="lobby-hint">Choose the room name and piece side you want to play, then click Create. Join an existing room by clicking it in the room list. The match starts when both players are in the room.</p>
+    </div>
+    <aside class="room-list-panel">
+      <h3 id="roomListTitle">Open Rooms</h3>
+      <label class="field room-list-search">
+        <span id="roomSearchLabel">Search (ID or Name)</span>
+        <input id="roomSearch" value="" placeholder="Search rooms...">
+      </label>
+      <ul id="roomList"></ul>
+      <p id="roomListEmpty" class="room-list-empty hidden">No active rooms right now.</p>
+    </aside>
+  </div>
+
+  <div id="privateJoinOverlay" class="modal-overlay hidden" aria-hidden="true">
+    <div class="modal-dialog private-join-dialog" role="dialog" aria-modal="true" aria-labelledby="privateJoinTitle">
+      <h3 id="privateJoinTitle">Private room</h3>
+      <p id="privateJoinBody" class="modal-body"></p>
+      <label class="field private-join-field">
+        <span id="privateJoinPasswordLabel">Password</span>
+        <div class="password-input-wrap">
+          <input id="privateJoinPasswordInput" type="password" autocomplete="off" value="" aria-describedby="privateJoinError">
+          <button type="button" id="privateJoinPasswordToggle" class="icon-btn" aria-label="Show password" title="Show password">👁</button>
+        </div>
+      </label>
+      <p id="privateJoinError" class="private-join-error hidden" role="alert"></p>
+      <div class="modal-actions">
+        <button type="button" id="privateJoinCancel" class="match-end-btn-secondary">Cancel</button>
+        <button type="button" id="privateJoinSubmit" class="match-end-btn-primary">Join</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="matchEndOverlay" class="match-end-overlay hidden" aria-hidden="true">
+    <div class="match-end-dialog" role="dialog" aria-labelledby="matchEndTitle" aria-describedby="matchEndBody">
+      <h3 id="matchEndTitle">Match finished</h3>
+      <p id="matchEndBody"></p>
+      <p id="matchEndCountdown" class="match-end-countdown hidden"></p>
+      <div class="match-end-actions">
+        <button type="button" id="matchEndStay" class="match-end-btn-secondary hidden">Stay in room</button>
+        <button type="button" id="matchEndToLobby" class="match-end-btn-primary">Back to lobby</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="gameShell" class="game-shell-hud hidden">
+    <div id="waitingBanner" class="waiting-banner hidden">Waiting for opponent...</div>
+    <div class="row">
+      <span id="inRoomLabel" class="in-room-label"></span>
+      <button id="copyRoomIdBtn" type="button">Copiar ID</button>
+      <label class="row-label">
+        <span id="reactionToggleText">Reactions</span>
+        <input id="reactionToggle" type="checkbox" checked />
+        <span id="reactionToggleLabel">On</span>
+      </label>
+      <label class="row-label">
+        <span id="coordsInSquaresText">Coords in squares</span>
+        <input id="coordsInSquares" type="checkbox" />
+      </label>
+      <button id="disconnectBtn" type="button">Leave room</button>
+    </div>
+    <div class="row">
+      <input id="from" value="6,4" placeholder="from row,col">
+      <input id="to" value="4,4" placeholder="to row,col">
+      <button id="moveBtn">Submit move</button>
+      <input id="handIndex" value="0" placeholder="hand index">
+      <button id="activateBtn">Activate card</button>
+    </div>
+    <div class="row">
+      <input id="pendingPiece" value="6,0" placeholder="pending piece row,col">
+      <button id="resolvePendingBtn">Resolve pending effect</button>
+      <input id="reactionHandIndex" value="0" placeholder="reaction hand index">
+      <input id="reactionPiece" value="" placeholder="reaction target row,col (optional)">
+      <button id="queueReactionBtn">Queue reaction</button>
+      <button id="resolveReactionsBtn">Resolve reactions</button>
+    </div>
+    <h3 id="reactionPendingTitle">Reaction/Pending status</h3>
+    <pre id="status"></pre>
+    <div id="boardArea">
+      <div id="boardWrap" class="board-wrap">
+        <div class="player-b-stack">
+          <div class="side-clock clock-b"><strong id="playerBLabel">Player B</strong> | <span id="clockLabelB">Clock</span>: <span id="clockB">--</span>s | <span id="strikesLabelB">Strikes</span>: <span id="strikesB">0</span></div>
+          <div class="bar-group">
+            <div class="bar mana-bar" id="manaBarB"><div class="fill" id="manaFillB"></div><span class="bar-label" id="manaLabelB">0/10</span></div>
+            <div class="bar energized-bar" id="energizedBarB"><div class="fill" id="energizedFillB"></div><span class="bar-label" id="energizedLabelB">0/20</span></div>
+          </div>
+        </div>
+        <div id="boardFrame" class="board-frame"></div>
+        <div class="player-a-stack">
+          <div class="bar-group">
+            <div class="bar mana-bar" id="manaBarA"><div class="fill" id="manaFillA"></div><span class="bar-label" id="manaLabelA">0/10</span></div>
+            <div class="bar energized-bar" id="energizedBarA"><div class="fill" id="energizedFillA"></div><span class="bar-label" id="energizedLabelA">0/20</span></div>
+          </div>
+          <div class="side-clock clock-a"><strong id="playerALabel">Player A</strong> | <span id="clockLabelA">Clock</span>: <span id="clockA">--</span>s | <span id="strikesLabelA">Strikes</span>: <span id="strikesA">0</span></div>
+        </div>
+      </div>
+    </div>
+    <h3 id="snapshotTitle">Snapshot</h3>
+    <pre id="snapshot"></pre>
+    <h3 id="eventsTitle">Events</h3>
+    <pre id="events"></pre>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,612 @@
+/* =============================================================================
+   Power Chess HUD — global tokens
+   ============================================================================= */
+
+:root {
+  --font-ui: "Oxanium", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --color-bg-page: #111;
+  --color-bg-panel: #151515;
+  --color-bg-input: #1b1b1b;
+  --color-bg-pre: #0b0b0b;
+  --color-border: #333;
+  --color-border-bar: #444;
+  --color-border-soft: #222;
+  --color-text: #eee;
+  --color-text-muted: #888;
+  --color-text-hint: #888;
+  --color-text-dim: #aaa;
+  --color-text-label: #ccc;
+  --color-board-light: #d8c6a0;
+  --color-board-dark: #7d5a3c;
+}
+
+/* =============================================================================
+   Base
+   ============================================================================= */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 16px;
+  font-family: var(--font-ui);
+  font-weight: 500;
+  color: var(--color-text);
+  background: var(--color-bg-page);
+}
+
+h2 {
+  margin-top: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #e8e8e8;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* =============================================================================
+   Utilities
+   ============================================================================= */
+
+.hidden {
+  display: none !important;
+}
+
+/* =============================================================================
+   Forms & controls
+   ============================================================================= */
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+}
+
+.field span {
+  font-size: 12px;
+  color: var(--color-text-label);
+}
+
+.lobby-row-primary {
+  align-items: flex-end;
+}
+
+.connect-btn {
+  margin-bottom: 1px;
+}
+
+.password-input-wrap {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.icon-btn {
+  min-width: 40px;
+  padding: 8px 10px;
+  line-height: 1;
+}
+
+button,
+input,
+select {
+  padding: 8px;
+  color: var(--color-text);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.row-label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.lobby-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-hint);
+}
+
+.in-room-label {
+  font-size: 14px;
+  color: var(--color-text-dim);
+}
+
+.inline-link-btn {
+  padding: 0;
+  color: #9acbff;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* =============================================================================
+   Lobby
+   ============================================================================= */
+
+.lobby-layout {
+  display: grid;
+  max-width: 1080px;
+  gap: 24px;
+  align-items: start;
+  grid-template-columns: 1fr minmax(320px, 400px);
+}
+
+@media (width <= 720px) {
+  .lobby-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.room-list-panel {
+  min-height: 120px;
+  padding: 14px;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+}
+
+.room-list-panel h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-label);
+}
+
+.room-list-search {
+  margin-bottom: 12px;
+}
+
+#roomList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.room-list-item {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.room-item-name {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-weight: 600;
+}
+
+.room-lock-icon {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
+}
+
+.room-list-item:hover {
+  background: #222;
+  border-color: #555;
+}
+
+.room-list-empty {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+
+/* =============================================================================
+   Game shell HUD
+   ============================================================================= */
+
+.game-shell-hud h3 {
+  margin: 16px 0 8px;
+  font-size: 14px;
+  color: var(--color-text-dim);
+}
+
+.waiting-banner {
+  margin-bottom: 16px;
+  padding: 20px 16px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #a8e6cf;
+  text-align: center;
+  background: #1a2520;
+  border: 1px solid #2a5c45;
+  border-radius: 10px;
+}
+
+/* =============================================================================
+   Resource bars & clocks
+   ============================================================================= */
+
+.board-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  width: fit-content;
+  margin-top: 12px;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.player-b-stack,
+.player-a-stack {
+  width: 100%;
+  max-width: calc(22px + 8 * 64px + 22px + 16px);
+}
+
+.player-b-stack {
+  align-self: flex-start;
+}
+
+.player-a-stack {
+  align-self: flex-end;
+}
+
+/* Player B: opponent (A) on top, self on bottom — same as flipped board view. */
+.board-wrap.board-wrap-perspective-b {
+  flex-direction: column-reverse;
+}
+
+.side-clock {
+  padding: 8px 10px;
+  font-size: 14px;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.clock-b {
+  margin-bottom: 6px;
+}
+
+.clock-a {
+  margin-top: 6px;
+  text-align: right;
+}
+
+.board-wrap.board-wrap-perspective-b .clock-a {
+  text-align: left;
+}
+
+.board-wrap.board-wrap-perspective-b .clock-b {
+  text-align: right;
+}
+
+.bar-group {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  width: 100%;
+}
+
+.bar {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  overflow: hidden;
+  background: #252525;
+  border: 1px solid var(--color-border-bar);
+  border-radius: 6px;
+}
+
+.bar .fill {
+  width: 0%;
+  height: 100%;
+  transition: width 0.2s ease;
+}
+
+.bar.mana-bar .fill {
+  background: linear-gradient(180deg, #5eb0ff, #2a7ccc);
+}
+
+.bar.energized-bar .fill {
+  background: linear-gradient(180deg, #ff7a7a, #c93a3a);
+}
+
+.bar .bar-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  pointer-events: none;
+  text-shadow: 0 0 3px #000, 0 0 6px #000;
+}
+
+/* =============================================================================
+   Chessboard
+   ============================================================================= */
+
+.board-frame {
+  display: grid;
+  gap: 2px;
+  grid-template-columns: 22px repeat(8, 64px) 22px;
+  grid-template-rows: 22px repeat(8, 64px) 22px;
+  user-select: none;
+}
+
+.edge-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  min-height: 22px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #bbb;
+}
+
+.grid-cell {
+  width: 64px;
+  height: 64px;
+}
+
+.sq {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  line-height: 1;
+  border: 1px solid var(--color-border-soft);
+}
+
+.light {
+  background: var(--color-board-light);
+}
+
+.dark {
+  background: var(--color-board-dark);
+}
+
+.sq .piece-img {
+  display: block;
+  flex-shrink: 0;
+  width: 87.5%;
+  height: 87.5%;
+  max-width: 58px;
+  max-height: 58px;
+  pointer-events: none;
+  user-select: none;
+  object-fit: contain;
+  object-position: center;
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 28%));
+}
+
+.sq.piece {
+  cursor: grab;
+}
+
+.sq.selected {
+  box-shadow: inset 0 0 0 3px rgb(86 195 255 / 90%);
+}
+
+.sq.move {
+  box-shadow: inset 0 0 0 3px rgb(119 255 153 / 85%);
+}
+
+.sq.drop-target {
+  box-shadow: inset 0 0 0 3px rgb(255 225 120 / 95%);
+}
+
+.sq .sq-coord {
+  position: absolute;
+  bottom: 2px;
+  left: 3px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.sq.light .sq-coord {
+  color: #222;
+}
+
+.sq.dark .sq-coord {
+  color: #f0f0f0;
+}
+
+.board-frame.show-inner-coords .sq-coord {
+  opacity: 0.38;
+}
+
+/* =============================================================================
+   Debug / JSON blocks
+   ============================================================================= */
+
+pre {
+  max-height: 220px;
+  padding: 10px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  background: var(--color-bg-pre);
+  border-radius: 6px;
+}
+
+/* =============================================================================
+   Lobby mini modals (e.g. private room join)
+   ============================================================================= */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 72%);
+}
+
+.modal-dialog {
+  width: 100%;
+  max-width: 400px;
+  padding: 22px 24px;
+  background: #1c1c1c;
+  border: 1px solid #444;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 50%);
+}
+
+.private-join-dialog h3 {
+  margin: 0 0 10px;
+  font-size: 18px;
+  color: #f0f0f0;
+}
+
+.modal-body {
+  margin: 0 0 16px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #c8c8c8;
+}
+
+.private-join-field {
+  margin-bottom: 8px;
+  min-width: 0;
+}
+
+.private-join-error,
+.lobby-private-password-error {
+  font-size: 13px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: #e87373;
+}
+
+.private-join-error {
+  margin: 0 0 14px;
+}
+
+.lobby-private-password-error {
+  margin: -4px 0 10px;
+}
+
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+/* =============================================================================
+   Match end modal
+   ============================================================================= */
+
+.match-end-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 72%);
+}
+
+.match-end-dialog {
+  width: 100%;
+  max-width: 420px;
+  padding: 24px;
+  background: #1c1c1c;
+  border: 1px solid #444;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 50%);
+}
+
+.match-end-dialog h3 {
+  margin: 0 0 12px;
+  font-size: 20px;
+  color: #f0f0f0;
+}
+
+.match-end-dialog p {
+  margin: 0 0 20px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #ccc;
+  white-space: pre-line;
+}
+
+.match-end-countdown {
+  margin: -8px 0 14px;
+  font-size: 13px;
+  color: #a9b6c4;
+}
+
+.match-end-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.match-end-dialog .match-end-actions button {
+  width: 100%;
+  padding: 10px;
+  font-weight: 600;
+}
+
+.match-end-btn-primary {
+  border-color: #3d7a56;
+  background: linear-gradient(180deg, #2f8f55, #256d42);
+}
+
+.match-end-btn-primary:hover {
+  filter: brightness(1.06);
+}
+
+.match-end-btn-secondary {
+  border-color: #555;
+  background: var(--color-bg-input);
+}
+
+.modal-actions .match-end-btn-primary,
+.modal-actions .match-end-btn-secondary {
+  min-width: 96px;
+  padding: 10px 16px;
+  font-weight: 600;
+}

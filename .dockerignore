@@ -1,0 +1,37 @@
+# Node / frontend tooling (lint only; image build is pure Go)
+node_modules/
+package.json
+package-lock.json
+.stylelintrc.json
+
+# VCS and editor noise
+.git
+.gitignore
+.cursor
+.idea
+.vscode
+
+# Local env (compose injects vars; never bake secrets into context)
+.env
+.env.*
+!.env.example
+
+# Docs and specs not needed to compile
+*.md
+
+# Compose is not used by the Dockerfile COPY layers
+docker-compose.yml
+docker-compose.override.yml
+
+# Local binaries and caches
+bin/
+dist/
+tmp/
+*.log
+coverage.out
+*.exe
+**/__debug_bin
+
+# OS cruft
+.DS_Store
+Thumbs.db

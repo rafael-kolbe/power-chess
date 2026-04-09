@@ -8,11 +8,14 @@ alwaysApply: true
 ## Product Context
 - 1v1 multiplayer chess game with card-based powers.
 - Core chess movement and check/checkmate logic must be preserved.
-- Never allow an instant checkmate caused directly by a power.
+- Powers can cause checkmate unless a specific card text explicitly forbids it.
+- A king can never be captured directly; attempts must be rejected as illegal moves.
 
 ## Source of Truth
 - Treat `PROJECT.md` as the primary business-rules reference.
 - In ambiguous cases, prioritize gameplay consistency and backend validation.
+- When the user provides canonical text (card text, examples, descriptions, UI copy), preserve it exactly.
+- Do not paraphrase, "improve", or invent replacement wording for user-specified text fields.
 
 ## Backend (Go)
 - Keep authoritative game rules on the server.
@@ -20,6 +23,8 @@ alwaysApply: true
 - Write clear, testable code with explicit naming and small functions.
 - Design the power/ability system for extensibility (new cards and effects without refactoring core turn logic).
 - Prefer effect-based architecture (card definition + resolver + validation pipeline) over hard-coded per-card branching in many places.
+- Use explicit protocol envelopes for frontend/backend communication.
+- Keep transport payloads stable and version-friendly.
 
 ## Database and Persistence
 - Use PostgreSQL as the primary database.
@@ -38,9 +43,13 @@ alwaysApply: true
 - Avoid coupling business rules to presentation layers.
 - Add comments only for non-obvious logic.
 - Default to ASCII in source files unless there is a clear reason not to.
+- Every newly added function must include GoDoc-style documentation comments.
+- Existing undocumented functions can be documented incrementally over time.
 
 ## Delivery Discipline
 - Document rule changes in `PROJECT.md` when they affect gameplay.
 - Update `README.md` when setup, tooling, or run instructions change.
+- Review and update relevant markdown docs (`PROJECT.md`, `README.md`, `PROTOCOL.md`, card/skill docs) whenever behavior changes.
 - Always create tests for each new functionality and bug fix.
 - Only commit when tests are passing (expected 100% pass rate for the relevant suite in CI/local runs).
+- Include protocol and integration tests when adding websocket/game actions.
