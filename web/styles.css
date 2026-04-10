@@ -251,6 +251,63 @@ button:disabled {
    Resource bars & clocks
    ============================================================================= */
 
+#boardArea {
+  position: relative;
+  width: 100%;
+}
+
+.match-board-tools {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: min(200px, 42vw);
+  pointer-events: none;
+}
+
+.match-board-tool {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgb(12 14 18 / 72%);
+  border: 1px solid rgb(255 255 255 / 8%);
+  pointer-events: auto;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: 0.02em;
+  color: rgb(200 210 220 / 52%);
+  user-select: none;
+}
+
+.match-board-tool:hover {
+  color: rgb(210 220 230 / 68%);
+  border-color: rgb(255 255 255 / 12%);
+}
+
+.match-board-tool input {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  opacity: 0.65;
+  accent-color: #6a9ab8;
+}
+
+.match-board-tool__text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .board-wrap {
   display: flex;
   flex-direction: column;
@@ -449,7 +506,7 @@ button:disabled {
 }
 
 .board-frame.show-inner-coords .sq-coord {
-  opacity: 0.38;
+  opacity: 0.24;
 }
 
 /* =============================================================================
@@ -631,7 +688,7 @@ pre {
   max-width: 420px;
   max-height: calc(100vh - 32px);
   overflow: auto;
-  padding: 22px 24px;
+  padding: 24px 22px 26px;
   background: #1c1c1c;
   border: 1px solid #444;
   border-radius: 12px;
@@ -640,9 +697,21 @@ pre {
 
 .auth-dialog h2,
 .auth-dialog h3 {
-  margin: 0 0 6px;
+  margin: 0 0 18px;
   font-size: 20px;
   color: #f0f0f0;
+}
+
+.auth-dialog .field {
+  min-width: 0;
+  width: 100%;
+  margin-bottom: 14px;
+}
+
+.auth-block .connect-btn.auth-block__primary {
+  width: 100%;
+  margin-top: 6px;
+  box-sizing: border-box;
 }
 
 .auth-hint {
@@ -676,7 +745,7 @@ pre {
 }
 
 .auth-error {
-  margin: 0 0 12px;
+  margin: 14px 0 0;
   font-size: 13px;
   font-weight: 600;
   color: #e87373;
@@ -696,25 +765,38 @@ pre {
   font-weight: 600;
 }
 
+/* Single horizontal row: lines flex, label never forces a second row unless viewport is tiny (ellipsis). */
 .auth-divider {
-  margin: 20px 0 14px;
-  text-align: center;
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #888;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  margin: 22px 0 18px;
+  box-sizing: border-box;
 }
 
-.auth-divider::before,
-.auth-divider::after {
-  content: "";
-  display: inline-block;
-  width: 28%;
-  max-width: 120px;
+.auth-divider__line {
+  flex: 1 1 0;
+  min-width: 12px;
   height: 1px;
-  margin: 0 10px;
-  vertical-align: middle;
   background: #444;
+}
+
+.auth-divider__text {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #888;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* =============================================================================
@@ -766,24 +848,3 @@ pre {
   margin: 0 0 10px;
 }
 
-/* =============================================================================
-   Card preview in lobby (collapsible)
-   ============================================================================= */
-
-.card-preview-panel {
-  margin-top: 16px;
-  padding: 10px 12px;
-  background: rgb(0 0 0 / 20%);
-  border: 1px solid #333;
-  border-radius: 8px;
-}
-
-.card-preview-panel summary {
-  cursor: pointer;
-  font-weight: 600;
-  color: #d0d0d0;
-}
-
-.card-preview-panel .card-preview-row {
-  margin-top: 10px;
-}

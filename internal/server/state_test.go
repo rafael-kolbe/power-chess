@@ -270,6 +270,8 @@ func TestRequestRematchSwapsSides(t *testing.T) {
 	room.clients[clientB] = struct{}{}
 	room.Players["conn-a"] = gameplay.PlayerA
 	room.Players["conn-b"] = gameplay.PlayerB
+	room.SetPlayerDisplayNameUnsafe(gameplay.PlayerA, "alice")
+	room.SetPlayerDisplayNameUnsafe(gameplay.PlayerB, "bob")
 	room.stateM.Unlock()
 
 	accepted, err := room.RequestRematch(gameplay.PlayerA)
@@ -295,5 +297,9 @@ func TestRequestRematchSwapsSides(t *testing.T) {
 	}
 	if room.Players["conn-a"] != gameplay.PlayerB || room.Players["conn-b"] != gameplay.PlayerA {
 		t.Fatalf("expected player address map swapped, got %+v", room.Players)
+	}
+	snap := room.SnapshotSafe()
+	if snap.PlayerAName != "bob" || snap.PlayerBName != "alice" {
+		t.Fatalf("expected display names swapped with seats, got A=%q B=%q", snap.PlayerAName, snap.PlayerBName)
 	}
 }

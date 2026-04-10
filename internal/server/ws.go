@@ -32,11 +32,11 @@ type Server struct {
 
 // Client wraps a websocket connection with room/player metadata.
 type Client struct {
-	conn        *websocket.Conn
-	server      *Server
-	room        *RoomSession
-	playerID    gameplay.PlayerID
-		// authUserID is set when the server runs with auth and the connection presented a valid JWT (same token as /api/auth/login).
+	conn     *websocket.Conn
+	server   *Server
+	room     *RoomSession
+	playerID gameplay.PlayerID
+	// authUserID is set when the server runs with auth and the connection presented a valid JWT (same token as /api/auth/login).
 	authUserID  uint64
 	writeM      sync.Mutex
 	closeReason error
@@ -290,6 +290,18 @@ func (c *Client) handleLeaveMatch(env Envelope) error {
 	return errClientLeaveMatch
 }
 
+// resolveClientDisplayName returns the authenticated username for match HUD labels, or empty for guests.
+func (s *Server) resolveClientDisplayName(c *Client) string {
+	if s.auth == nil || c.authUserID == 0 {
+		return ""
+	}
+	u, err := s.auth.UserByID(c.authUserID)
+	if err != nil || u == nil {
+		return ""
+	}
+	return u.Username
+}
+
 // handleJoinMatch attaches the client to a room and assigns a gameplay side.
 func (c *Client) handleJoinMatch(env Envelope) error {
 	var p JoinMatchPayload
@@ -322,6 +334,9 @@ func (c *Client) handleJoinMatch(env Envelope) error {
 		}
 		c.playerID = selected
 		room.Players[c.conn.RemoteAddr().String()] = c.playerID
+		if dn := c.server.resolveClientDisplayName(c); dn != "" {
+			room.SetPlayerDisplayNameUnsafe(selected, dn)
+		}
 		room.AddClient(c)
 		return nil
 	}); err != nil {

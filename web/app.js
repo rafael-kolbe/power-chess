@@ -25,10 +25,6 @@
   let authBackendAvailable = true;
   /** @type {{ id: number, username: string, email: string, role: string } | null} */
   let authUser = null;
-  /** Board edge coordinates inside squares (no UI toggle). */
-  const showInnerCoords = false;
-  /** When true, auto-resolve empty reaction stacks (same as former "reactions" toggle off). */
-  const autoSkipReactions = true;
 
   const lobbyScreenEl = document.getElementById("lobbyScreen");
   const gameShellEl = document.getElementById("gameShell");
@@ -52,6 +48,9 @@
   const eventsEl = document.getElementById("events");
   const statusEl = document.getElementById("status");
   const playerEl = document.getElementById("playerId");
+  const reactionToggleEl = document.getElementById("reactionToggle");
+  const reactionToggleLabelEl = document.getElementById("reactionToggleLabel");
+  const coordsInSquaresEl = document.getElementById("coordsInSquares");
   const clockAEl = document.getElementById("clockA");
   const clockBEl = document.getElementById("clockB");
   const manaFillA = document.getElementById("manaFillA");
@@ -182,7 +181,7 @@
       autoCloseNow: "Room will close now if no action is taken.",
       cardMarqueeTitle: "All cards — layout preview",
       authCreateTitle: "Create account",
-      authAlreadyHave: "----- Already have an account? -----",
+      authAlreadyHave: "Already have an account?",
       authUsername: "Username",
       authEmail: "Email",
       authPassword: "Password",
@@ -199,8 +198,7 @@
       authUnavailable: "Accounts are disabled on this server (no database). You can still play as a guest.",
       lobbySignedInAs: "Signed in as {username}",
       lobbyGuest: "Guest (no account)",
-      debugLogsTitle: "Debug logs",
-      cardPreviewSummary: "Card templates (preview)"
+      debugLogsTitle: "Debug logs"
     },
     "pt-BR": {
       title: "POWER CHESS (Alpha)",
@@ -288,7 +286,7 @@
       autoCloseNow: "A sala será fechada agora se ninguém fizer nada.",
       cardMarqueeTitle: "Todas as cartas — prévia do layout",
       authCreateTitle: "Criar conta",
-      authAlreadyHave: "----- Já possui conta? -----",
+      authAlreadyHave: "Já possui conta?",
       authUsername: "Nome de usuário",
       authEmail: "E-mail",
       authPassword: "Senha",
@@ -305,8 +303,7 @@
       authUnavailable: "Contas desativadas neste servidor (sem banco). Você ainda pode jogar como convidado.",
       lobbySignedInAs: "Conectado como {username}",
       lobbyGuest: "Convidado (sem conta)",
-      debugLogsTitle: "Logs de debug",
-      cardPreviewSummary: "Modelos de cartas (prévia)"
+      debugLogsTitle: "Logs de debug"
     }
   };
   let locale = "en-US";
@@ -545,7 +542,7 @@
     document.getElementById("authEmailLabel").textContent = t("authEmail");
     document.getElementById("authPasswordLabel").textContent = t("authPassword");
     document.getElementById("authConfirmPasswordLabel").textContent = t("authConfirmPassword");
-    document.getElementById("authDivider").textContent = t("authAlreadyHave");
+    document.getElementById("authDividerLabel").textContent = t("authAlreadyHave");
     document.getElementById("authLoginEmailLabel").textContent = t("authEmail");
     document.getElementById("authLoginPasswordLabel").textContent = t("authPassword");
     authRegisterBtnEl.textContent = t("authRegister");
@@ -556,8 +553,8 @@
     document.getElementById("eventsTitle").textContent = t("eventsTitle");
     const dbg = document.getElementById("debugLogsTitle");
     if (dbg) dbg.textContent = t("debugLogsTitle");
-    const cps = document.getElementById("cardPreviewSummary");
-    if (cps) cps.textContent = t("cardPreviewSummary");
+    document.getElementById("coordsInSquaresText").textContent = t("coordsInSquares");
+    updateReactionToggleLabel();
     document.getElementById("clockLabelA").textContent = t("clock");
     document.getElementById("clockLabelB").textContent = t("clock");
     document.getElementById("strikesLabelA").textContent = t("strikes");
@@ -712,16 +709,38 @@
     });
   }
 
-  function syncPlayerRoleLabels() {
+  function updateReactionToggleLabel() {
+    if (!reactionToggleEl || !reactionToggleLabelEl) return;
+    reactionToggleLabelEl.textContent = `${t("reactions")}: ${reactionToggleEl.checked ? t("toggleOn") : t("toggleOff")}`;
+  }
+
+  /**
+   * @param {string} roleKey i18n key: youLabel or opponentLabel
+   * @param {string} [name] server snapshot display name for that seat
+   */
+  function playerClockLabel(roleKey, name) {
+    const role = t(roleKey);
+    const n = name && String(name).trim();
+    if (!n) return role;
+    return `${role} (${n})`;
+  }
+
+  /**
+   * @param {object} [snapshot] state_snapshot payload; falls back to lastSnapshot when omitted
+   */
+  function syncPlayerRoleLabels(snapshot) {
+    const snap = snapshot !== undefined ? snapshot : lastSnapshot;
     const isA = playerEl.value === "A";
     const top = document.getElementById("playerBLabel");
     const bottom = document.getElementById("playerALabel");
+    const nameA = snap?.playerAName ?? "";
+    const nameB = snap?.playerBName ?? "";
     if (isA) {
-      top.textContent = t("opponentLabel");
-      bottom.textContent = t("youLabel");
+      top.textContent = playerClockLabel("opponentLabel", nameB);
+      bottom.textContent = playerClockLabel("youLabel", nameA);
     } else {
-      top.textContent = t("youLabel");
-      bottom.textContent = t("opponentLabel");
+      top.textContent = playerClockLabel("youLabel", nameB);
+      bottom.textContent = playerClockLabel("opponentLabel", nameA);
     }
   }
 
@@ -901,6 +920,7 @@
         renderBoard(msg.payload.board);
         renderStatus(msg.payload);
         renderPlayerHud(msg.payload);
+        syncPlayerRoleLabels(msg.payload);
         handleAutoSkipReaction(msg.payload);
         renderTurnClocks();
         return;
@@ -1233,7 +1253,7 @@
   }
 
   function handleAutoSkipReaction(snapshot) {
-    if (!autoSkipReactions) return;
+    if (reactionToggleEl.checked) return;
     const rw = snapshot?.reactionWindow;
     if (!rw?.open) return;
     const localPlayer = playerEl.value;
@@ -1269,7 +1289,7 @@
   function renderBoard(board) {
     syncBoardPerspectiveClass();
     boardFrameEl.innerHTML = "";
-    boardFrameEl.classList.toggle("show-inner-coords", showInnerCoords);
+    boardFrameEl.classList.toggle("show-inner-coords", coordsInSquaresEl && coordsInSquaresEl.checked);
     const moveSet = new Set(highlightedMoves.map((m) => posKey(m.row, m.col)));
     const selectedKey = selectedFrom ? posKey(selectedFrom.row, selectedFrom.col) : null;
     const ep = lastSnapshot?.enPassant;
@@ -1587,7 +1607,11 @@
       });
       inRoomLabelEl.append(` | ${t("passwordLabelInline")}: `, value, " (", toggle, ")");
     }
-    inRoomLabelEl.append(` | ${t("you")}: ${t("player")} ${playerEl.value}`);
+    const youRoom =
+      authUser && authUser.username
+        ? `${t("you")}: ${authUser.username} (${t("player")} ${playerEl.value})`
+        : `${t("you")}: ${t("player")} ${playerEl.value}`;
+    inRoomLabelEl.append(` | ${youRoom}`);
   }
 
   function syncTurnFromSnapshot(payload) {
@@ -1768,6 +1792,10 @@
     }
   });
   roomSearchEl.addEventListener("input", () => applyRoomSearch());
+  reactionToggleEl.addEventListener("change", updateReactionToggleLabel);
+  coordsInSquaresEl.addEventListener("change", () => {
+    if (lastSnapshot?.board) renderBoard(lastSnapshot.board);
+  });
   playerEl.addEventListener("change", () => {
     syncPlayerRoleLabels();
     if (lastSnapshot?.board) renderBoard(lastSnapshot.board);

@@ -37,6 +37,8 @@ type RoomSession struct {
 	postMatchDeadline time.Time
 	rematchVotes      map[gameplay.PlayerID]bool
 	lastActivity      time.Time
+	// displayNameByPlayer holds authenticated usernames per seat for the match HUD (cleared when a seat disconnects).
+	displayNameByPlayer map[gameplay.PlayerID]string
 }
 
 const defaultRoomName = "Let's Play!"
@@ -76,6 +78,10 @@ func newRoomSessionWithEngine(roomID, roomName string, engine *match.Engine) *Ro
 		reactionTimeout:  10 * time.Second,
 		rematchVotes:     map[gameplay.PlayerID]bool{},
 		lastActivity:     time.Now().UTC(),
+		displayNameByPlayer: map[gameplay.PlayerID]string{
+			gameplay.PlayerA: "",
+			gameplay.PlayerB: "",
+		},
 	}
 }
 
@@ -131,6 +137,8 @@ func (r *RoomSession) Snapshot() StateSnapshotPayload {
 		RoomPassword: r.RoomPassword,
 		ConnectedA:   cA,
 		ConnectedB:   cB,
+		PlayerAName:  r.displayNameByPlayer[gameplay.PlayerA],
+		PlayerBName:  r.displayNameByPlayer[gameplay.PlayerB],
 		GameStarted:  cA > 0 && cB > 0,
 		TurnPlayer:   string(s.CurrentTurn),
 		TurnSeconds:  s.TurnSeconds,
@@ -333,6 +341,17 @@ func (r *RoomSession) Persist(ctx context.Context, store RoomStore) error {
 	return store.SaveRoom(ctx, r)
 }
 
+// SetPlayerDisplayNameUnsafe sets the HUD display name for a seat (call with stateM held or from Execute).
+func (r *RoomSession) SetPlayerDisplayNameUnsafe(pid gameplay.PlayerID, name string) {
+	if r.displayNameByPlayer == nil {
+		r.displayNameByPlayer = map[gameplay.PlayerID]string{
+			gameplay.PlayerA: "",
+			gameplay.PlayerB: "",
+		}
+	}
+	r.displayNameByPlayer[pid] = strings.TrimSpace(name)
+}
+
 // RegisterPlayerConnection marks player as connected and clears pending disconnect timeout.
 func (r *RoomSession) RegisterPlayerConnection(pid gameplay.PlayerID) {
 	r.stateM.Lock()
@@ -355,6 +374,9 @@ func (r *RoomSession) HandlePlayerDisconnect(pid gameplay.PlayerID) {
 	r.lastActivity = time.Now().UTC()
 	if r.connectedByPlayer[pid] > 0 {
 		r.connectedByPlayer[pid]--
+	}
+	if r.connectedByPlayer[pid] == 0 {
+		r.SetPlayerDisplayNameUnsafe(pid, "")
 	}
 	if r.matchEnded {
 		return
@@ -386,6 +408,9 @@ func (r *RoomSession) handlePlayerLeaveUnsafe(pid gameplay.PlayerID) {
 	r.lastActivity = time.Now().UTC()
 	if r.connectedByPlayer[pid] > 0 {
 		r.connectedByPlayer[pid]--
+	}
+	if r.connectedByPlayer[pid] == 0 {
+		r.SetPlayerDisplayNameUnsafe(pid, "")
 	}
 	r.turnDeadline = time.Time{}
 	if timer, ok := r.disconnectTimers[pid]; ok {
@@ -560,6 +585,10 @@ func (r *RoomSession) swapConnectedPlayerSidesUnsafe() {
 	timerB := r.disconnectTimers[gameplay.PlayerB]
 	r.disconnectTimers[gameplay.PlayerA] = timerB
 	r.disconnectTimers[gameplay.PlayerB] = timerA
+	nameA := r.displayNameByPlayer[gameplay.PlayerA]
+	nameB := r.displayNameByPlayer[gameplay.PlayerB]
+	r.displayNameByPlayer[gameplay.PlayerA] = nameB
+	r.displayNameByPlayer[gameplay.PlayerB] = nameA
 }
 
 func (r *RoomSession) resetForNewMatchUnsafe() {

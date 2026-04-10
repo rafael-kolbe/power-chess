@@ -165,6 +165,8 @@ type StateSnapshotPayload struct {
 	RoomPassword    string                 `json:"roomPassword,omitempty"`
 	ConnectedA      int                    `json:"connectedA"`
 	ConnectedB      int                    `json:"connectedB"`
+	PlayerAName     string                 `json:"playerAName,omitempty"`
+	PlayerBName     string                 `json:"playerBName,omitempty"`
 	GameStarted     bool                   `json:"gameStarted"`
 	TurnPlayer      string                 `json:"turnPlayer"`
 	TurnSeconds     int                    `json:"turnSeconds"`

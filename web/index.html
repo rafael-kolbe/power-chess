@@ -20,13 +20,17 @@
         <label class="field"><span id="authEmailLabel">Email</span><input id="authRegEmail" type="email" autocomplete="email" /></label>
         <label class="field"><span id="authPasswordLabel">Password</span><input id="authRegPassword" type="password" autocomplete="new-password" /></label>
         <label class="field"><span id="authConfirmPasswordLabel">Confirm password</span><input id="authRegConfirm" type="password" autocomplete="new-password" /></label>
-        <button type="button" id="authRegisterBtn" class="connect-btn">Create account</button>
+        <button type="button" id="authRegisterBtn" class="connect-btn auth-block__primary">Create account</button>
       </div>
-      <p id="authDivider" class="auth-divider">----- Already have an account? -----</p>
+      <div id="authDivider" class="auth-divider" role="separator">
+        <span class="auth-divider__line" aria-hidden="true"></span>
+        <span id="authDividerLabel" class="auth-divider__text">Already have an account?</span>
+        <span class="auth-divider__line" aria-hidden="true"></span>
+      </div>
       <div id="authLoginBlock" class="auth-block">
         <label class="field"><span id="authLoginEmailLabel">Email</span><input id="authLoginEmail" type="email" autocomplete="email" /></label>
         <label class="field"><span id="authLoginPasswordLabel">Password</span><input id="authLoginPassword" type="password" autocomplete="current-password" /></label>
-        <button type="button" id="authLoginBtn" class="connect-btn">Log in</button>
+        <button type="button" id="authLoginBtn" class="connect-btn auth-block__primary">Log in</button>
       </div>
       <p id="authError" class="auth-error hidden" role="alert"></p>
     </div>
@@ -87,11 +91,6 @@
       </label>
       <ul id="roomList"></ul>
       <p id="roomListEmpty" class="room-list-empty hidden">No active rooms right now.</p>
-      <details class="card-preview-panel" id="cardPreviewPanel">
-        <summary id="cardPreviewSummary">Card templates (preview)</summary>
-        <p class="lobby-hint" style="margin-top: 8px">Same artwork per type; only text overlays change.</p>
-        <div id="cardPreviewRow" class="card-preview-row"></div>
-      </details>
     </aside>
   </div>
 
@@ -150,6 +149,16 @@
           </div>
           <div class="side-clock clock-a"><strong id="playerALabel">Player A</strong> | <span id="clockLabelA">Clock</span>: <span id="clockA">--</span>s | <span id="strikesLabelA">Strikes</span>: <span id="strikesA">0</span></div>
         </div>
+      </div>
+      <div class="match-board-tools" aria-label="Board options">
+        <label class="match-board-tool">
+          <input type="checkbox" id="reactionToggle" />
+          <span id="reactionToggleLabel" class="match-board-tool__text">Reactions: Off</span>
+        </label>
+        <label class="match-board-tool">
+          <input type="checkbox" id="coordsInSquares" />
+          <span id="coordsInSquaresText" class="match-board-tool__text">Coords in squares</span>
+        </label>
       </div>
     </div>
     <section class="match-debug">
