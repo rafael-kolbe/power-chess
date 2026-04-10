@@ -69,10 +69,15 @@ func NewPostgresRoomStoreFromEnv() (*PostgresRoomStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := db.AutoMigrate(&roomSnapshotModel{}); err != nil {
+	if err := db.AutoMigrate(&roomSnapshotModel{}, &userModel{}); err != nil {
 		return nil, err
 	}
 	return &PostgresRoomStore{db: db}, nil
+}
+
+// DB returns the underlying GORM handle for other services (e.g. auth).
+func (s *PostgresRoomStore) DB() *gorm.DB {
+	return s.db
 }
 
 // SaveRoom upserts the latest room snapshot.

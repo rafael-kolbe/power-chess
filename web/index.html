@@ -11,10 +11,35 @@
   <link rel="stylesheet" href="/card.css" />
 </head>
 <body class="has-card-footer">
+  <div id="authOverlay" class="modal-overlay auth-overlay hidden" aria-hidden="true">
+    <div class="modal-dialog auth-dialog" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+      <h3 id="authTitle">Create account</h3>
+      <p id="authUnavailableHint" class="lobby-hint hidden"></p>
+      <div id="authRegisterBlock" class="auth-block">
+        <label class="field"><span id="authUsernameLabel">Username</span><input id="authRegUsername" autocomplete="username" /></label>
+        <label class="field"><span id="authEmailLabel">Email</span><input id="authRegEmail" type="email" autocomplete="email" /></label>
+        <label class="field"><span id="authPasswordLabel">Password</span><input id="authRegPassword" type="password" autocomplete="new-password" /></label>
+        <label class="field"><span id="authConfirmPasswordLabel">Confirm password</span><input id="authRegConfirm" type="password" autocomplete="new-password" /></label>
+        <button type="button" id="authRegisterBtn" class="connect-btn">Create account</button>
+      </div>
+      <p id="authDivider" class="auth-divider">----- Already have an account? -----</p>
+      <div id="authLoginBlock" class="auth-block">
+        <label class="field"><span id="authLoginEmailLabel">Email</span><input id="authLoginEmail" type="email" autocomplete="email" /></label>
+        <label class="field"><span id="authLoginPasswordLabel">Password</span><input id="authLoginPassword" type="password" autocomplete="current-password" /></label>
+        <button type="button" id="authLoginBtn" class="connect-btn">Log in</button>
+      </div>
+      <p id="authError" class="auth-error hidden" role="alert"></p>
+    </div>
+  </div>
+
   <h2 id="titleLabel">POWER CHESS (Alpha)</h2>
 
   <div id="lobbyScreen" class="lobby-layout">
     <div class="lobby-main">
+      <div class="row lobby-session-row">
+        <span id="lobbyUserLabel" class="lobby-user-label"></span>
+        <button type="button" id="logoutBtn" class="match-end-btn-secondary hidden">Log out</button>
+      </div>
       <div class="row lobby-row-primary">
         <label class="field">
           <span id="languageLabel">Language</span>
@@ -62,6 +87,11 @@
       </label>
       <ul id="roomList"></ul>
       <p id="roomListEmpty" class="room-list-empty hidden">No active rooms right now.</p>
+      <details class="card-preview-panel" id="cardPreviewPanel">
+        <summary id="cardPreviewSummary">Card templates (preview)</summary>
+        <p class="lobby-hint" style="margin-top: 8px">Same artwork per type; only text overlays change.</p>
+        <div id="cardPreviewRow" class="card-preview-row"></div>
+      </details>
     </aside>
   </div>
 
@@ -99,37 +129,10 @@
 
   <div id="gameShell" class="game-shell-hud hidden">
     <div id="waitingBanner" class="waiting-banner hidden">Waiting for opponent...</div>
-    <div class="row">
+    <div class="row match-header-row">
       <span id="inRoomLabel" class="in-room-label"></span>
-      <button id="copyRoomIdBtn" type="button">Copiar ID</button>
-      <label class="row-label">
-        <span id="reactionToggleText">Reactions</span>
-        <input id="reactionToggle" type="checkbox" checked />
-        <span id="reactionToggleLabel">On</span>
-      </label>
-      <label class="row-label">
-        <span id="coordsInSquaresText">Coords in squares</span>
-        <input id="coordsInSquares" type="checkbox" />
-      </label>
       <button id="disconnectBtn" type="button">Leave room</button>
     </div>
-    <div class="row">
-      <input id="from" value="6,4" placeholder="from row,col">
-      <input id="to" value="4,4" placeholder="to row,col">
-      <button id="moveBtn">Submit move</button>
-      <input id="handIndex" value="0" placeholder="hand index">
-      <button id="activateBtn">Activate card</button>
-    </div>
-    <div class="row">
-      <input id="pendingPiece" value="6,0" placeholder="pending piece row,col">
-      <button id="resolvePendingBtn">Resolve pending effect</button>
-      <input id="reactionHandIndex" value="0" placeholder="reaction hand index">
-      <input id="reactionPiece" value="" placeholder="reaction target row,col (optional)">
-      <button id="queueReactionBtn">Queue reaction</button>
-      <button id="resolveReactionsBtn">Resolve reactions</button>
-    </div>
-    <h3 id="reactionPendingTitle">Reaction/Pending status</h3>
-    <pre id="status"></pre>
     <div id="boardArea">
       <div id="boardWrap" class="board-wrap">
         <div class="player-b-stack">
@@ -149,15 +152,15 @@
         </div>
       </div>
     </div>
-    <h3 id="snapshotTitle">Snapshot</h3>
-    <pre id="snapshot"></pre>
-    <h3 id="eventsTitle">Events</h3>
-    <pre id="events"></pre>
-    <details class="card-preview-panel" id="cardPreviewPanel">
-      <summary>Card templates (preview)</summary>
-      <p class="lobby-hint" style="margin-top: 8px">Same artwork per type; only text overlays change. Use <code>createPowerCard()</code> in <code>card.js</code>.</p>
-      <div id="cardPreviewRow" class="card-preview-row"></div>
-    </details>
+    <section class="match-debug">
+      <h3 id="debugLogsTitle">Debug logs</h3>
+      <h4 id="reactionPendingTitle" class="match-debug-sub">Reaction / pending</h4>
+      <pre id="status"></pre>
+      <h4 id="snapshotTitle" class="match-debug-sub">Snapshot</h4>
+      <pre id="snapshot"></pre>
+      <h4 id="eventsTitle" class="match-debug-sub">Events</h4>
+      <pre id="events"></pre>
+    </section>
   </div>
 
   <footer class="main-footer" id="mainFooter" aria-label="Card catalog preview">

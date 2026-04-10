@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +25,7 @@ type Server struct {
 	rooms      map[string]*RoomSession
 	roomsM     sync.RWMutex
 	store      RoomStore
+	auth       *AuthService
 	telemetry  *Telemetry
 	nextRoomID int
 }
@@ -50,12 +53,26 @@ var errClientLeaveMatch = errors.New("client requested leave_match close")
 const duplicateRequestMessage = "request already processed"
 
 // NewServer creates a websocket-capable HTTP server instance.
+// When DATABASE_URL is set, PostgreSQL must connect and JWT_SECRET (min 16 chars) must be set for auth.
 func NewServer() *Server {
+	dsn := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	var store RoomStore
-	if pgStore, err := NewPostgresRoomStoreFromEnv(); err == nil {
+	var auth *AuthService
+	if dsn != "" {
+		pgStore, err := NewPostgresRoomStoreFromEnv()
+		if err != nil {
+			log.Fatalf("DATABASE_URL is set but postgres connection failed: %v", err)
+		}
 		store = pgStore
+		secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+		if len(secret) < 16 {
+			log.Fatal("JWT_SECRET must be at least 16 characters when DATABASE_URL is set")
+		}
+		auth = NewAuthService(pgStore.DB(), []byte(secret))
 	}
-	return NewServerWithStore(store)
+	s := NewServerWithStore(store)
+	s.auth = auth
+	return s
 }
 
 // NewServerWithStore creates a websocket-capable HTTP server with optional persistence.
@@ -92,6 +109,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/metrics", s.HandleMetrics)
 	mux.HandleFunc("/api/rooms", s.handleListRooms)
+	mux.HandleFunc("/api/auth/register", s.handleAuthRegister)
+	mux.HandleFunc("/api/auth/login", s.handleAuthLogin)
+	mux.HandleFunc("/api/auth/me", s.handleAuthMe)
 	mux.HandleFunc("/ws", s.handleWS)
 	mux.Handle("/", http.FileServer(http.Dir("web")))
 	return mux

@@ -5,11 +5,13 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/joho/godotenv"
 	"power-chess/internal/server"
 )
 
 // main boots the HTTP/WebSocket server process.
 func main() {
+	_ = godotenv.Load()
 	addr := os.Getenv("SERVER_ADDR")
 	if addr == "" {
 		addr = ":8080"

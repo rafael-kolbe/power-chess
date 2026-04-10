@@ -20,6 +20,16 @@
   /** @type {string} Room name shown in the private-join modal (for i18n refresh). */
   let privateJoinPendingRoomName = "";
 
+  const AUTH_TOKEN_KEY = "powerChessAuthToken";
+  /** When false, server has no DATABASE_URL auth; lobby works without login. */
+  let authBackendAvailable = true;
+  /** @type {{ id: number, username: string, email: string, role: string } | null} */
+  let authUser = null;
+  /** Board edge coordinates inside squares (no UI toggle). */
+  const showInnerCoords = false;
+  /** When true, auto-resolve empty reaction stacks (same as former "reactions" toggle off). */
+  const autoSkipReactions = true;
+
   const lobbyScreenEl = document.getElementById("lobbyScreen");
   const gameShellEl = document.getElementById("gameShell");
   const waitingBannerEl = document.getElementById("waitingBanner");
@@ -41,12 +51,7 @@
   const snapshotEl = document.getElementById("snapshot");
   const eventsEl = document.getElementById("events");
   const statusEl = document.getElementById("status");
-  const fromEl = document.getElementById("from");
-  const toEl = document.getElementById("to");
   const playerEl = document.getElementById("playerId");
-  const reactionToggleEl = document.getElementById("reactionToggle");
-  const reactionToggleLabelEl = document.getElementById("reactionToggleLabel");
-  const coordsInSquaresEl = document.getElementById("coordsInSquares");
   const clockAEl = document.getElementById("clockA");
   const clockBEl = document.getElementById("clockB");
   const manaFillA = document.getElementById("manaFillA");
@@ -65,7 +70,19 @@
   const matchEndRematchEl = document.getElementById("matchEndRematch");
   const matchEndStayEl = document.getElementById("matchEndStay");
   const matchEndToLobbyEl = document.getElementById("matchEndToLobby");
-  const copyRoomIdBtnEl = document.getElementById("copyRoomIdBtn");
+  const authOverlayEl = document.getElementById("authOverlay");
+  const authUnavailableHintEl = document.getElementById("authUnavailableHint");
+  const authRegUsernameEl = document.getElementById("authRegUsername");
+  const authRegEmailEl = document.getElementById("authRegEmail");
+  const authRegPasswordEl = document.getElementById("authRegPassword");
+  const authRegConfirmEl = document.getElementById("authRegConfirm");
+  const authRegisterBtnEl = document.getElementById("authRegisterBtn");
+  const authLoginEmailEl = document.getElementById("authLoginEmail");
+  const authLoginPasswordEl = document.getElementById("authLoginPassword");
+  const authLoginBtnEl = document.getElementById("authLoginBtn");
+  const authErrorEl = document.getElementById("authError");
+  const lobbyUserLabelEl = document.getElementById("lobbyUserLabel");
+  const logoutBtnEl = document.getElementById("logoutBtn");
   const privateJoinOverlayEl = document.getElementById("privateJoinOverlay");
   const privateJoinTitleEl = document.getElementById("privateJoinTitle");
   const privateJoinBodyEl = document.getElementById("privateJoinBody");
@@ -163,7 +180,27 @@
       rematchOpponentLeft: "The other player left the room.",
       autoCloseIn: "Room closes in {s}s if no action is taken.",
       autoCloseNow: "Room will close now if no action is taken.",
-      cardMarqueeTitle: "All cards — layout preview"
+      cardMarqueeTitle: "All cards — layout preview",
+      authCreateTitle: "Create account",
+      authAlreadyHave: "----- Already have an account? -----",
+      authUsername: "Username",
+      authEmail: "Email",
+      authPassword: "Password",
+      authConfirmPassword: "Confirm password",
+      authRegister: "Create account",
+      authLogin: "Log in",
+      authLogout: "Log out",
+      authErrorMismatch: "Passwords do not match.",
+      authErrorShort: "Password must be at least 8 characters.",
+      authErrorNetwork: "Could not reach the server.",
+      authErrorTaken: "Username or email already in use.",
+      authErrorInvalid: "Invalid email or password.",
+      authErrorGeneric: "Something went wrong. Try again.",
+      authUnavailable: "Accounts are disabled on this server (no database). You can still play as a guest.",
+      lobbySignedInAs: "Signed in as {username}",
+      lobbyGuest: "Guest (no account)",
+      debugLogsTitle: "Debug logs",
+      cardPreviewSummary: "Card templates (preview)"
     },
     "pt-BR": {
       title: "POWER CHESS (Alpha)",
@@ -249,7 +286,27 @@
       rematchOpponentLeft: "O outro jogador saiu da sala.",
       autoCloseIn: "A sala fecha em {s}s se ninguém fizer nada.",
       autoCloseNow: "A sala será fechada agora se ninguém fizer nada.",
-      cardMarqueeTitle: "Todas as cartas — prévia do layout"
+      cardMarqueeTitle: "Todas as cartas — prévia do layout",
+      authCreateTitle: "Criar conta",
+      authAlreadyHave: "----- Já possui conta? -----",
+      authUsername: "Nome de usuário",
+      authEmail: "E-mail",
+      authPassword: "Senha",
+      authConfirmPassword: "Confirmar senha",
+      authRegister: "Criar conta",
+      authLogin: "Entrar",
+      authLogout: "Sair",
+      authErrorMismatch: "As senhas não coincidem.",
+      authErrorShort: "A senha deve ter pelo menos 8 caracteres.",
+      authErrorNetwork: "Não foi possível contatar o servidor.",
+      authErrorTaken: "Nome de usuário ou e-mail já em uso.",
+      authErrorInvalid: "E-mail ou senha inválidos.",
+      authErrorGeneric: "Algo deu errado. Tente novamente.",
+      authUnavailable: "Contas desativadas neste servidor (sem banco). Você ainda pode jogar como convidado.",
+      lobbySignedInAs: "Conectado como {username}",
+      lobbyGuest: "Convidado (sem conta)",
+      debugLogsTitle: "Logs de debug",
+      cardPreviewSummary: "Modelos de cartas (prévia)"
     }
   };
   let locale = "en-US";
@@ -262,6 +319,206 @@
       str = str.replaceAll(`{${k}}`, String(v));
     }
     return str;
+  }
+
+  function readStoredToken() {
+    try {
+      return localStorage.getItem(AUTH_TOKEN_KEY) || "";
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function writeStoredToken(tok) {
+    try {
+      if (tok) localStorage.setItem(AUTH_TOKEN_KEY, tok);
+      else localStorage.removeItem(AUTH_TOKEN_KEY);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  function authFetchHeaders() {
+    const tok = readStoredToken();
+    return tok ? { Authorization: `Bearer ${tok}` } : {};
+  }
+
+  function setAuthErrorVisible(msg) {
+    if (!msg) {
+      authErrorEl.classList.add("hidden");
+      authErrorEl.textContent = "";
+      return;
+    }
+    authErrorEl.textContent = msg;
+    authErrorEl.classList.remove("hidden");
+  }
+
+  function refreshLobbyUserLabel() {
+    if (!authBackendAvailable) {
+      lobbyUserLabelEl.textContent = t("lobbyGuest");
+      logoutBtnEl.classList.add("hidden");
+      return;
+    }
+    if (authUser) {
+      lobbyUserLabelEl.textContent = t("lobbySignedInAs", { username: authUser.username });
+      logoutBtnEl.classList.remove("hidden");
+    } else {
+      lobbyUserLabelEl.textContent = "";
+      logoutBtnEl.classList.add("hidden");
+    }
+  }
+
+  function showAuthOverlay() {
+    if (!authBackendAvailable) return;
+    authOverlayEl.classList.remove("hidden");
+    authOverlayEl.setAttribute("aria-hidden", "false");
+  }
+
+  function hideAuthOverlay() {
+    authOverlayEl.classList.add("hidden");
+    authOverlayEl.setAttribute("aria-hidden", "true");
+    setAuthErrorVisible("");
+  }
+
+  async function authResponseErrorMessage(r, fallbackKey) {
+    try {
+      const data = await r.json();
+      if (data && typeof data.error === "string") return data.error;
+    } catch (_) {
+      /* ignore */
+    }
+    return t(fallbackKey);
+  }
+
+  async function applySessionFromMeResponse(r) {
+    if (r.status === 503) {
+      authBackendAvailable = false;
+      authUser = null;
+      writeStoredToken("");
+      hideAuthOverlay();
+      authUnavailableHintEl.classList.add("hidden");
+      refreshLobbyUserLabel();
+      return;
+    }
+    authBackendAvailable = true;
+    if (r.ok) {
+      authUser = await r.json();
+      hideAuthOverlay();
+      authUnavailableHintEl.classList.add("hidden");
+      refreshLobbyUserLabel();
+      return;
+    }
+    authUser = null;
+    writeStoredToken("");
+    if (r.status === 401) {
+      showAuthOverlay();
+      refreshLobbyUserLabel();
+      return;
+    }
+    hideAuthOverlay();
+    refreshLobbyUserLabel();
+  }
+
+  async function bootstrapAuthSession() {
+    try {
+      const r = await fetch("/api/auth/me", { headers: authFetchHeaders() });
+      await applySessionFromMeResponse(r);
+    } catch (_) {
+      authBackendAvailable = true;
+      setAuthErrorVisible(t("authErrorNetwork"));
+      showAuthOverlay();
+    }
+  }
+
+  async function submitRegister() {
+    setAuthErrorVisible("");
+    const username = (authRegUsernameEl.value || "").trim();
+    const email = (authRegEmailEl.value || "").trim();
+    const password = authRegPasswordEl.value || "";
+    const confirm = authRegConfirmEl.value || "";
+    if (password !== confirm) {
+      setAuthErrorVisible(t("authErrorMismatch"));
+      return;
+    }
+    if (password.length < 8) {
+      setAuthErrorVisible(t("authErrorShort"));
+      return;
+    }
+    try {
+      const r = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username,
+          email,
+          password,
+          confirm_password: confirm
+        })
+      });
+      if (r.status === 503) {
+        authUnavailableHintEl.textContent = t("authUnavailable");
+        authUnavailableHintEl.classList.remove("hidden");
+        await applySessionFromMeResponse(r);
+        return;
+      }
+      if (!r.ok) {
+        const msg =
+          r.status === 409
+            ? t("authErrorTaken")
+            : r.status === 400
+              ? await authResponseErrorMessage(r, "authErrorGeneric")
+              : await authResponseErrorMessage(r, "authErrorGeneric");
+        setAuthErrorVisible(msg);
+        return;
+      }
+      const data = await r.json();
+      writeStoredToken(data.token || "");
+      authUser = data.user || null;
+      hideAuthOverlay();
+      refreshLobbyUserLabel();
+    } catch (_) {
+      setAuthErrorVisible(t("authErrorNetwork"));
+    }
+  }
+
+  async function submitLogin() {
+    setAuthErrorVisible("");
+    const email = (authLoginEmailEl.value || "").trim();
+    const password = authLoginPasswordEl.value || "";
+    try {
+      const r = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password })
+      });
+      if (r.status === 503) {
+        authUnavailableHintEl.textContent = t("authUnavailable");
+        authUnavailableHintEl.classList.remove("hidden");
+        await applySessionFromMeResponse(r);
+        return;
+      }
+      if (!r.ok) {
+        const msg = r.status === 401 ? t("authErrorInvalid") : await authResponseErrorMessage(r, "authErrorGeneric");
+        setAuthErrorVisible(msg);
+        return;
+      }
+      const data = await r.json();
+      writeStoredToken(data.token || "");
+      authUser = data.user || null;
+      hideAuthOverlay();
+      refreshLobbyUserLabel();
+    } catch (_) {
+      setAuthErrorVisible(t("authErrorNetwork"));
+    }
+  }
+
+  function logoutSession() {
+    writeStoredToken("");
+    authUser = null;
+    if (authBackendAvailable) showAuthOverlay();
+    refreshLobbyUserLabel();
+    authLoginEmailEl.value = "";
+    authLoginPasswordEl.value = "";
   }
 
   function applyTranslations() {
@@ -283,27 +540,28 @@
     matchEndStayEl.textContent = t("stayInRoom");
     matchEndToLobbyEl.textContent = t("backLobby");
     document.getElementById("disconnectBtn").textContent = t("leaveRoom");
-    copyRoomIdBtnEl.textContent = t("copyRoomId");
-    document.getElementById("reactionToggleText").textContent = t("reactions");
-    document.getElementById("coordsInSquaresText").textContent = t("coordsInSquares");
-    document.getElementById("moveBtn").textContent = t("submitMove");
-    document.getElementById("activateBtn").textContent = t("activateCard");
-    document.getElementById("resolvePendingBtn").textContent = t("resolvePending");
-    document.getElementById("queueReactionBtn").textContent = t("queueReaction");
-    document.getElementById("resolveReactionsBtn").textContent = t("resolveReactions");
+    document.getElementById("authTitle").textContent = t("authCreateTitle");
+    document.getElementById("authUsernameLabel").textContent = t("authUsername");
+    document.getElementById("authEmailLabel").textContent = t("authEmail");
+    document.getElementById("authPasswordLabel").textContent = t("authPassword");
+    document.getElementById("authConfirmPasswordLabel").textContent = t("authConfirmPassword");
+    document.getElementById("authDivider").textContent = t("authAlreadyHave");
+    document.getElementById("authLoginEmailLabel").textContent = t("authEmail");
+    document.getElementById("authLoginPasswordLabel").textContent = t("authPassword");
+    authRegisterBtnEl.textContent = t("authRegister");
+    authLoginBtnEl.textContent = t("authLogin");
+    logoutBtnEl.textContent = t("authLogout");
     document.getElementById("reactionPendingTitle").textContent = t("reactionPendingTitle");
     document.getElementById("snapshotTitle").textContent = t("snapshotTitle");
     document.getElementById("eventsTitle").textContent = t("eventsTitle");
+    const dbg = document.getElementById("debugLogsTitle");
+    if (dbg) dbg.textContent = t("debugLogsTitle");
+    const cps = document.getElementById("cardPreviewSummary");
+    if (cps) cps.textContent = t("cardPreviewSummary");
     document.getElementById("clockLabelA").textContent = t("clock");
     document.getElementById("clockLabelB").textContent = t("clock");
     document.getElementById("strikesLabelA").textContent = t("strikes");
     document.getElementById("strikesLabelB").textContent = t("strikes");
-    fromEl.placeholder = t("fromPlaceholder");
-    toEl.placeholder = t("toPlaceholder");
-    document.getElementById("handIndex").placeholder = t("handIndexPlaceholder");
-    document.getElementById("pendingPiece").placeholder = t("pendingPiecePlaceholder");
-    document.getElementById("reactionHandIndex").placeholder = t("reactionHandIndexPlaceholder");
-    document.getElementById("reactionPiece").placeholder = t("reactionPiecePlaceholder");
     const optRandom = pieceTypeEl.querySelector('option[value="random"]');
     const optWhite = pieceTypeEl.querySelector('option[value="white"]');
     const optBlack = pieceTypeEl.querySelector('option[value="black"]');
@@ -312,8 +570,8 @@
     if (optBlack) optBlack.textContent = t("pieceTypeBlack");
     const connectBtn = document.getElementById("connectBtn");
     connectBtn.textContent = t("create");
-    updateReactionToggleLabel();
     syncPlayerRoleLabels();
+    refreshLobbyUserLabel();
     renderRoomList(lobbyRooms);
     if (lastSnapshot) {
       renderInRoomLabel(lastSnapshot);
@@ -903,15 +1161,6 @@
     return p.color === local;
   }
 
-  function setMoveInputs(from, to) {
-    fromEl.value = `${from.row},${from.col}`;
-    toEl.value = `${to.row},${to.col}`;
-  }
-
-  function updateReactionToggleLabel() {
-    reactionToggleLabelEl.textContent = reactionToggleEl.checked ? t("toggleOn") : t("toggleOff");
-  }
-
   function setBar(fillEl, labelEl, cur, max) {
     const m = Math.max(1, max || 1);
     const pct = Math.min(100, Math.round((100 * (cur || 0)) / m));
@@ -968,7 +1217,7 @@
   }
 
   function handleAutoSkipReaction(snapshot) {
-    if (reactionToggleEl.checked) return;
+    if (!autoSkipReactions) return;
     const rw = snapshot?.reactionWindow;
     if (!rw?.open) return;
     const localPlayer = playerEl.value;
@@ -978,7 +1227,6 @@
   }
 
   function sendMove(from, to) {
-    setMoveInputs(from, to);
     send("submit_move", {
       fromRow: from.row, fromCol: from.col,
       toRow: to.row, toCol: to.col
@@ -995,18 +1243,6 @@
     ws.send(JSON.stringify({ id: `req-${seq++}`, type, payload }));
   }
 
-  function parsePos(input) {
-    const [r, c] = input.split(",").map((v) => Number(v.trim()));
-    return { row: r, col: c };
-  }
-
-  function parseOptionalPos(input) {
-    if (!input || !input.trim()) return null;
-    const { row, col } = parsePos(input);
-    if (Number.isNaN(row) || Number.isNaN(col)) return null;
-    return { row, col };
-  }
-
   function makeEdgeLabel(text) {
     const el = document.createElement("div");
     el.className = "edge-label";
@@ -1017,7 +1253,7 @@
   function renderBoard(board) {
     syncBoardPerspectiveClass();
     boardFrameEl.innerHTML = "";
-    boardFrameEl.classList.toggle("show-inner-coords", coordsInSquaresEl.checked);
+    boardFrameEl.classList.toggle("show-inner-coords", showInnerCoords);
     const moveSet = new Set(highlightedMoves.map((m) => posKey(m.row, m.col)));
     const selectedKey = selectedFrom ? posKey(selectedFrom.row, selectedFrom.col) : null;
     const ep = lastSnapshot?.enPassant;
@@ -1492,43 +1728,14 @@
     }
   });
 
-  document.getElementById("moveBtn").addEventListener("click", () => {
-    const from = parsePos(fromEl.value);
-    const to = parsePos(toEl.value);
-    sendMove(from, to);
+  authRegisterBtnEl.addEventListener("click", () => {
+    void submitRegister();
   });
-
-  document.getElementById("activateBtn").addEventListener("click", () => {
-    send("activate_card", { handIndex: Number(document.getElementById("handIndex").value) });
+  authLoginBtnEl.addEventListener("click", () => {
+    void submitLogin();
   });
+  logoutBtnEl.addEventListener("click", () => logoutSession());
 
-  document.getElementById("resolvePendingBtn").addEventListener("click", () => {
-    const pos = parseOptionalPos(document.getElementById("pendingPiece").value);
-    const payload = {};
-    if (pos) {
-      payload.pieceRow = pos.row;
-      payload.pieceCol = pos.col;
-    }
-    send("resolve_pending_effect", payload);
-  });
-
-  document.getElementById("queueReactionBtn").addEventListener("click", () => {
-    const target = parseOptionalPos(document.getElementById("reactionPiece").value);
-    const payload = {
-      handIndex: Number(document.getElementById("reactionHandIndex").value)
-    };
-    if (target) {
-      payload.pieceRow = target.row;
-      payload.pieceCol = target.col;
-    }
-    send("queue_reaction", payload);
-  });
-
-  document.getElementById("resolveReactionsBtn").addEventListener("click", () => {
-    send("resolve_reactions", {});
-  });
-
-  reactionToggleEl.addEventListener("change", updateReactionToggleLabel);
   localeSelectEl.addEventListener("change", () => setLocale(localeSelectEl.value));
   privateRoomEl.addEventListener("change", updatePrivatePasswordVisibility);
   roomPasswordEl.addEventListener("input", () => {
@@ -1544,28 +1751,11 @@
       setTimeout(() => roomNameEl.select(), 0);
     }
   });
-  copyRoomIdBtnEl.addEventListener("click", async () => {
-    const id = lastSnapshot?.roomId;
-    if (!id) return;
-    try {
-      await navigator.clipboard.writeText(String(id));
-      copyRoomIdBtnEl.textContent = t("idCopied");
-      setTimeout(() => {
-        copyRoomIdBtnEl.textContent = t("copyRoomId");
-      }, 1200);
-    } catch (_) {
-      globalThis.alert(`${t("room")} ID: ${id}`);
-    }
-  });
   roomSearchEl.addEventListener("input", () => applyRoomSearch());
-  coordsInSquaresEl.addEventListener("change", () => {
-    if (lastSnapshot?.board) renderBoard(lastSnapshot.board);
-  });
   playerEl.addEventListener("change", () => {
     syncPlayerRoleLabels();
     if (lastSnapshot?.board) renderBoard(lastSnapshot.board);
   });
-  updateReactionToggleLabel();
   globalThis.setInterval(renderTurnClocks, 250);
   renderTurnClocks();
   renderBoard([]);
@@ -1579,5 +1769,6 @@
     savedLocale = "en-US";
   }
   setLocale(savedLocale);
+  void bootstrapAuthSession();
   startRoomListPolling();
 })();
