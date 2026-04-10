@@ -28,6 +28,9 @@ type Server struct {
 	auth       *AuthService
 	telemetry  *Telemetry
 	nextRoomID int
+	// userRoom maps authenticated user ID -> room ID they are currently joined to (at most one room).
+	userRoom   map[uint64]string
+	userRoomMu sync.Mutex
 }
 
 // Client wraps a websocket connection with room/player metadata.
@@ -97,6 +100,7 @@ func NewServerWithStore(store RoomStore) *Server {
 		store:      store,
 		telemetry:  NewTelemetry(),
 		nextRoomID: nextID,
+		userRoom:   map[uint64]string{},
 	}
 	go s.runReactionTimeoutLoop()
 	go s.runTurnTimeoutLoop()
@@ -165,6 +169,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 func (c *Client) readLoop() {
 	defer func() {
 		if c.room != nil {
+			c.server.unbindUserFromRoom(c.authUserID, c.room.RoomID)
 			c.room.RemoveClient(c)
 			if c.playerID != "" {
 				if errors.Is(c.closeReason, errClientLeaveMatch) {
@@ -290,6 +295,41 @@ func (c *Client) handleLeaveMatch(env Envelope) error {
 	return errClientLeaveMatch
 }
 
+// ensureUserCanJoinRoom rejects join when the account is already active in a different room.
+func (s *Server) ensureUserCanJoinRoom(userID uint64, roomID string) error {
+	if userID == 0 {
+		return nil
+	}
+	s.userRoomMu.Lock()
+	defer s.userRoomMu.Unlock()
+	if rid, ok := s.userRoom[userID]; ok && rid != roomID {
+		return fmt.Errorf("already active in room %s", rid)
+	}
+	return nil
+}
+
+// bindUserToRoom records that this account has successfully joined the room.
+func (s *Server) bindUserToRoom(userID uint64, roomID string) {
+	if userID == 0 {
+		return
+	}
+	s.userRoomMu.Lock()
+	defer s.userRoomMu.Unlock()
+	s.userRoom[userID] = roomID
+}
+
+// unbindUserFromRoom clears the room binding when the socket leaves (or is closing).
+func (s *Server) unbindUserFromRoom(userID uint64, roomID string) {
+	if userID == 0 {
+		return
+	}
+	s.userRoomMu.Lock()
+	defer s.userRoomMu.Unlock()
+	if s.userRoom[userID] == roomID {
+		delete(s.userRoom, userID)
+	}
+}
+
 // resolveClientDisplayName returns the authenticated username for match HUD labels, or empty for guests.
 func (s *Server) resolveClientDisplayName(c *Client) string {
 	if s.auth == nil || c.authUserID == 0 {
@@ -322,7 +362,9 @@ func (c *Client) handleJoinMatch(env Envelope) error {
 	if err != nil {
 		return err
 	}
-	c.room = room
+	if err := c.server.ensureUserCanJoinRoom(c.authUserID, room.RoomID); err != nil {
+		return protocolError{code: ErrorActionFailed, message: err.Error()}
+	}
 	if err := room.Execute(func() error {
 		requestKey := fmt.Sprintf("%s|join_match|%s", room.RoomID, env.ID)
 		if env.ID != "" && !room.MarkRequestOnce(requestKey) {
@@ -345,6 +387,8 @@ func (c *Client) handleJoinMatch(env Envelope) error {
 		}
 		return protocolError{code: ErrorActionFailed, message: err.Error()}
 	}
+	c.room = room
+	c.server.bindUserToRoom(c.authUserID, room.RoomID)
 	room.RegisterPlayerConnection(c.playerID)
 	room.EvaluateMatchOutcome()
 	_ = room.Persist(context.Background(), c.server.store)

@@ -25,6 +25,23 @@ func TestMarkRequestOnce(t *testing.T) {
 	}
 }
 
+// TestJoinSeatBlockedDuringReconnectGrace ensures a third party cannot take the vacant seat while the grace timer runs.
+func TestJoinSeatBlockedDuringReconnectGrace(t *testing.T) {
+	room, err := NewRoomSession("room-join-grace")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	room.DisconnectGrace = time.Minute
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	room.RegisterPlayerConnection(gameplay.PlayerB)
+	room.HandlePlayerDisconnect(gameplay.PlayerA)
+
+	_, err = room.joinSeat(gameplay.PlayerA)
+	if err == nil {
+		t.Fatalf("expected joinSeat to reject while reconnect timer is pending for A")
+	}
+}
+
 // TestDisconnectTimeoutGivesWinToConnectedPlayer validates single disconnect timeout rule.
 func TestDisconnectTimeoutGivesWinToConnectedPlayer(t *testing.T) {
 	room, err := NewRoomSession("room-disconnect")

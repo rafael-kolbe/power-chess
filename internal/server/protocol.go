@@ -168,6 +168,9 @@ type StateSnapshotPayload struct {
 	PlayerAName     string                 `json:"playerAName,omitempty"`
 	PlayerBName     string                 `json:"playerBName,omitempty"`
 	GameStarted     bool                   `json:"gameStarted"`
+	// ReconnectPendingFor is "A" or "B" while that seat's socket is gone but the grace timer has not fired yet.
+	ReconnectPendingFor     string `json:"reconnectPendingFor,omitempty"`
+	ReconnectDeadlineUnixMs int64  `json:"reconnectDeadlineUnixMs,omitempty"`
 	TurnPlayer      string                 `json:"turnPlayer"`
 	TurnSeconds     int                    `json:"turnSeconds"`
 	TurnNumber      int                    `json:"turnNumber"`

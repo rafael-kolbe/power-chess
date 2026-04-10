@@ -25,8 +25,9 @@ type RoomSession struct {
 	stateM            sync.Mutex
 	seen              map[string]struct{}
 	connectedByPlayer map[gameplay.PlayerID]int
-	disconnectTimers  map[gameplay.PlayerID]*time.Timer
-	DisconnectGrace   time.Duration
+	disconnectTimers    map[gameplay.PlayerID]*time.Timer
+	disconnectDeadline  map[gameplay.PlayerID]time.Time // when grace timer fires for that seat
+	DisconnectGrace     time.Duration
 	matchEnded        bool
 	winner            gameplay.PlayerID
 	endReason         string
@@ -73,8 +74,9 @@ func newRoomSessionWithEngine(roomID, roomName string, engine *match.Engine) *Ro
 			gameplay.PlayerA: 0,
 			gameplay.PlayerB: 0,
 		},
-		disconnectTimers: map[gameplay.PlayerID]*time.Timer{},
-		DisconnectGrace:  60 * time.Second,
+		disconnectTimers:   map[gameplay.PlayerID]*time.Timer{},
+		disconnectDeadline: map[gameplay.PlayerID]time.Time{},
+		DisconnectGrace:    60 * time.Second,
 		reactionTimeout:  10 * time.Second,
 		rematchVotes:     map[gameplay.PlayerID]bool{},
 		lastActivity:     time.Now().UTC(),
@@ -130,6 +132,23 @@ func (r *RoomSession) Snapshot() StateSnapshotPayload {
 	s := r.Engine.State
 	cA := r.connectedByPlayer[gameplay.PlayerA]
 	cB := r.connectedByPlayer[gameplay.PlayerB]
+	reconnectGrace := false
+	var reconnectFor string
+	var reconnectUntil int64
+	for _, pid := range []gameplay.PlayerID{gameplay.PlayerA, gameplay.PlayerB} {
+		if r.connectedByPlayer[pid] == 0 && r.disconnectTimers[pid] != nil && r.connectedByPlayer[oppositePlayer(pid)] > 0 {
+			reconnectGrace = true
+			reconnectFor = string(pid)
+			if t, ok := r.disconnectDeadline[pid]; ok {
+				reconnectUntil = t.UnixMilli()
+			}
+			break
+		}
+	}
+	board := serializeBoard(r.Engine.Chess.Board)
+	if r.matchEnded {
+		board = serializeBoard(chess.NewGame().Board)
+	}
 	payload := StateSnapshotPayload{
 		RoomID:       r.RoomID,
 		RoomName:     r.RoomName,
@@ -139,12 +158,12 @@ func (r *RoomSession) Snapshot() StateSnapshotPayload {
 		ConnectedB:   cB,
 		PlayerAName:  r.displayNameByPlayer[gameplay.PlayerA],
 		PlayerBName:  r.displayNameByPlayer[gameplay.PlayerB],
-		GameStarted:  cA > 0 && cB > 0,
+		GameStarted:  (cA > 0 && cB > 0) || reconnectGrace,
 		TurnPlayer:   string(s.CurrentTurn),
 		TurnSeconds:  s.TurnSeconds,
 		TurnNumber:   s.TurnNumber,
 		IgnitionOn:   s.IgnitionSlot.Occupied,
-		Board:        serializeBoard(r.Engine.Chess.Board),
+		Board:        board,
 		Players: []PlayerHUDState{
 			playerHUDState(gameplay.PlayerA, s.Players[gameplay.PlayerA]),
 			playerHUDState(gameplay.PlayerB, s.Players[gameplay.PlayerB]),
@@ -206,6 +225,8 @@ func (r *RoomSession) Snapshot() StateSnapshotPayload {
 	}
 	payload.RematchA = r.rematchVotes[gameplay.PlayerA]
 	payload.RematchB = r.rematchVotes[gameplay.PlayerB]
+	payload.ReconnectPendingFor = reconnectFor
+	payload.ReconnectDeadlineUnixMs = reconnectUntil
 	if r.matchEnded && !r.postMatchDeadline.IsZero() {
 		msLeft := time.Until(r.postMatchDeadline).Milliseconds()
 		if msLeft < 0 {
@@ -329,6 +350,7 @@ func (r *RoomSession) shutdownTimers() {
 		tm.Stop()
 	}
 	r.disconnectTimers = map[gameplay.PlayerID]*time.Timer{}
+	r.disconnectDeadline = map[gameplay.PlayerID]time.Time{}
 }
 
 // Persist stores room state using provided storage adapter.
@@ -362,6 +384,7 @@ func (r *RoomSession) RegisterPlayerConnection(pid gameplay.PlayerID) {
 		timer.Stop()
 		delete(r.disconnectTimers, pid)
 	}
+	delete(r.disconnectDeadline, pid)
 	if r.connectedByPlayer[gameplay.PlayerA] > 0 && r.connectedByPlayer[gameplay.PlayerB] > 0 {
 		r.resetTurnDeadlineUnsafe(time.Now())
 	}
@@ -417,6 +440,7 @@ func (r *RoomSession) handlePlayerLeaveUnsafe(pid gameplay.PlayerID) {
 		timer.Stop()
 		delete(r.disconnectTimers, pid)
 	}
+	delete(r.disconnectDeadline, pid)
 	if r.matchEnded {
 		return
 	}
@@ -499,6 +523,7 @@ func (r *RoomSession) cancelMatchNoWinner() {
 		tm.Stop()
 	}
 	r.disconnectTimers = map[gameplay.PlayerID]*time.Timer{}
+	r.disconnectDeadline = map[gameplay.PlayerID]time.Time{}
 }
 
 func (r *RoomSession) scheduleDisconnectTimeout(pid gameplay.PlayerID) {
@@ -506,9 +531,15 @@ func (r *RoomSession) scheduleDisconnectTimeout(pid gameplay.PlayerID) {
 		timer.Stop()
 	}
 	grace := r.DisconnectGrace
+	deadline := time.Now().Add(grace)
+	if r.disconnectDeadline == nil {
+		r.disconnectDeadline = make(map[gameplay.PlayerID]time.Time)
+	}
+	r.disconnectDeadline[pid] = deadline
 	r.disconnectTimers[pid] = time.AfterFunc(grace, func() {
 		r.stateM.Lock()
 		defer r.stateM.Unlock()
+		delete(r.disconnectDeadline, pid)
 		if r.matchEnded || r.connectedByPlayer[pid] > 0 {
 			return
 		}
@@ -585,6 +616,10 @@ func (r *RoomSession) swapConnectedPlayerSidesUnsafe() {
 	timerB := r.disconnectTimers[gameplay.PlayerB]
 	r.disconnectTimers[gameplay.PlayerA] = timerB
 	r.disconnectTimers[gameplay.PlayerB] = timerA
+	ddA := r.disconnectDeadline[gameplay.PlayerA]
+	ddB := r.disconnectDeadline[gameplay.PlayerB]
+	r.disconnectDeadline[gameplay.PlayerA] = ddB
+	r.disconnectDeadline[gameplay.PlayerB] = ddA
 	nameA := r.displayNameByPlayer[gameplay.PlayerA]
 	nameB := r.displayNameByPlayer[gameplay.PlayerB]
 	r.displayNameByPlayer[gameplay.PlayerA] = nameB
@@ -636,6 +671,14 @@ func oppositePlayer(pid gameplay.PlayerID) gameplay.PlayerID {
 	return gameplay.PlayerA
 }
 
+// joinSeat returns pid if that seat is free for a new connection, or an error while a reconnect grace timer is waiting for the same seat.
+func (r *RoomSession) joinSeat(pid gameplay.PlayerID) (gameplay.PlayerID, error) {
+	if r.connectedByPlayer[pid] == 0 && r.disconnectTimers[pid] != nil {
+		return "", fmt.Errorf("waiting for disconnected player to reconnect")
+	}
+	return pid, nil
+}
+
 func (r *RoomSession) assignJoinPlayer(p JoinMatchPayload) (gameplay.PlayerID, error) {
 	if r.RoomPrivate && strings.TrimSpace(p.Password) != r.RoomPassword {
 		return "", fmt.Errorf("invalid room password")
@@ -651,41 +694,41 @@ func (r *RoomSession) assignJoinPlayer(p JoinMatchPayload) (gameplay.PlayerID, e
 		if occA {
 			return "", fmt.Errorf("white side is already occupied")
 		}
-		return gameplay.PlayerA, nil
+		return r.joinSeat(gameplay.PlayerA)
 	case "black":
 		if occB {
 			return "", fmt.Errorf("black side is already occupied")
 		}
-		return gameplay.PlayerB, nil
+		return r.joinSeat(gameplay.PlayerB)
 	case "random":
 		if p.PlayerID == string(gameplay.PlayerA) && !occA {
-			return gameplay.PlayerA, nil
+			return r.joinSeat(gameplay.PlayerA)
 		}
 		if p.PlayerID == string(gameplay.PlayerB) && !occB {
-			return gameplay.PlayerB, nil
+			return r.joinSeat(gameplay.PlayerB)
 		}
 		if occA {
-			return gameplay.PlayerB, nil
+			return r.joinSeat(gameplay.PlayerB)
 		}
 		if occB {
-			return gameplay.PlayerA, nil
+			return r.joinSeat(gameplay.PlayerA)
 		}
 		if time.Now().UnixNano()%2 == 0 {
-			return gameplay.PlayerA, nil
+			return r.joinSeat(gameplay.PlayerA)
 		}
-		return gameplay.PlayerB, nil
+		return r.joinSeat(gameplay.PlayerB)
 	}
 	// Backward-compatible fallback from old playerId payload.
 	if p.PlayerID == string(gameplay.PlayerB) {
 		if occB {
 			return "", fmt.Errorf("black side is already occupied")
 		}
-		return gameplay.PlayerB, nil
+		return r.joinSeat(gameplay.PlayerB)
 	}
 	if occA {
 		return "", fmt.Errorf("white side is already occupied")
 	}
-	return gameplay.PlayerA, nil
+	return r.joinSeat(gameplay.PlayerA)
 }
 
 // playerHUDState converts internal player state to transport-friendly HUD data.

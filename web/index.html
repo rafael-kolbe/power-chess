@@ -128,6 +128,13 @@
 
   <div id="gameShell" class="game-shell-hud hidden">
     <div id="waitingBanner" class="waiting-banner hidden">Waiting for opponent...</div>
+    <div id="opponentDisconnectOverlay" class="opponent-disconnect-overlay hidden" aria-hidden="true" role="alertdialog" aria-labelledby="opponentDisconnectTitle">
+      <div class="opponent-disconnect-dialog">
+        <h3 id="opponentDisconnectTitle">Opponent disconnected</h3>
+        <p id="opponentDisconnectCountdown" class="opponent-disconnect-countdown">60</p>
+        <p id="opponentDisconnectHint" class="opponent-disconnect-hint"></p>
+      </div>
+    </div>
     <div class="row match-header-row">
       <span id="inRoomLabel" class="in-room-label"></span>
       <button id="disconnectBtn" type="button">Leave room</button>

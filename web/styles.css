@@ -235,6 +235,56 @@ button:disabled {
   color: var(--color-text-dim);
 }
 
+.game-shell-hud {
+  position: relative;
+}
+
+.opponent-disconnect-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12px 16px 0;
+  pointer-events: none;
+  background: rgb(0 0 0 / 35%);
+}
+
+.opponent-disconnect-dialog {
+  width: 100%;
+  max-width: 420px;
+  padding: 16px 18px;
+  text-align: center;
+  pointer-events: auto;
+  background: #1a2330;
+  border: 1px solid #3d5a7a;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 45%);
+}
+
+.opponent-disconnect-dialog h3 {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 700;
+  color: #e8c96a;
+}
+
+.opponent-disconnect-countdown {
+  margin: 0 0 8px;
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #f0f0f0;
+}
+
+.opponent-disconnect-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #a9b6c4;
+}
+
 .waiting-banner {
   margin-bottom: 16px;
   padding: 20px 16px;

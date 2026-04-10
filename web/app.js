@@ -29,6 +29,7 @@
   const lobbyScreenEl = document.getElementById("lobbyScreen");
   const gameShellEl = document.getElementById("gameShell");
   const waitingBannerEl = document.getElementById("waitingBanner");
+  const opponentDisconnectOverlayEl = document.getElementById("opponentDisconnectOverlay");
   const boardAreaEl = document.getElementById("boardArea");
   const roomListEl = document.getElementById("roomList");
   const roomListEmptyEl = document.getElementById("roomListEmpty");
@@ -172,7 +173,11 @@
       reasonOpponentAbandoned: "Reason: Your opponent abandoned the match.",
       reasonCheckmateShort: "Reason: checkmate.",
       reasonStalemateShort: "Reason: stalemate.",
-      disconnectWinAlert: "Victory: opponent disconnected and did not return in time."
+      disconnectWinAlert: "Victory: opponent disconnected and did not return in time.",
+      opponentDisconnectedTitle: "Opponent disconnected",
+      opponentDisconnectedSeconds: "{s}s",
+      opponentDisconnectedHint:
+        "You will win when the timer reaches 0 if they do not return. This seat is closed to other players until then."
       ,
       rematchProposed: "New game proposed, click on 'Play again' to accept.",
       rematchWaiting: "Waiting for opponent to accept the new game.",
@@ -277,7 +282,11 @@
       reasonOpponentAbandoned: "Motivo: Seu adversário abandonou a partida.",
       reasonCheckmateShort: "Motivo: Xeque-mate.",
       reasonStalemateShort: "Motivo: Afogamento (stalemate).",
-      disconnectWinAlert: "Vitória: o adversário saiu da sala (tempo de reconexão expirou)."
+      disconnectWinAlert: "Vitória: o adversário saiu da sala (tempo de reconexão expirou).",
+      opponentDisconnectedTitle: "Oponente desconectou",
+      opponentDisconnectedSeconds: "{s}s",
+      opponentDisconnectedHint:
+        "Você vence quando o tempo chegar a 0 se o adversário não voltar. Este lugar fica fechado para outros até lá."
       ,
       rematchProposed: "Novo jogo proposto, clique em 'Jogar novamente' para aceitar.",
       rematchWaiting: "Aguardando o adversário aceitar o novo jogo.",
@@ -572,6 +581,9 @@
     renderRoomList(lobbyRooms);
     if (lastSnapshot) {
       renderInRoomLabel(lastSnapshot);
+    }
+    if (joinedRoom && lastSnapshot) {
+      updateOpponentDisconnectOverlay(lastSnapshot);
     }
     updatePasswordToggleVisual();
     refreshPrivateJoinModalTexts();
@@ -914,6 +926,7 @@
           turnDeadline = Date.now() + turnSeconds * 1000;
         }
         syncTurnFromSnapshot(msg.payload);
+        updateOpponentDisconnectOverlay(msg.payload);
         maybeShowMatchEndModal(msg.payload);
 
         snapshotEl.textContent = JSON.stringify(msg.payload, null, 2);
@@ -1436,6 +1449,59 @@
     );
   }
 
+  /** @type {ReturnType<typeof setInterval> | null} */
+  let opponentDisconnectInterval = null;
+
+  function clearOpponentDisconnectInterval() {
+    if (opponentDisconnectInterval) {
+      clearInterval(opponentDisconnectInterval);
+      opponentDisconnectInterval = null;
+    }
+  }
+
+  function hideOpponentDisconnectOverlay() {
+    if (!opponentDisconnectOverlayEl) return;
+    opponentDisconnectOverlayEl.classList.add("hidden");
+    opponentDisconnectOverlayEl.setAttribute("aria-hidden", "true");
+    clearOpponentDisconnectInterval();
+  }
+
+  /**
+   * Shows a countdown while the opponent's reconnect grace timer is running (server closes the seat to new joins).
+   * @param {object} payload state_snapshot
+   */
+  function updateOpponentDisconnectOverlay(payload) {
+    if (!opponentDisconnectOverlayEl) return;
+    const pending = payload?.reconnectPendingFor;
+    const deadline = Number(payload?.reconnectDeadlineUnixMs || 0);
+    const local = playerEl.value;
+    const show =
+      payload &&
+      !payload.matchEnded &&
+      pending &&
+      pending !== local &&
+      deadline > 0;
+    if (!show) {
+      hideOpponentDisconnectOverlay();
+      return;
+    }
+    opponentDisconnectOverlayEl.classList.remove("hidden");
+    opponentDisconnectOverlayEl.setAttribute("aria-hidden", "false");
+    document.getElementById("opponentDisconnectTitle").textContent = t("opponentDisconnectedTitle");
+    document.getElementById("opponentDisconnectHint").textContent = t("opponentDisconnectedHint");
+    const countdownEl = document.getElementById("opponentDisconnectCountdown");
+    const tick = () => {
+      const sec = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      countdownEl.textContent = t("opponentDisconnectedSeconds", { s: sec });
+      if (sec <= 0) {
+        hideOpponentDisconnectOverlay();
+      }
+    };
+    tick();
+    clearOpponentDisconnectInterval();
+    opponentDisconnectInterval = setInterval(tick, 500);
+  }
+
   function hideMatchEndOverlay() {
     matchEndOverlayEl.classList.add("hidden");
     matchEndOverlayEl.setAttribute("aria-hidden", "true");
@@ -1522,10 +1588,7 @@
     }
     updatePostMatchActionControls(payload);
     if (!prevMatchEnded) {
-      const you = playerEl.value;
-      if (payload.endReason === "disconnect_timeout" && payload.winner === you) {
-        globalThis.alert(t("disconnectWinAlert"));
-      }
+      hideOpponentDisconnectOverlay();
       showMatchEndOverlay(t("matchFinished"), buildPostMatchModalMessage(payload));
     } else if (!matchEndOverlayEl.classList.contains("hidden")) {
       matchEndBodyEl.textContent = buildPostMatchModalMessage(payload);
@@ -1648,6 +1711,7 @@
     revealRoomPassword = false;
     prevMatchEnded = false;
     hideMatchEndOverlay();
+    hideOpponentDisconnectOverlay();
     hideLobbyPrivatePasswordError();
     renderTurnClocks();
     startRoomListPolling();
