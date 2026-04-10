@@ -1,186 +1,82 @@
 # Power Chess
 
-Power Chess e um jogo multiplayer 1v1 de xadrez com cartas e habilidades especiais.
+Jogo **multiplayer 1v1** de xadrez com **cartas de poder** e **habilidades de jogador**. O servidor autoritativo é em **Go** (WebSocket); o cliente atual é **HTML/CSS/JS** com HUD de desenvolvimento.
 
-As regras de negocio do projeto estao em:
-- `PROJECT.md`
-- `Cards.md`
-- `PlayerSkills.md`
+## Documentação
+
+| Documento | Conteúdo |
+|-----------|----------|
+| [PROJECT.md](PROJECT.md) | Visão do produto, regras de jogo, diretrizes técnicas, **roadmap** |
+| [PROTOCOL.md](PROTOCOL.md) | Contrato WebSocket v2 (mensagens, payloads, exemplos) |
+| [Cards.md](Cards.md) | Texto das cartas iniciais (espelha o catálogo do servidor) |
+| [PlayerSkills.md](PlayerSkills.md) | Habilidades de jogador selecionáveis |
 
 ## Requisitos
-- Git
-- Go (1.26+ recomendado)
-- Docker + Docker Compose
 
-## Instalar Golang
+- Git  
+- Go **1.26+** (ver `go.mod`)  
+- Node.js 18+ (apenas para testes E2E com Playwright)  
+- Docker + Docker Compose (opcional, para Postgres + servidor em container)
 
-### Linux (Ubuntu/Debian)
-```bash
-sudo apt update
-sudo apt install -y golang-go
-go version
-```
+## Executar localmente
 
-### Linux (Snap - alternativa)
-```bash
-sudo snap install go --classic
-go version
-```
-
-### macOS (Homebrew)
-```bash
-brew update
-brew install go
-go version
-```
-
-### Windows
-1. Baixe em [https://go.dev/dl/](https://go.dev/dl/)
-2. Execute o instalador `.msi`
-3. Verifique:
-```powershell
-go version
-```
-
-## Executar localmente (Go)
 ```bash
 go mod tidy
 go test ./...
 go run ./cmd/server
 ```
 
-Servidor:
-- HTTP health: [http://localhost:8080/healthz](http://localhost:8080/healthz)
-- HTTP metrics: [http://localhost:8080/metrics](http://localhost:8080/metrics)
+- Health: `http://localhost:8080/healthz`  
+- Métricas: `http://localhost:8080/metrics`  
+- UI: `http://localhost:8080/`  
 - WebSocket: `ws://localhost:8080/ws`
 
-## Executar com Docker Compose
+### Docker Compose
+
 ```bash
 docker compose up --build
 ```
 
-Servicos:
-- `server`: backend Go + WebSocket em `:8080`
-- `postgres`: PostgreSQL 16 (container `:5432`, host `:5433`)
+- Servidor em `:8080`  
+- Postgres: host `localhost:5433` → container `:5432` (ver `docker-compose.yml`)
 
-Variaveis atuais:
-- `SERVER_ADDR` (padrao no compose: `:8080`)
-- `DATABASE_URL` (habilita persistencia de sala em Postgres)
+Variáveis úteis: `SERVER_ADDR`, `DATABASE_URL` (persistência de sala em Postgres; sem URL, o servidor segue em memória).
 
-## Protocolo WebSocket (base atual)
+### Instalar Go
 
-Formato envelope:
-```json
-{
-  "id": "optional-correlation-id",
-  "type": "message_type",
-  "payload": {}
-}
-```
+- **Linux (apt):** `sudo apt update && sudo apt install -y golang-go`  
+- **Linux (snap):** `sudo snap install go --classic`  
+- **macOS:** `brew install go`  
+- **Windows:** instalador em [go.dev/dl](https://go.dev/dl/)
 
-Mensagens cliente -> servidor:
-- `ping`
-- `join_match`
-- `submit_move`
-- `activate_card`
-- `resolve_pending_effect`
-- `queue_reaction`
-- `resolve_reactions`
+## Estrutura do repositório
 
-Mensagens servidor -> cliente:
-- `hello`
-- `ack`
-- `error`
-- `state_snapshot`
+| Pasta / arquivo | Função |
+|-----------------|--------|
+| `cmd/server` | Entrada HTTP/WebSocket |
+| `internal/server` | Protocolo, handlers, salas |
+| `internal/chess` | Motor de xadrez |
+| `internal/gameplay` | Estado de partida (deck, mana, ignição, recarga, cartas) |
+| `internal/match` | Efeitos, reações, cadeias Counter |
+| `internal/ranking` | ELO |
+| `web/` | Frontend estático (`app.js`, `index.html`, assets) |
+| `tests/e2e/` | Testes Playwright |
 
-Documento completo do protocolo:
-- `PROTOCOL.md`
+## Protocolo WebSocket (resumo)
 
-HUD de desenvolvimento:
-- `GET /` (servindo `web/index.html`)
-- JavaScript cliente: `web/app.js`
-- Controles rapidos no HUD:
-  - `Resolve Pending Effect`
-  - `Queue Reaction`
-  - `Resolve Reactions`
-  - Painel de status para `pendingCapture`, `reactionWindow` e `pendingEffects`
+Envelope JSON: `id`, `type`, `payload`. Detalhes completos, códigos de erro e exemplos de `state_snapshot` estão em **[PROTOCOL.md](PROTOCOL.md)**.
 
-### `ack` (v2)
-`ack` agora retorna payload padronizado:
-```json
-{
-  "requestId": "same-as-envelope-id",
-  "requestType": "submit_move",
-  "status": "ok|queued",
-  "code": "",
-  "message": ""
-}
-```
+Mensagens comuns (cliente → servidor): `ping`, `join_match`, `submit_move`, `activate_card`, `resolve_pending_effect`, `queue_reaction`, `resolve_reactions`, `leave_match`, `stay_in_room`, `request_rematch`.
 
-### `error` (v2)
-`error` retorna `code` + `message` com codigos padrao:
-- `bad_request`
-- `unknown_message_type`
-- `join_required`
-- `action_failed`
-- `invalid_payload`
-- `protocol_violation`
+Servidor → cliente: `hello`, `ack`, `error`, `state_snapshot`.
 
-### `state_snapshot` (v2)
-O snapshot enviado para HUD contem:
-- `board` (matriz 8x8 com codigos como `wK`, `bP`, vazio `""`)
-- `players` (mana, energized, handCount, cooldownCount, graveyardCount, strikes)
-- `pendingEffects` (efeitos aguardando alvo)
-- `reactionWindow` (trigger, tipos permitidos e tamanho da stack)
-- `matchEnded`, `winner`, `endReason` (estado final da partida)
+## Testes
 
-## Estrutura de codigo (atual)
-- `cmd/server`: bootstrap do servidor HTTP/WebSocket
-- `internal/server`: protocolo e handlers de transporte
-- `internal/chess`: motor de xadrez (movimentos, check, checkmate, etc.)
-- `internal/gameplay`: estado de partida (deck, mana, ignicao, cooldown, skills)
-- `internal/match`: orquestracao de efeitos/cartas e reacoes
-- `internal/ranking`: calculo ELO
-
-## Roadmap imediato (Beta Server)
-- [x] Base de protocolo websocket v2 (ack/error/snapshot)
-- [x] Trigger windows de captura e chain Counter (Counterattack/Blockade)
-- [x] Persistencia de estado de partida em PostgreSQL (reconexao e retomada)
-- [x] Lock de concorrencia por sala e idempotencia por `requestId`
-- [x] Testes websocket end-to-end multi-cliente
-- [x] Monitoramento/telemetria basica do servidor
-
-## Telemetria basica
-- Endpoint `GET /metrics` expoe JSON com:
-  - `uptimeSeconds`
-  - `totalRequests`
-  - `requestsByType`
-  - `errorsByCode`
-  - `handlerAvgLatencyMs`
-  - `handlerLastLatencyMs`
-- Metricas sao mantidas em memoria (sem Prometheus por enquanto).
-
-## Persistencia minima (PostgreSQL)
-- A sala e salva no Postgres apos mutacoes relevantes e em eventos de desconexao.
-- `join_match` tenta restaurar sala persistida antes de criar uma nova em memoria.
-- Persistencia e opcional: se `DATABASE_URL` nao estiver configurada, servidor segue em memoria.
-- Snapshot persistido inclui estado de xadrez, estado de gameplay, janelas/reacoes pendentes e metadados de fim de partida.
-
-## Cartas e habilidades nao implementadas (intencional)
-- Funcionalidades de cartas e habilidades ainda pendentes permanecem como backlog.
-- Prioridade atual: estabilizar servidor beta e fluxo de teste multiplayer.
-
-## Qualidade e testes
-- Sempre adicionar testes para cada funcionalidade nova/bugfix.
-- Antes de commit:
 ```bash
 go test ./...
 ```
-- Documentacao de funcoes novas: obrigatoria (GoDoc).
 
-## Testes E2E de UI (Playwright)
-
-Para validar fluxos de modal e rematch sem jogar uma partida inteira manualmente:
+### E2E (Playwright)
 
 ```bash
 npm install
@@ -188,43 +84,25 @@ npx playwright install
 npm run test:e2e
 ```
 
-Execucao com browser visivel:
+Com navegador visível: `npm run test:e2e:headed`
 
-```bash
-npm run test:e2e:headed
-```
+## Git e entregas
 
-Os testes E2E ficam em `tests/e2e` e atualmente cobrem:
-- fluxo de proposta/aceite de "Jogar novamente";
-- tratamento de saida do oponente apos proposta;
-- reset de modal ao iniciar nova partida;
-- criacao de sala publica e validacao basica de lobby;
-- validacao de senha para sala privada;
-- exibicao de sala privada no modal de senha;
-- busca de salas no lobby;
-- traducao basica de labels no frontend.
+- Branch principal: **`main`**.  
+- **Cada funcionalidade grande** deve ser **commitada** de forma coesa e **enviada** para `origin/main` (`git push origin main`) quando estiver pronta e com testes passando.  
+- Antes de commitar: `go test ./...` (e `npm run test:e2e` se alterar UI/protocolo relevante).
 
-## Regras de ativacao (resumo)
-- `Power` e `Continuous`: ativacao no turno do jogador da vez.
-- `Retribution`: ativacao em reaction windows de cadeia.
-- `Counter`: ativacao em reaction windows de resposta a captura/condicao da carta.
-- `Counterattack`: requer tentativa de captura por peca atacante buffada por `Power`; quando valida, captura a peca atacante e cancela a captura pendente.
-- `Blockade`: responde diretamente a `Counterattack`, nega seu efeito, cancela a captura pendente e mantem a peca atacante na casa original.
+## Telemetria e persistência
 
-## Regras de desconexao (beta)
-- Se os dois jogadores desconectarem, a partida e cancelada sem vencedor.
-- Se um jogador desconectar e nao reconectar em 60s, o outro vence por `disconnect_timeout`.
-- O `state_snapshot` expone `matchEnded`, `winner` e `endReason` para HUD e automacoes.
-- Slot de ignicao ocupado bloqueia novas ativacoes, exceto `Save It For Later` (comportamento especial de remover a carta ignited sem resolver efeito e reutilizar o slot).
-- Cartas com `Ignition: 0` resolvem imediatamente e permitem sequencias no mesmo turno se houver mana e slot livre.
-- Habilidades de jogador: somente no proprio turno, consomem turno e nao podem ser negadas.
+- **`GET /metrics`**: JSON em memória (`uptimeSeconds`, `requestsByType`, latências, erros).  
+- **Postgres**: salas e estado para reconexão; `join_match` tenta restaurar antes de criar sala nova. Ver [PROJECT.md](PROJECT.md).
 
-## UX do HUD (beta)
-- Coordenadas nas bordas do tabuleiro (arquivos e ranks), com opcao de coordenadas discretas dentro de cada casa.
-- Barras de mana (azul) e mana energizada (vermelho) com texto tipo `3/10` e `15/20`.
-- Drag-and-drop de pecas com highlight de movimentos pseudo-legais.
-- Toggle `On/Off` no HUD:
-  - `On`: jogador pode responder normalmente em qualquer reaction window.
-  - `Off`: HUD auto-envia skip da resposta para acelerar testes (Counter, resposta a Power, etc.).
-- Timeout de resposta no backend: 10s para janelas de reacao (captura/cartas). Ao expirar, a pilha e resolvida automaticamente.
-- Painel com relogio de turno (cliente), mana, mana energizada e strikes para ambos jogadores.
+## Qualidade
+
+- Regras de jogo e validação no **servidor**.  
+- Novas funcionalidades e correções devem incluir **testes**.  
+- Funções novas em Go: comentários no estilo **GoDoc**.
+
+---
+
+Para regras de negócio, timers, strikes, mana e roadmap de produto, use **[PROJECT.md](PROJECT.md)**.

@@ -1,13 +1,36 @@
-# Power Chess WebSocket Protocol (v2)
+# Power Chess — WebSocket protocol (v2)
 
-This document defines the current client/server websocket contract.
+Contrato atual entre cliente e servidor. Mudanças de comportamento devem ser refletidas aqui e nos testes de integração.
 
-## Transport
+## Índice
 
-- Endpoint: `ws://<host>:8080/ws`
-- Metrics endpoint: `http://<host>:8080/metrics`
-- Lobby list: `GET http://<host>:8080/api/rooms` returns `{ "rooms": [ { "roomId", "roomName", "roomPrivate", "connectedA", "connectedB", "gameStarted", "occupiedByColor?" } ] }` for matches that have not ended (`matchEnded` is false). When occupancy is `1/2`, `occupiedByColor` is `White` or `Black`.
-- JSON envelope format:
+1. [Transporte e HTTP auxiliar](#transporte-e-http-auxiliar)  
+2. [Envelope JSON](#envelope-json)  
+3. [Servidor → cliente](#servidor--cliente)  
+4. [Cliente → servidor](#cliente--servidor)  
+5. [Janela de captura e cadeia Counter](#janela-de-captura-e-cadeia-counter)  
+6. [Desconexão e timeout de turno](#desconexão-e-timeout-de-turno)  
+7. [Reconciliação de fim de partida](#reconciliação-de-fim-de-partida)  
+8. [Cobertura de testes](#cobertura-de-testes)  
+
+---
+
+## Transporte e HTTP auxiliar
+
+| Item | Valor |
+|------|--------|
+| WebSocket | `ws://<host>:8080/ws` |
+| Health | `GET http://<host>:8080/healthz` |
+| Métricas | `GET http://<host>:8080/metrics` (JSON em memória) |
+| Lista de salas (lobby) | `GET http://<host>:8080/api/rooms` |
+
+**Resposta de `/api/rooms`:** `{ "rooms": [ { "roomId", "roomName", "roomPrivate", "connectedA", "connectedB", "gameStarted", "occupiedByColor?" } ] }` — apenas partidas com `matchEnded` falso. Com ocupação `1/2`, `occupiedByColor` pode ser `White` ou `Black`.
+
+---
+
+## Envelope JSON
+
+Todas as mensagens usam:
 
 ```json
 {
@@ -17,21 +40,23 @@ This document defines the current client/server websocket contract.
 }
 ```
 
-## Server -> Client Messages
+O campo `id` permite correlacionar `ack` / `error` com o pedido e suporta **idempotência** (`requestId` + tipo + jogador + sala).
+
+---
+
+## Servidor → cliente
 
 ### `hello`
 
-Sent when websocket connection is established.
+Enviado ao abrir o WebSocket.
 
 ```json
-{
-  "type": "hello"
-}
+{ "type": "hello" }
 ```
 
 ### `ack`
 
-Acknowledges a request that was accepted and processed.
+Confirma processamento do pedido.
 
 ```json
 {
@@ -47,11 +72,9 @@ Acknowledges a request that was accepted and processed.
 }
 ```
 
-Duplicate requests (`same room + player + type + requestId`) return `status: "duplicate"` and are not applied again.
+Pedidos duplicados (mesmo `requestId` + tipo + jogador + sala) retornam `status: "duplicate"` sem reaplicar o efeito.
 
 ### `error`
-
-Reports request failure.
 
 ```json
 {
@@ -63,17 +86,22 @@ Reports request failure.
 }
 ```
 
-Error codes currently used:
-- `bad_request`
-- `unknown_message_type`
-- `join_required`
-- `action_failed`
-- `invalid_payload`
-- `protocol_violation`
+**Códigos usados:** `bad_request`, `unknown_message_type`, `join_required`, `action_failed`, `invalid_payload`, `protocol_violation`.
 
 ### `state_snapshot`
 
-Broadcast room state update.
+Broadcast do estado da sala. Campos principais:
+
+| Área | Conteúdo |
+|------|-----------|
+| Sala | `roomId`, `roomName`, `roomPrivate`, `roomPassword`, `connectedA/B`, `gameStarted` |
+| Turno | `turnPlayer`, `turnSeconds`, `turnNumber`, `ignitionOn`, `ignitionCard` |
+| Tabuleiro | `board` 8×8 (códigos `wK`, `bP`, `""` vazio), `enPassant`, `castlingRights` |
+| Jogadores | `players[]`: `mana`, `maxMana`, `energizedMana`, `maxEnergized`, `handCount`, `cooldownCount`, `graveyardCount`, `strikes` |
+| Efeitos | `pendingEffects`, `pendingCapture`, `reactionWindow` |
+| Fim | `matchEnded`, `winner`, `endReason`, `rematchA/B`, `postMatchMsLeft` |
+
+**Exemplo ilustrativo** (estrutura; valores reais variam):
 
 ```json
 {
@@ -132,12 +160,7 @@ Broadcast room state update.
         "strikes": 0
       }
     ],
-    "pendingEffects": [
-      {
-        "owner": "A",
-        "cardId": "knight-touch"
-      }
-    ],
+    "pendingEffects": [{ "owner": "A", "cardId": "knight-touch" }],
     "pendingCapture": {
       "active": true,
       "fromRow": 6,
@@ -163,23 +186,21 @@ Broadcast room state update.
 }
 ```
 
-Field `enPassant` mirrors the engine state after the last completed move: when `valid` is true, a pawn may capture on `(targetRow,targetCol)` and remove the pawn at `(pawnRow,pawnCol)`. Clients may use it for move highlighting; the server remains authoritative for legality.
-Field `castlingRights` mirrors server-side castling rights and should be used by clients to avoid suggesting castling after king/rook movement has already revoked that side.
-Field `turnSeconds` is the authoritative per-turn timer duration used by the server timeout loop.
-When a match ends, `rematchA` / `rematchB` show rematch votes and `postMatchMsLeft` exposes remaining post-match action window before room auto-close.
+**Notas:**
 
-When building each snapshot, the server re-evaluates checkmate/stalemate from the live board. If the room was previously marked ended only as `both_disconnected_cancelled` but the position is decisively over, `winner` and `endReason` are updated to `checkmate` or `stalemate` before the payload is sent. The same reconciliation runs when the last client disconnects, so a terminal position is not overwritten by the double-disconnect cancel path.
+- `enPassant`: quando `valid` é true, o cliente pode usar para highlight; o servidor decide legalidade.  
+- `castlingRights`: evita sugerir roque após revogação.  
+- `turnSeconds`: duração autoritativa do timer de turno.  
+- Após fim de partida: `rematchA` / `rematchB` e `postMatchMsLeft` para a janela pós-partida.
 
-## Client -> Server Messages
+---
+
+## Cliente → servidor
 
 ### `ping`
 
 ```json
-{
-  "id": "req-1",
-  "type": "ping",
-  "payload": { "timestamp": 1710000000 }
-}
+{ "id": "req-1", "type": "ping", "payload": { "timestamp": 1710000000 } }
 ```
 
 ### `join_match`
@@ -199,13 +220,11 @@ When building each snapshot, the server re-evaluates checkmate/stalemate from th
 }
 ```
 
-Behavior notes:
-- On `join_match`, backend first attempts to load persisted room state from PostgreSQL (when persistence is enabled).
-- `roomId` must be a positive integer string. If omitted/empty, backend creates a new room with auto-incremented integer id.
-- `roomName` is the display name of the room. If omitted/empty, server uses `Let's Play!`.
-- `pieceType` accepts `white`, `black`, `random`.
-- `isPrivate` + `password` configure private rooms on creation and are validated on join.
-- If no persisted room exists, backend creates a new in-memory room.
+- Com persistência habilitada, o servidor tenta **carregar** a sala do Postgres antes de criar outra em memória.  
+- `roomId`: string inteira positiva; vazio → nova sala com ID auto-incrementado.  
+- `roomName`: nome exibido; vazio → padrão do servidor.  
+- `pieceType`: `white` | `black` | `random`.  
+- `isPrivate` + `password`: salas privadas na criação/entrada.
 
 ### `submit_move`
 
@@ -213,23 +232,14 @@ Behavior notes:
 {
   "id": "req-3",
   "type": "submit_move",
-  "payload": {
-    "fromRow": 6,
-    "fromCol": 4,
-    "toRow": 4,
-    "toCol": 4
-  }
+  "payload": { "fromRow": 6, "fromCol": 4, "toRow": 4, "toCol": 4 }
 }
 ```
 
 ### `activate_card`
 
 ```json
-{
-  "id": "req-4",
-  "type": "activate_card",
-  "payload": { "handIndex": 0 }
-}
+{ "id": "req-4", "type": "activate_card", "payload": { "handIndex": 0 } }
 ```
 
 ### `resolve_pending_effect`
@@ -238,10 +248,7 @@ Behavior notes:
 {
   "id": "req-5",
   "type": "resolve_pending_effect",
-  "payload": {
-    "pieceRow": 6,
-    "pieceCol": 0
-  }
+  "payload": { "pieceRow": 6, "pieceCol": 0 }
 }
 ```
 
@@ -251,92 +258,81 @@ Behavior notes:
 {
   "id": "req-6",
   "type": "queue_reaction",
-  "payload": {
-    "handIndex": 1,
-    "pieceRow": 4,
-    "pieceCol": 4
-  }
+  "payload": { "handIndex": 1, "pieceRow": 4, "pieceCol": 4 }
 }
 ```
 
 ### `resolve_reactions`
 
 ```json
-{
-  "id": "req-7",
-  "type": "resolve_reactions",
-  "payload": {}
-}
+{ "id": "req-7", "type": "resolve_reactions", "payload": {} }
 ```
 
 ### `leave_match`
 
-Intentional room exit by the local player.
-
 ```json
-{
-  "id": "req-8",
-  "type": "leave_match",
-  "payload": {}
-}
+{ "id": "req-8", "type": "leave_match", "payload": {} }
 ```
 
 ### `stay_in_room`
 
-Used by a single remaining player after match end to reset room into waiting state.
-
 ```json
-{
-  "id": "req-9",
-  "type": "stay_in_room",
-  "payload": {}
-}
+{ "id": "req-9", "type": "stay_in_room", "payload": {} }
 ```
+
+Usado após fim de partida quando um jogador permanece só na sala para voltar ao estado de espera.
 
 ### `request_rematch`
 
-Used after match end while both players remain connected. Match resets when both sides vote and players automatically swap sides (`A <-> B`), so colors are inverted in the next game.
-
 ```json
-{
-  "id": "req-10",
-  "type": "request_rematch",
-  "payload": {}
-}
+{ "id": "req-10", "type": "request_rematch", "payload": {} }
 ```
 
-## Capture Trigger Window
+Com ambos conectados após o fim; quando ambos votam, a partida reinicia com **lados invertidos** (`A` ↔ `B`).
 
-- When a valid capture move is submitted, backend opens a reaction window with trigger `capture_attempt`.
-- En passant capture attempts also open `capture_attempt`.
-- The move is kept as pending and is not applied immediately.
-- The first reaction in this chain must come from the opponent and must be a `Counter` card.
-- Reactions resolve in LIFO order.
-- If no reaction is queued, `resolve_reactions` applies the pending capture move.
-- `Counterattack` validation: only valid if the pending attacker is currently buffed by a `Power` card.
-- `Blockade` validation: only valid when responding directly to `Counterattack` in the same `capture_attempt` chain.
-- `Blockade` effect: negates `Counterattack`, cancels pending capture, and keeps attacker on original square.
+---
 
-## Integration Test Coverage
+## Janela de captura e cadeia Counter
 
-Current websocket integration tests cover:
-- multi-client `join_match` flow with `state_snapshot` broadcast
-- `ack` contract validation for normal and duplicate request handling
-- request idempotency by room + player + type + requestId
-- disconnect timeout and match cancellation rules
-- persistence adapter integration for room save/load hooks
-- in-memory telemetry counters and `/metrics` HTTP exposure
+- Captura válida (inclui en passant) pode abrir `capture_attempt` com movimento **pendente**.  
+- A primeira resposta na cadeia costuma ser **Counter** do oponente.  
+- Reações resolvem em **LIFO**.  
+- Sem reações enfileiradas, `resolve_reactions` aplica a captura pendente.  
+- **Counterattack** e **Blockade**: validação e efeitos conforme regras do servidor (ver [Cards.md](Cards.md)).
 
-## Disconnect Rules
+---
 
-- If both players disconnect, match is canceled with no winner (`endReason: both_disconnected_cancelled`).
-- If one player disconnects while the other stays connected, a 60-second grace timer starts.
-- If disconnected player does not return in time, remaining player wins (`endReason: disconnect_timeout`).
-- If a player explicitly sends `leave_match` while the opponent is still connected, the opponent wins immediately (`endReason: left_room`).
+## Desconexão e timeout de turno
 
-## Turn Timeout Rules
+| Situação | Efeito típico |
+|----------|----------------|
+| Ambos desconectam | Partida cancelada (`both_disconnected_cancelled` ou equivalente) |
+| Um desconecta | Grace ~60 s; ao expirar, vitória do outro (`disconnect_timeout`) |
+| `leave_match` com oponente na sala | Vitória do oponente (`left_room`) |
+| Timeout de turno | +1 strike no jogador ativo; turno passa; 3 strikes → derrota (`strike_limit`) |
 
-- Turn duration defaults to 30 seconds (`turnSeconds` in snapshot).
-- If the active player times out, they receive 1 strike and turn immediately passes to the opponent.
-- On 3rd strike, active player loses immediately (`endReason: strike_limit`).
+`turnSeconds` no snapshot define o limite por jogada.
 
+---
+
+## Reconciliação de fim de partida
+
+O servidor reavalia xeque-mate/afogamento no tabuleiro ao montar snapshots. Se a sala estava marcada como encerrada por cancelamento de desconexão dupla mas a posição é terminal, `winner` / `endReason` podem ser atualizados para `checkmate` ou `stalemate`. O mesmo vale ao desconectar o último cliente, para não sobrescrever resultado decisivo.
+
+---
+
+## Cobertura de testes
+
+Testes de integração WebSocket cobrem, entre outros:
+
+- `join_match` multi-cliente e broadcast de `state_snapshot`  
+- Contrato de `ack` e pedidos duplicados  
+- Idempotência por `requestId`  
+- Timeout de desconexão e cancelamento  
+- Hooks de persistência (save/load)  
+- Contadores em `/metrics`  
+
+---
+
+Documentação de produto e roadmap: **[PROJECT.md](PROJECT.md)**.  
+Instruções de execução: **[README.md](README.md)**.
