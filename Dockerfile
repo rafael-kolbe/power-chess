@@ -2,11 +2,15 @@ FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 
+# Vendored modules: the image builds without contacting proxy.golang.org (works offline / flaky DNS).
 COPY go.mod go.sum ./
-RUN go mod download
+COPY vendor ./vendor
 
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /bin/power-chess-server ./cmd/server
+COPY cmd ./cmd
+COPY internal ./internal
+COPY web ./web
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=vendor -trimpath -o /bin/power-chess-server ./cmd/server
 
 FROM alpine:3.21
 
@@ -19,4 +23,3 @@ COPY --from=builder /app/web /app/web
 
 EXPOSE 8080
 ENTRYPOINT ["/app/power-chess-server"]
-

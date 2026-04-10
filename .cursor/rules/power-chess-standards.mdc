@@ -51,5 +51,7 @@ alwaysApply: true
 - Update `README.md` when setup, tooling, or run instructions change.
 - Review and update relevant markdown docs (`PROJECT.md`, `README.md`, `PROTOCOL.md`, card/skill docs) whenever behavior changes.
 - Always create tests for each new functionality and bug fix.
+- **Before every commit or push:** run `go test ./...` locally and fix failures. When Docker or `go.mod` / `go.sum` change, also run `go mod vendor` and `docker compose build` (or `docker build .`) so the image still builds without relying on module download inside the container.
 - Only commit when tests are passing (expected 100% pass rate for the relevant suite in CI/local runs).
 - Include protocol and integration tests when adding websocket/game actions.
+- Keep `vendor/` in sync: after adding or upgrading Go dependencies, run `go mod tidy` and `go mod vendor`, then commit `vendor/` together with `go.mod` / `go.sum` so Docker builds stay offline-friendly.

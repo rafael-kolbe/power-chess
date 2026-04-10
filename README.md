@@ -41,6 +41,19 @@ go run ./cmd/export-card-metadata
 
 ### Docker Compose
 
+O `Dockerfile` compila com **`-mod=vendor`**: as dependências Go vêm da pasta `vendor/` no repositório, então a imagem **não precisa baixar módulos** (evita falhas quando o DNS da rede do Docker não resolve `proxy.golang.org`).
+
+Depois de alterar `go.mod` / `go.sum`, regenere o vendor e faça commit junto:
+
+```bash
+go mod tidy
+go mod vendor
+go test ./...
+docker compose build
+```
+
+Subir stack:
+
 ```bash
 docker compose up --build
 ```
