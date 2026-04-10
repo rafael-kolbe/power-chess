@@ -253,3 +253,47 @@ func TestResolveTurnTimeoutIfExpiredLosesOnThirdStrike(t *testing.T) {
 		t.Fatalf("expected strike_limit win for B, got %+v", s)
 	}
 }
+
+// TestRequestRematchSwapsSides ensures accepted rematch swaps player colors.
+func TestRequestRematchSwapsSides(t *testing.T) {
+	room, err := NewRoomSession("room-rematch-swap")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	room.stateM.Lock()
+	room.matchEnded = true
+	room.connectedByPlayer[gameplay.PlayerA] = 1
+	room.connectedByPlayer[gameplay.PlayerB] = 1
+	clientA := &Client{playerID: gameplay.PlayerA}
+	clientB := &Client{playerID: gameplay.PlayerB}
+	room.clients[clientA] = struct{}{}
+	room.clients[clientB] = struct{}{}
+	room.Players["conn-a"] = gameplay.PlayerA
+	room.Players["conn-b"] = gameplay.PlayerB
+	room.stateM.Unlock()
+
+	accepted, err := room.RequestRematch(gameplay.PlayerA)
+	if err != nil {
+		t.Fatalf("request rematch A failed: %v", err)
+	}
+	if accepted {
+		t.Fatalf("expected rematch pending after first vote")
+	}
+	accepted, err = room.RequestRematch(gameplay.PlayerB)
+	if err != nil {
+		t.Fatalf("request rematch B failed: %v", err)
+	}
+	if !accepted {
+		t.Fatalf("expected rematch accepted after second vote")
+	}
+
+	if clientA.playerID != gameplay.PlayerB {
+		t.Fatalf("expected former A client to become B, got %s", clientA.playerID)
+	}
+	if clientB.playerID != gameplay.PlayerA {
+		t.Fatalf("expected former B client to become A, got %s", clientB.playerID)
+	}
+	if room.Players["conn-a"] != gameplay.PlayerB || room.Players["conn-b"] != gameplay.PlayerA {
+		t.Fatalf("expected player address map swapped, got %+v", room.Players)
+	}
+}

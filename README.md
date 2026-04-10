@@ -178,6 +178,32 @@ go test ./...
 ```
 - Documentacao de funcoes novas: obrigatoria (GoDoc).
 
+## Testes E2E de UI (Playwright)
+
+Para validar fluxos de modal e rematch sem jogar uma partida inteira manualmente:
+
+```bash
+npm install
+npx playwright install
+npm run test:e2e
+```
+
+Execucao com browser visivel:
+
+```bash
+npm run test:e2e:headed
+```
+
+Os testes E2E ficam em `tests/e2e` e atualmente cobrem:
+- fluxo de proposta/aceite de "Jogar novamente";
+- tratamento de saida do oponente apos proposta;
+- reset de modal ao iniciar nova partida;
+- criacao de sala publica e validacao basica de lobby;
+- validacao de senha para sala privada;
+- exibicao de sala privada no modal de senha;
+- busca de salas no lobby;
+- traducao basica de labels no frontend.
+
 ## Regras de ativacao (resumo)
 - `Power` e `Continuous`: ativacao no turno do jogador da vez.
 - `Retribution`: ativacao em reaction windows de cadeia.

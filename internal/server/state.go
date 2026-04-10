@@ -537,10 +537,29 @@ func (r *RoomSession) RequestRematch(pid gameplay.PlayerID) (bool, error) {
 	r.rematchVotes[pid] = true
 	r.lastActivity = time.Now().UTC()
 	if r.rematchVotes[gameplay.PlayerA] && r.rematchVotes[gameplay.PlayerB] {
+		r.swapConnectedPlayerSidesUnsafe()
 		r.resetForNewMatchUnsafe()
 		return true, nil
 	}
 	return false, nil
+}
+
+// swapConnectedPlayerSidesUnsafe swaps connected players between A/B before rematch reset.
+func (r *RoomSession) swapConnectedPlayerSidesUnsafe() {
+	for client := range r.clients {
+		client.playerID = oppositePlayer(client.playerID)
+	}
+	for key, pid := range r.Players {
+		r.Players[key] = oppositePlayer(pid)
+	}
+	connectedA := r.connectedByPlayer[gameplay.PlayerA]
+	connectedB := r.connectedByPlayer[gameplay.PlayerB]
+	r.connectedByPlayer[gameplay.PlayerA] = connectedB
+	r.connectedByPlayer[gameplay.PlayerB] = connectedA
+	timerA := r.disconnectTimers[gameplay.PlayerA]
+	timerB := r.disconnectTimers[gameplay.PlayerB]
+	r.disconnectTimers[gameplay.PlayerA] = timerB
+	r.disconnectTimers[gameplay.PlayerB] = timerA
 }
 
 func (r *RoomSession) resetForNewMatchUnsafe() {

@@ -6,10 +6,11 @@
   <title>POWER CHESS (Alpha)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Oxanium:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500&family=Oxanium:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/card.css" />
 </head>
-<body>
+<body class="has-card-footer">
   <h2 id="titleLabel">POWER CHESS (Alpha)</h2>
 
   <div id="lobbyScreen" class="lobby-layout">
@@ -89,6 +90,7 @@
       <p id="matchEndBody"></p>
       <p id="matchEndCountdown" class="match-end-countdown hidden"></p>
       <div class="match-end-actions">
+        <button type="button" id="matchEndRematch" class="match-end-btn-primary hidden">Play again</button>
         <button type="button" id="matchEndStay" class="match-end-btn-secondary hidden">Stay in room</button>
         <button type="button" id="matchEndToLobby" class="match-end-btn-primary">Back to lobby</button>
       </div>
@@ -151,7 +153,23 @@
     <pre id="snapshot"></pre>
     <h3 id="eventsTitle">Events</h3>
     <pre id="events"></pre>
+    <details class="card-preview-panel" id="cardPreviewPanel">
+      <summary>Card templates (preview)</summary>
+      <p class="lobby-hint" style="margin-top: 8px">Same artwork per type; only text overlays change. Use <code>createPowerCard()</code> in <code>card.js</code>.</p>
+      <div id="cardPreviewRow" class="card-preview-row"></div>
+    </details>
   </div>
+
+  <footer class="main-footer" id="mainFooter" aria-label="Card catalog preview">
+    <p class="main-footer__label" id="cardMarqueeLabel">All cards — layout preview</p>
+    <div class="card-marquee">
+      <div class="card-marquee__track" id="cardMarqueeTrack"></div>
+    </div>
+  </footer>
+
+  <script src="/cards-catalog.js"></script>
+  <script src="/card.js"></script>
+  <script src="/card-marquee.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

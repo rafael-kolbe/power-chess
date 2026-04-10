@@ -51,7 +51,7 @@ Gain 4 mana.
 ## Cooldown: 2
 ## Example:
 ```
-1. You have currently 2 mana.
+1. You currently have 2 mana.
 2. You activate "Energy Gain".
 3. Ignition succeeds the next turn.
 4. You gain 4 mana.
@@ -78,7 +78,7 @@ Swap positions of one piece you control with one piece your opponent controls up
 # Mind Control
 ## Type: Power
 ## Description
-Target a piece your opponent controls, except the king or a queen, take control of it for three turns. If the piece is captured, move it to your opponent's graveyard.
+Target a piece your opponent controls, except the king or a queen, and take control of it for three turns. If the piece is captured, move it to your opponent's graveyard.
 ## Cost: 7
 ## Ignition: 2
 ## Cooldown: 10
@@ -168,7 +168,7 @@ Target a card on your opponent's cooldown slot, burn x mana from your opponent, 
 ## Cooldown: 9
 ## Example:
 ```
-1. Opponent has a "Knight Touch" on their cooldown slots.
+1. Opponent has a "Knight Touch" on their cooldown slot.
 2. Opponent activates any "Power" card.
 3. You activate "Retaliate" as retribution.
 4. You target the opponent's "Knight Touch", burning 3 mana from your opponent successfully.
@@ -210,7 +210,7 @@ If a piece you control would be captured by the activation of a "Counter" card t
 # Backstab
 ## Type: Power
 ## Description
-Target a pawn you control and is currently facing an opponent's piece with an empty square behind it, jump over the piece and capture it, and if you do, gain 3 mana.
+Target a pawn you control that is currently facing an opponent's piece with an empty square behind it, jump over the piece and capture it, and if you do, gain 3 mana.
 ## Cost: 1
 ## Ignition: 1
 ## Cooldown: 7
@@ -313,7 +313,7 @@ Target a card on your opponent's ignition slot and negate its effect.
 # Save It For Later
 ## Type: Retribution
 ## Description
-This card can only be activated if you have a card in your ignition slot. Target that card and move it back to your hand gaining the mana cost of the card as mana.
+This card can only be activated if you have a card in your ignition slot. Target that card and move it back to your hand, gaining the mana cost of the card as mana.
 ## Cost: 0
 ## Ignition: 0
 ## Cooldown: 10

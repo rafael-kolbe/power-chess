@@ -16,6 +16,7 @@
   let lobbyRooms = [];
   let revealRoomPassword = false;
   let matchCountdownTimer = null;
+  let pendingJoinAttempt = null;
   /** @type {string} Room name shown in the private-join modal (for i18n refresh). */
   let privateJoinPendingRoomName = "";
 
@@ -61,6 +62,7 @@
   const matchEndOverlayEl = document.getElementById("matchEndOverlay");
   const matchEndBodyEl = document.getElementById("matchEndBody");
   const matchEndCountdownEl = document.getElementById("matchEndCountdown");
+  const matchEndRematchEl = document.getElementById("matchEndRematch");
   const matchEndStayEl = document.getElementById("matchEndStay");
   const matchEndToLobbyEl = document.getElementById("matchEndToLobby");
   const copyRoomIdBtnEl = document.getElementById("copyRoomIdBtn");
@@ -73,6 +75,8 @@
   const privateJoinCancelEl = document.getElementById("privateJoinCancel");
   const privateJoinSubmitEl = document.getElementById("privateJoinSubmit");
   const privateJoinErrorEl = document.getElementById("privateJoinError");
+  const cardMarqueeLabelEl = document.getElementById("cardMarqueeLabel");
+  const mainFooterEl = document.getElementById("mainFooter");
 
   const i18n = {
     "en-US": {
@@ -95,6 +99,7 @@
       waiting: "Waiting for opponent...",
       matchFinished: "Match finished",
       backLobby: "Back to lobby",
+      playAgain: "Play again",
       stayInRoom: "Stay in room",
       leaveRoom: "Leave room",
       copyRoomId: "Copy ID",
@@ -153,8 +158,12 @@
       reasonStalemateShort: "Reason: stalemate.",
       disconnectWinAlert: "Victory: opponent disconnected and did not return in time."
       ,
+      rematchProposed: "New game proposed, click on 'Play again' to accept.",
+      rematchWaiting: "Waiting for opponent to accept the new game.",
+      rematchOpponentLeft: "The other player left the room.",
       autoCloseIn: "Room closes in {s}s if no action is taken.",
-      autoCloseNow: "Room will close now if no action is taken."
+      autoCloseNow: "Room will close now if no action is taken.",
+      cardMarqueeTitle: "All cards — layout preview"
     },
     "pt-BR": {
       title: "POWER CHESS (Alpha)",
@@ -176,6 +185,7 @@
       waiting: "Aguardando adversário...",
       matchFinished: "Partida encerrada",
       backLobby: "Voltar ao lobby",
+      playAgain: "Jogar novamente",
       stayInRoom: "Ficar na sala",
       leaveRoom: "Sair da sala",
       copyRoomId: "Copiar ID",
@@ -234,8 +244,12 @@
       reasonStalemateShort: "Motivo: Afogamento (stalemate).",
       disconnectWinAlert: "Vitória: o adversário saiu da sala (tempo de reconexão expirou)."
       ,
+      rematchProposed: "Novo jogo proposto, clique em 'Jogar novamente' para aceitar.",
+      rematchWaiting: "Aguardando o adversário aceitar o novo jogo.",
+      rematchOpponentLeft: "O outro jogador saiu da sala.",
       autoCloseIn: "A sala fecha em {s}s se ninguém fizer nada.",
-      autoCloseNow: "A sala será fechada agora se ninguém fizer nada."
+      autoCloseNow: "A sala será fechada agora se ninguém fizer nada.",
+      cardMarqueeTitle: "Todas as cartas — prévia do layout"
     }
   };
   let locale = "en-US";
@@ -265,6 +279,7 @@
     roomListEmptyEl.textContent = t("noRooms");
     waitingBannerEl.textContent = t("waiting");
     document.getElementById("matchEndTitle").textContent = t("matchFinished");
+    matchEndRematchEl.textContent = t("playAgain");
     matchEndStayEl.textContent = t("stayInRoom");
     matchEndToLobbyEl.textContent = t("backLobby");
     document.getElementById("disconnectBtn").textContent = t("leaveRoom");
@@ -307,6 +322,9 @@
     refreshPrivateJoinModalTexts();
     if (!lobbyPrivatePasswordErrorEl.classList.contains("hidden")) {
       lobbyPrivatePasswordErrorEl.textContent = t("privateNeedsPassword");
+    }
+    if (cardMarqueeLabelEl) {
+      cardMarqueeLabelEl.textContent = t("cardMarqueeTitle");
     }
   }
 
@@ -449,6 +467,16 @@
     }
   }
 
+  /**
+   * Shows or hides the card marquee footer (lobby-only).
+   * @param {boolean} visible
+   */
+  function setLobbyFooterVisible(visible) {
+    if (!mainFooterEl) return;
+    mainFooterEl.classList.toggle("hidden", !visible);
+    document.body.classList.toggle("has-card-footer", visible);
+  }
+
   function setLocale(nextLocale) {
     locale = i18n[nextLocale] ? nextLocale : "en-US";
     localeSelectEl.value = locale;
@@ -458,6 +486,7 @@
       /* ignore storage failures */
     }
     applyTranslations();
+    document.dispatchEvent(new CustomEvent("powerchess:locale", { detail: { locale } }));
   }
 
   function hideLobbyPrivatePasswordError() {
@@ -494,6 +523,20 @@
     return chooseRandomPlayer();
   }
 
+  function oppositePieceType(pieceType) {
+    if (pieceType === "white") return "black";
+    if (pieceType === "black") return "white";
+    return "random";
+  }
+
+  function isJoinOccupiedSideError(msg) {
+    if (!msg || msg.type !== "error") return false;
+    const errCode = String(msg.payload?.code || "");
+    const errMessage = String(msg.payload?.message || "").toLowerCase();
+    if (errCode !== "action_failed") return false;
+    return errMessage.includes("already occupied");
+  }
+
   function connectToRoom(roomId, pieceTypeOverride, roomNameOverride, privateOverride, passwordOverride) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.close();
@@ -519,6 +562,14 @@
       return;
     }
     playerEl.value = desiredPlayerForPieceType(pieceType);
+    pendingJoinAttempt = {
+      roomId: roomId || "",
+      roomName,
+      isPrivate,
+      password,
+      pieceType,
+      attemptedFallback: false
+    };
     syncPlayerRoleLabels();
     ws = new WebSocket(`ws://${location.host}/ws`);
     ws.onopen = () => {
@@ -542,12 +593,14 @@
       const msg = JSON.parse(ev.data);
       logEvent(msg);
       if (msg.type === "state_snapshot") {
+        pendingJoinAttempt = null;
         lastSnapshot = msg.payload;
         selectedFrom = null;
         highlightedMoves = [];
 
         if (!joinedRoom) {
           joinedRoom = true;
+          setLobbyFooterVisible(false);
           lobbyScreenEl.classList.add("hidden");
           gameShellEl.classList.remove("hidden");
           playerEl.disabled = true;
@@ -576,6 +629,21 @@
         renderPlayerHud(msg.payload);
         handleAutoSkipReaction(msg.payload);
         renderTurnClocks();
+        return;
+      }
+      if (isJoinOccupiedSideError(msg) && !joinedRoom && pendingJoinAttempt && !pendingJoinAttempt.attemptedFallback) {
+        pendingJoinAttempt.attemptedFallback = true;
+        pendingJoinAttempt.pieceType = oppositePieceType(pendingJoinAttempt.pieceType);
+        playerEl.value = desiredPlayerForPieceType(pendingJoinAttempt.pieceType);
+        syncPlayerRoleLabels();
+        send("join_match", {
+          roomId: pendingJoinAttempt.roomId,
+          roomName: pendingJoinAttempt.roomName,
+          pieceType: pendingJoinAttempt.pieceType,
+          playerId: playerEl.value,
+          isPrivate: pendingJoinAttempt.isPrivate,
+          password: pendingJoinAttempt.password
+        });
       }
     };
   }
@@ -1099,6 +1167,8 @@
   function hideMatchEndOverlay() {
     matchEndOverlayEl.classList.add("hidden");
     matchEndOverlayEl.setAttribute("aria-hidden", "true");
+    matchEndRematchEl.classList.add("hidden");
+    matchEndRematchEl.disabled = false;
     matchEndStayEl.classList.add("hidden");
     matchEndCountdownEl.classList.add("hidden");
     matchEndCountdownEl.textContent = "";
@@ -1147,6 +1217,31 @@
     return `${headline}\n\n${reasonLine}`.trim();
   }
 
+  function localRematchVote(payload) {
+    return playerEl.value === "A" ? !!payload.rematchA : !!payload.rematchB;
+  }
+
+  function opponentRematchVote(payload) {
+    return playerEl.value === "A" ? !!payload.rematchB : !!payload.rematchA;
+  }
+
+  function buildPostMatchModalMessage(payload) {
+    const base = buildMatchEndMessage(payload);
+    const connected = (payload.connectedA || 0) + (payload.connectedB || 0);
+    const localVotedRematch = localRematchVote(payload);
+    const opponentVotedRematch = opponentRematchVote(payload);
+    if (connected === 1 && localVotedRematch) {
+      return `${base}\n\n${t("rematchOpponentLeft")}`;
+    }
+    if (connected === 2 && opponentVotedRematch && !localVotedRematch) {
+      return `${base}\n\n${t("rematchProposed")}`;
+    }
+    if (connected === 2 && localVotedRematch && !opponentVotedRematch) {
+      return `${base}\n\n${t("rematchWaiting")}`;
+    }
+    return base;
+  }
+
   function maybeShowMatchEndModal(payload) {
     if (!payload.matchEnded) {
       prevMatchEnded = false;
@@ -1159,13 +1254,19 @@
       if (payload.endReason === "disconnect_timeout" && payload.winner === you) {
         globalThis.alert(t("disconnectWinAlert"));
       }
-      showMatchEndOverlay(t("matchFinished"), buildMatchEndMessage(payload));
+      showMatchEndOverlay(t("matchFinished"), buildPostMatchModalMessage(payload));
+    } else if (!matchEndOverlayEl.classList.contains("hidden")) {
+      matchEndBodyEl.textContent = buildPostMatchModalMessage(payload);
     }
     prevMatchEnded = true;
   }
 
   function updatePostMatchActionControls(payload) {
     const connected = (payload.connectedA || 0) + (payload.connectedB || 0);
+    const ended = payload.matchEnded === true;
+    const localVotedRematch = localRematchVote(payload);
+    matchEndRematchEl.classList.toggle("hidden", !ended || connected !== 2);
+    matchEndRematchEl.disabled = !ended || connected !== 2 || localVotedRematch;
     matchEndStayEl.classList.toggle("hidden", connected !== 1);
     startPostMatchCountdown(payload);
   }
@@ -1250,6 +1351,7 @@
     joinedRoom = false;
     gameStarted = false;
     lastSnapshot = null;
+    setLobbyFooterVisible(true);
     lobbyScreenEl.classList.remove("hidden");
     gameShellEl.classList.add("hidden");
     playerEl.disabled = false;
@@ -1297,7 +1399,6 @@
           privateRoomEl.checked = false;
           updatePrivatePasswordVisibility();
           const pieceType = pieceTypeForRoomJoin(rm);
-          pieceTypeEl.value = pieceType;
           let joinPassword = "";
           if (rm.roomPrivate) {
             const typed = await showPrivateJoinModal(rm.roomName || "Let's Play!");
@@ -1370,6 +1471,10 @@
   matchEndStayEl.addEventListener("click", () => {
     send("stay_in_room", {});
     hideMatchEndOverlay();
+  });
+  matchEndRematchEl.addEventListener("click", () => {
+    send("request_rematch", {});
+    matchEndRematchEl.disabled = true;
   });
   matchEndToLobbyEl.addEventListener("click", () => returnToLobbyAfterMatch());
   matchEndOverlayEl.addEventListener("click", (ev) => {

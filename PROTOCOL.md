@@ -295,7 +295,7 @@ Used by a single remaining player after match end to reset room into waiting sta
 
 ### `request_rematch`
 
-Used after match end while both players remain connected. Match resets when both sides vote.
+Used after match end while both players remain connected. Match resets when both sides vote and players automatically swap sides (`A <-> B`), so colors are inverted in the next game.
 
 ```json
 {

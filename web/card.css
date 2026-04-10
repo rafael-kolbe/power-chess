@@ -1,0 +1,332 @@
+/* =============================================================================
+   Power card templates — shared art 639×965, text as overlay (no per-card PNGs)
+   Fonts: Cinzel (title), EB Garamond (body) — loaded in index.html
+   ============================================================================= */
+
+:root {
+  /* Text on parchment */
+  --card-color-title: #1e1610;
+  --card-color-body: #2e2318;
+  --card-color-example: #4a3a2c;
+  /* Slot numerals: high contrast + stroke for readability on glowing orbs */
+  --card-color-mana-num: #f5fbff;
+  --card-color-ignition-num: #fff8f0;
+  --card-color-cooldown-num: #f3ecff;
+  --card-num-shadow: 0 0 3px rgba(0, 0, 0, 0.95), 0 1px 2px rgba(0, 0, 0, 0.85);
+  --card-font-title: "Cinzel", "Times New Roman", serif;
+  --card-font-body: "EB Garamond", Georgia, serif;
+  --card-font-slots: "Cinzel", "Oxanium", system-ui, sans-serif;
+}
+
+/* -----------------------------------------------------------------------------
+   Shell: fixed aspect ratio matches source PNGs (639 × 965)
+   ----------------------------------------------------------------------------- */
+
+.power-card {
+  --card-width: 220px;
+  position: relative;
+  width: var(--card-width);
+  max-width: 100%;
+  aspect-ratio: 639 / 965;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  color: var(--card-color-body);
+  font-family: var(--card-font-body);
+  line-height: 1.25;
+  -webkit-font-smoothing: antialiased;
+}
+
+.power-card--continuous {
+  background-image: url("/public/cards/continuousCard.png");
+}
+
+.power-card--counter {
+  background-image: url("/public/cards/counterCard.png");
+}
+
+.power-card--power {
+  background-image: url("/public/cards/powerCard.png");
+}
+
+.power-card--retribution {
+  background-image: url("/public/cards/retributionCard.png");
+}
+
+/* Title — top parchment strip (approx. 5–13% from top) */
+.power-card__title {
+  position: absolute;
+  left: 7%;
+  top: 4.8%;
+  width: 64%;
+  height: 8.5%;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3%;
+  text-align: center;
+  font-family: var(--card-font-title);
+  font-weight: 700;
+  font-size: calc(var(--card-width) * 0.052);
+  letter-spacing: 0.04em;
+  color: var(--card-color-title);
+  line-height: 1.1;
+  overflow: hidden;
+}
+
+/* Mana — center over blue orb (top-right) */
+.power-card__mana {
+  position: absolute;
+  left: 86.5%;
+  top: 9.2%;
+  transform: translate(-50%, -50%);
+  min-width: 14%;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--card-font-slots);
+  font-weight: 700;
+  font-size: calc(var(--card-width) * 0.095);
+  line-height: 1;
+  color: var(--card-color-mana-num);
+  text-shadow: var(--card-num-shadow);
+  pointer-events: none;
+}
+
+/* Central parchment: description + optional example footer */
+.power-card__body {
+  position: absolute;
+  left: 9.5%;
+  top: 16.2%;
+  width: 81%;
+  bottom: 17%;
+  display: flex;
+  flex-direction: column;
+  padding: 3% 3.5% 2%;
+  box-sizing: border-box;
+}
+
+.power-card__desc {
+  margin: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  font-size: calc(var(--card-width) * 0.038);
+  font-weight: 500;
+  color: var(--card-color-body);
+  hyphens: auto;
+  white-space: pre-line;
+}
+
+/* Corner hint: hover / focus shows full example (also use title for native tooltip) */
+.power-card__info {
+  position: absolute;
+  top: 1%;
+  right: 2%;
+  width: calc(var(--card-width) * 0.11);
+  height: calc(var(--card-width) * 0.11);
+  min-width: 18px;
+  min-height: 18px;
+  border: 1px solid rgba(40, 30, 20, 0.35);
+  border-radius: 50%;
+  background: rgba(255, 250, 235, 0.65);
+  color: var(--card-color-title);
+  font-family: var(--card-font-title);
+  font-size: calc(var(--card-width) * 0.045);
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.power-card__info:focus-visible {
+  outline: 2px solid #c9a227;
+  outline-offset: 2px;
+}
+
+.power-card__footer {
+  flex: 0 0 auto;
+  margin-top: 2%;
+  padding-top: 2%;
+  border-top: 1px solid rgba(60, 48, 36, 0.2);
+  position: relative;
+}
+
+.power-card__example {
+  margin: 0;
+  font-size: calc(var(--card-width) * 0.032);
+  font-style: italic;
+  color: var(--card-color-example);
+  line-height: 1.2;
+  white-space: pre-line;
+}
+
+/* Optional: hide example until hover on info or footer (add class on article) */
+.power-card--example-hover .power-card__example {
+  opacity: 0;
+  max-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: none;
+}
+
+.power-card--example-hover:has(.power-card__info:hover) .power-card__example,
+.power-card--example-hover:has(.power-card__info:focus-visible) .power-card__example,
+.power-card--example-hover:has(.power-card__footer:hover) .power-card__example {
+  opacity: 1;
+  max-height: 120px;
+  margin-top: 4px;
+}
+
+/* Ignition — over orange slot (bottom-left) */
+.power-card__ignition {
+  position: absolute;
+  left: 12%;
+  top: 90%;
+  transform: translate(-50%, -50%);
+  min-width: 14%;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--card-font-slots);
+  font-weight: 700;
+  font-size: calc(var(--card-width) * 0.095);
+  color: var(--card-color-ignition-num);
+  text-shadow: var(--card-num-shadow);
+  pointer-events: none;
+}
+
+/* Cooldown — over purple hourglass (bottom-right) */
+.power-card__cooldown {
+  position: absolute;
+  left: 88%;
+  top: 90%;
+  transform: translate(-50%, -50%);
+  min-width: 14%;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--card-font-slots);
+  font-weight: 700;
+  font-size: calc(var(--card-width) * 0.085);
+  color: var(--card-color-cooldown-num);
+  text-shadow: var(--card-num-shadow);
+  pointer-events: none;
+}
+
+/* Row of previews in dev HUD */
+.card-preview-panel {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-panel);
+}
+
+.card-preview-panel summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-text-label);
+  margin-bottom: 8px;
+}
+
+.card-preview-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.card-preview-row .power-card {
+  flex: 0 0 auto;
+}
+
+/* =============================================================================
+   Footer — full-width card marquee (all catalog cards, random order on load)
+   ============================================================================= */
+
+body.has-card-footer {
+  padding-bottom: min(240px, 32vh);
+}
+
+.main-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  padding: 10px 0 14px;
+  background: linear-gradient(180deg, transparent 0%, rgba(10, 10, 12, 0.92) 28%);
+  border-top: 1px solid var(--color-border);
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.35);
+}
+
+.main-footer__label {
+  margin: 0 0 8px;
+  padding: 0 16px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.card-marquee {
+  width: 100%;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent);
+}
+
+.card-marquee__track {
+  --marquee-duration: 80s;
+  display: flex;
+  width: max-content;
+  animation: card-marquee-slide var(--marquee-duration) linear infinite reverse;
+  will-change: transform;
+}
+
+.card-marquee__sequence {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  gap: 14px;
+  padding: 0 10px;
+}
+
+.card-marquee .power-card {
+  flex: 0 0 auto;
+}
+
+@keyframes card-marquee-slide {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-marquee__track {
+    animation: none;
+    justify-content: center;
+    flex-wrap: wrap;
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .card-marquee__track > .card-marquee__sequence:last-of-type {
+    display: none;
+  }
+}
