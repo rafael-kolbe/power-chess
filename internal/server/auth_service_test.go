@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -16,6 +17,20 @@ func TestRegisterUserSetsRoleUser(t *testing.T) {
 	}
 	if u.ID == 0 {
 		t.Fatal("expected non-zero ID")
+	}
+}
+
+func TestRegisterUserDuplicateEmail(t *testing.T) {
+	_, auth := openAuthTestDB(t)
+	if _, err := auth.RegisterUser("first_user", "same@example.com", "password1"); err != nil {
+		t.Fatalf("first register: %v", err)
+	}
+	_, err := auth.RegisterUser("other_user", "same@example.com", "password2")
+	if err == nil {
+		t.Fatal("expected error for duplicate email")
+	}
+	if !errors.Is(err, ErrEmailAlreadyRegistered) {
+		t.Fatalf("want ErrEmailAlreadyRegistered, got %v", err)
 	}
 }
 

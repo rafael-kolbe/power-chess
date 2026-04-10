@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 )
@@ -83,7 +84,7 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := s.auth.RegisterUser(body.Username, body.Email, body.Password)
 	if err != nil {
-		if IsDuplicateUserError(err) {
+		if errors.Is(err, ErrEmailAlreadyRegistered) || IsDuplicateUserError(err) {
 			writeAuthError(w, http.StatusConflict, "username_or_email_taken")
 			return
 		}
@@ -98,7 +99,7 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, authTokenResponse{
 		Token: token,
 		User: authUserResponse{
-			ID: user.ID,
+			ID:       user.ID,
 			Username: user.Username,
 			Email:    user.Email,
 			Role:     user.Role,

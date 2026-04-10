@@ -22,6 +22,9 @@ var (
 	emailPattern    = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 )
 
+// ErrEmailAlreadyRegistered is returned by RegisterUser when the normalized email is already in use.
+var ErrEmailAlreadyRegistered = errors.New("email already registered")
+
 // userModel is the persisted account row (GORM).
 type userModel struct {
 	ID           uint64 `gorm:"primaryKey;autoIncrement"`
@@ -74,6 +77,13 @@ func (s *AuthService) RegisterUser(username, email, password string) (*userModel
 	if err != nil {
 		return nil, err
 	}
+	var clash userModel
+	if err := s.db.Where("email = ?", e).Take(&clash).Error; err == nil {
+		return nil, ErrEmailAlreadyRegistered
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
 	user := userModel{
 		Username:     u,
 		Email:        e,
