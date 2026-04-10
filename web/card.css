@@ -24,6 +24,10 @@
 
 .power-card {
   --card-width: 220px;
+  /* Example/Description button label (Cinzel); parchment effect text uses --card-effect-font-max. */
+  --card-toggle-font-size: min(12px, calc(var(--card-width) * 0.052));
+  /* Parchment description/example may render up to +2pt larger than the button label. */
+  --card-effect-font-max: calc(var(--card-toggle-font-size) + 2pt);
   position: relative;
   width: var(--card-width);
   max-width: 100%;
@@ -59,30 +63,48 @@
 .power-card__title {
   position: absolute;
   left: 7%;
-  top: 4.8%;
+  top: 5%;
   width: 64%;
   height: 8.5%;
   margin: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 3%;
+  padding: 0 2.5% 0 5.5%;
   text-align: center;
   font-family: var(--card-font-title);
   font-weight: 700;
   font-size: calc(var(--card-width) * 0.052);
   letter-spacing: 0.04em;
   color: var(--card-color-title);
-  line-height: 1.1;
+  line-height: 1;
   overflow: hidden;
 }
 
-/* Mana — center over blue orb (top-right) */
+/* Clip box: hides overflow; inner scales down without clipping mid-glyph */
+.power-card__title-clip {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* Long names: JS applies scaleX (horizontal “squish”, no wrap) */
+.power-card__title-inner {
+  display: inline-block;
+  white-space: nowrap;
+  transform-origin: 50% 50%;
+  vertical-align: middle;
+}
+
+/* Mana — center over blue orb (top-right); slight translateY to optically center numeral */
 .power-card__mana {
   position: absolute;
   left: 86.5%;
-  top: 9.2%;
-  transform: translate(-50%, -50%);
+  top: 9.35%;
+  transform: translate(calc(-50% - 1px), calc(-50% + 0.12em));
   min-width: 14%;
   aspect-ratio: 1;
   display: flex;
@@ -95,102 +117,225 @@
   color: var(--card-color-mana-num);
   text-shadow: var(--card-num-shadow);
   pointer-events: none;
+  z-index: 2;
 }
 
-/* Central parchment: description + optional example footer */
+/* Central parchment: text stack fills space; optional Example toggle pinned to bottom */
 .power-card__body {
   position: absolute;
   left: 9.5%;
   top: 16.2%;
   width: 81%;
-  bottom: 17%;
+  /*
+   * Extend below old 14.5% inset so the flex text area regains height taken by body gap + footer
+   * padding (~30px). Clamp so the box does not run into the printed orbs on narrow layouts.
+   */
+  bottom: max(6.2%, calc(14.5% - 30px));
   display: flex;
   flex-direction: column;
-  padding: 3% 3.5% 2%;
+  padding: 2.5% 3.5% 0.12em;
+  box-sizing: border-box;
+  overflow: hidden;
+  gap: 8px;
+}
+
+.power-card__text-stack {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-top: 0.3em;
+  padding-bottom: 0.1em;
   box-sizing: border-box;
 }
 
-.power-card__desc {
+.power-card__desc,
+.power-card__example {
   margin: 0;
   flex: 1 1 auto;
-  overflow: auto;
-  font-size: calc(var(--card-width) * 0.038);
+  min-height: 0;
+  overflow: hidden;
+  font-size: min(var(--card-effect-font-max), calc(var(--card-width) * 0.04 + 1.05pt + 2pt));
   font-weight: 500;
-  color: var(--card-color-body);
-  hyphens: auto;
+  line-height: 1.24;
+  /* start: avoids justify “rivers” in a narrow parchment column */
+  text-align: start;
+  text-wrap: pretty;
+  hyphens: none;
+  -webkit-hyphens: none;
+  overflow-wrap: break-word;
+  word-break: normal;
   white-space: pre-line;
+  list-style: none;
 }
 
-/* Corner hint: hover / focus shows full example (also use title for native tooltip) */
-.power-card__info {
+/* Portuguese copy is often longer: slightly smaller base so it matches EN fit */
+.power-card--locale-pt .power-card__desc,
+.power-card--locale-pt .power-card__example {
+  font-size: min(var(--card-effect-font-max), calc(var(--card-width) * 0.0375 + 0.95pt + 2pt));
+}
+
+.power-card__desc {
+  color: var(--card-color-body);
+}
+
+.power-card__example {
+  color: var(--card-color-example);
+}
+
+/* Long numbered examples: slightly tighter leading to reclaim vertical space */
+.power-card--show-example .power-card__example {
+  line-height: 1.18;
+}
+
+/* First step when text overflows the pane */
+.power-card--shrink-text .power-card__desc,
+.power-card--shrink-text .power-card__example {
+  font-size: min(var(--card-effect-font-max), calc(var(--card-width) * 0.0345 + 0.85pt + 2pt));
+}
+
+.power-card--locale-pt.power-card--shrink-text .power-card__desc,
+.power-card--locale-pt.power-card--shrink-text .power-card__example {
+  font-size: min(var(--card-effect-font-max), calc(var(--card-width) * 0.0325 + 0.78pt + 2pt));
+}
+
+/* Still overflowing after first shrink */
+.power-card--shrink-tight .power-card__desc,
+.power-card--shrink-tight .power-card__example {
+  font-size: min(var(--card-effect-font-max), calc(var(--card-width) * 0.03 + 0.68pt + 2pt));
+  line-height: 1.15;
+}
+
+.power-card--locale-pt.power-card--shrink-tight .power-card__desc,
+.power-card--locale-pt.power-card--shrink-tight .power-card__example {
+  font-size: min(var(--card-effect-font-max), calc(var(--card-width) * 0.0285 + 0.62pt + 2pt));
+}
+
+/* Third tier when example/description still overflows (e.g. Retaliate-style lists) */
+.power-card--shrink-min .power-card__desc,
+.power-card--shrink-min .power-card__example {
+  font-size: min(var(--card-effect-font-max), calc(var(--card-width) * 0.0265 + 0.48pt + 2pt));
+  line-height: 1.12;
+}
+
+.power-card--locale-pt.power-card--shrink-min .power-card__desc,
+.power-card--locale-pt.power-card--shrink-min .power-card__example {
+  font-size: min(var(--card-effect-font-max), calc(var(--card-width) * 0.0245 + 0.42pt + 2pt));
+}
+
+/*
+ * Ornamental rule: parchment-style fillet (not a flat UI border). Padding below keeps the button
+ * fixed while .power-card__text-stack stays taller.
+ */
+.power-card__footer {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  border-top: none;
+  padding: 10px 0 0.42em;
+}
+
+/* Manuscript-style divider: fine hairline + soft feather (keeps parchment legibility) */
+.power-card__footer::before {
+  content: "";
   position: absolute;
-  top: 1%;
-  right: 2%;
-  width: calc(var(--card-width) * 0.11);
-  height: calc(var(--card-width) * 0.11);
-  min-width: 18px;
-  min-height: 18px;
-  border: 1px solid rgba(40, 30, 20, 0.35);
-  border-radius: 50%;
-  background: rgba(255, 250, 235, 0.65);
-  color: var(--card-color-title);
-  font-family: var(--card-font-title);
-  font-size: calc(var(--card-width) * 0.045);
-  font-weight: 700;
-  line-height: 1;
-  cursor: help;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  pointer-events: none;
+  border-radius: 1px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 248, 232, 0.55) 0%,
+    rgba(255, 248, 232, 0.2) 35%,
+    rgba(72, 58, 44, 0.55) 50%,
+    rgba(72, 58, 44, 0.42) 52%,
+    rgba(140, 118, 92, 0.18) 100%
+  );
+  box-shadow: 0 1px 0 rgba(255, 252, 245, 0.28);
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 4%, #000 96%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, #000 4%, #000 96%, transparent 100%);
+}
+
+/* Card type on the printed footer strip (green / per-frame color), bottom of the card art */
+.power-card__type-stamp {
+  position: absolute;
+  left: 14%;
+  right: 14%;
+  top: auto;
+  bottom: 2.2%;
+  height: auto;
+  min-height: 0;
+  max-height: 6.5%;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2;
+  margin: 0;
+  padding: 0.12em 2% 0.18em;
+  box-sizing: border-box;
+  font-family: var(--card-font-title);
+  font-weight: 700;
+  font-size: min(10px, calc(var(--card-width) * 0.046));
+  letter-spacing: 0.1em;
+  line-height: 1.05;
+  text-transform: uppercase;
+  text-align: center;
+  color: #ebcf73;
+  text-shadow:
+    0 0 1px rgba(20, 14, 6, 0.9),
+    0 1px 0 rgba(255, 252, 235, 0.42),
+    0 2px 5px rgba(0, 0, 0, 0.82),
+    0 0 14px rgba(212, 175, 55, 0.28);
+  pointer-events: none;
+  z-index: 1;
 }
 
-.power-card__info:focus-visible {
+.power-card__toggle {
+  appearance: none;
+  margin: 0;
+  padding: 0.16em 0.72em 0.18em;
+  font-family: var(--card-font-title);
+  font-size: var(--card-toggle-font-size);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--card-color-title);
+  background: rgba(255, 255, 255, 0.36);
+  border: 1px solid rgba(50, 40, 32, 0.35);
+  border-radius: 2px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  line-height: 1.05;
+  backdrop-filter: blur(3px);
+}
+
+.power-card__footer .power-card__toggle:hover {
+  background: rgba(255, 255, 255, 0.52);
+  border-color: rgba(50, 40, 32, 0.45);
+}
+
+.power-card__footer .power-card__toggle:active {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+.power-card__footer .power-card__toggle:focus-visible {
   outline: 2px solid #c9a227;
   outline-offset: 2px;
 }
 
-.power-card__footer {
-  flex: 0 0 auto;
-  margin-top: 2%;
-  padding-top: 2%;
-  border-top: 1px solid rgba(60, 48, 36, 0.2);
-  position: relative;
-}
-
-.power-card__example {
-  margin: 0;
-  font-size: calc(var(--card-width) * 0.032);
-  font-style: italic;
-  color: var(--card-color-example);
-  line-height: 1.2;
-  white-space: pre-line;
-}
-
-/* Optional: hide example until hover on info or footer (add class on article) */
-.power-card--example-hover .power-card__example {
-  opacity: 0;
-  max-height: 0;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-  border: none;
-}
-
-.power-card--example-hover:has(.power-card__info:hover) .power-card__example,
-.power-card--example-hover:has(.power-card__info:focus-visible) .power-card__example,
-.power-card--example-hover:has(.power-card__footer:hover) .power-card__example {
-  opacity: 1;
-  max-height: 120px;
-  margin-top: 4px;
-}
-
-/* Ignition — over orange slot (bottom-left) */
+/* Ignition — over orange slot (bottom-left); extra translateY vs mana for optical center */
 .power-card__ignition {
   position: absolute;
   left: 12%;
-  top: 90%;
-  transform: translate(-50%, -50%);
+  top: 90.15%;
+  transform: translate(-50%, calc(-50% + 0.22em + 2px));
   min-width: 14%;
   aspect-ratio: 1;
   display: flex;
@@ -199,17 +344,19 @@
   font-family: var(--card-font-slots);
   font-weight: 700;
   font-size: calc(var(--card-width) * 0.095);
+  line-height: 1;
   color: var(--card-color-ignition-num);
   text-shadow: var(--card-num-shadow);
   pointer-events: none;
+  z-index: 2;
 }
 
 /* Cooldown — over purple hourglass (bottom-right) */
 .power-card__cooldown {
   position: absolute;
   left: 88%;
-  top: 90%;
-  transform: translate(-50%, -50%);
+  top: 90.15%;
+  transform: translate(-50%, calc(-50% + 0.22em + 2px));
   min-width: 14%;
   aspect-ratio: 1;
   display: flex;
@@ -218,9 +365,11 @@
   font-family: var(--card-font-slots);
   font-weight: 700;
   font-size: calc(var(--card-width) * 0.085);
+  line-height: 1;
   color: var(--card-color-cooldown-num);
   text-shadow: var(--card-num-shadow);
   pointer-events: none;
+  z-index: 2;
 }
 
 /* Row of previews in dev HUD */

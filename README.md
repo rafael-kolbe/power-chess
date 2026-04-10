@@ -26,6 +26,14 @@ go test ./...
 go run ./cmd/server
 ```
 
+Se você alterar **texto em inglês, custo, ignição, recarga, tipo ou ordem** das cartas em `internal/gameplay/cards.go`, regenere o arquivo estático usado pelo marquee / preview (`web/card-metadata.gen.js`):
+
+```bash
+go run ./cmd/export-card-metadata
+```
+
+(Equivalente: `go generate ./internal/gameplay`.)
+
 - Health: `http://localhost:8080/healthz`  
 - Métricas: `http://localhost:8080/metrics`  
 - UI: `http://localhost:8080/`  

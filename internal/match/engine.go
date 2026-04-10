@@ -162,9 +162,19 @@ func (e *Engine) applyMoveWithBuffIfAny(board *chess.Game, pid gameplay.PlayerID
 		if !isRookLikeDelta(m.From, m.To) {
 			return fmt.Errorf("rook buff only allows rook-like movement from buffed piece")
 		}
+		if pc := board.PieceAt(m.From); pc.Type == chess.Pawn {
+			if !isSingleOrthogonalStep(m.From, m.To) {
+				return fmt.Errorf("rook touch on a pawn allows only one square")
+			}
+		}
 	case MoveBuffBishop:
 		if !isBishopLikeDelta(m.From, m.To) {
 			return fmt.Errorf("bishop buff only allows bishop-like movement from buffed piece")
+		}
+		if pc := board.PieceAt(m.From); pc.Type == chess.Pawn {
+			if !isSingleDiagonalStep(m.From, m.To) {
+				return fmt.Errorf("bishop touch on a pawn allows only one square")
+			}
 		}
 	default:
 		return board.ApplyMove(m)
@@ -366,4 +376,18 @@ func isBishopLikeDelta(from, to chess.Pos) bool {
 	dr := abs(from.Row - to.Row)
 	dc := abs(from.Col - to.Col)
 	return dr == dc
+}
+
+// isSingleOrthogonalStep reports a move of exactly one square along a rank or file.
+func isSingleOrthogonalStep(from, to chess.Pos) bool {
+	dr := abs(from.Row - to.Row)
+	dc := abs(from.Col - to.Col)
+	return dr+dc == 1
+}
+
+// isSingleDiagonalStep reports a move of exactly one square diagonally.
+func isSingleDiagonalStep(from, to chess.Pos) bool {
+	dr := abs(from.Row - to.Row)
+	dc := abs(from.Col - to.Col)
+	return dr == 1 && dc == 1
 }

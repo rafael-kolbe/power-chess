@@ -18,7 +18,7 @@ When this skill applies, treat **all** work in this area as **specialist respons
 - **Grammar and style** (EN + pt-BR): idiomatic, precise, no accidental tone drift.
 - **TCG semantics**: triggers, targets, timing words (**When** / **While** / **until**), and **parallel wording** across cards/skills so players infer rules the same way everywhere.
 - **Terminology lock**: one English term and one pt-BR equivalent per concept across cards, skills, menus, and examples (see [reference.md](reference.md)).
-- **Cross-surface consistency**: server strings, markdown, `cards-catalog.js`, `app.js` i18n, and any other visible copy stay aligned after edits.
+- **Cross-surface consistency**: server strings, markdown, `card-metadata.gen.js` (generated), `cards-catalog.js` (PT), `app.js` i18n, and any other visible copy stay aligned after edits.
 
 Do not defer to “generic editing”: **own** clarity of rules-as-text end to end.
 
@@ -34,10 +34,10 @@ Keep **effect text**, **menus**, and **examples** consistent, **TCG-literate**, 
 1. **`internal/gameplay/cards.go`** — `InitialCardCatalog()`: `Name`, `Description`, `Example` for cards.
 2. **`internal/gameplay/player_skills.go`** — `InitialPlayerSkills()`: `Name`, `Description`, `Example` for player skills.
 3. **`Cards.md`** / **`PlayerSkills.md`** — must mirror the Go English for those fields (project convention).
-4. **`web/cards-catalog.js`** — object **`EN`** must match Go **byte-for-byte** for card name/description/example; **`PT`** translates that meaning with fixed terminology.
+4. **`web/cards-catalog.js`** — only **`PT`** (Portuguese). English name/description/example come from **`web/card-metadata.gen.js`**, generated from Go (`go run ./cmd/export-card-metadata`).
 5. **`web/app.js`** — `i18n["en-US"]` and `i18n["pt-BR"]` for menus, banners, buttons, labels (not duplicated rules text from cards unless intentionally surfaced in UI).
 
-If English rules text changes in Go, update **all** downstream copies in the same change (docs + `cards-catalog.js` EN + PT where meaning shifts).
+If English rules text changes in Go, regenerate **`web/card-metadata.gen.js`**, update **markdown**, and adjust **`PT`** in `cards-catalog.js` when the meaning shifts.
 
 ## TCG copy norms (English) + semantics
 
@@ -52,13 +52,13 @@ See [reference.md](reference.md) for file paths and a **term alignment** checkli
 ## Workflow (agent checklist)
 
 1. **Inventory**
-   - Cards: `cards.go` ↔ `Cards.md` ↔ `web/cards-catalog.js` (EN + PT).
+   - Cards: `cards.go` ↔ `Cards.md` ↔ `web/card-metadata.gen.js` (EN, generated) ↔ `web/cards-catalog.js` (PT only).
    - Player skills: `player_skills.go` ↔ `PlayerSkills.md` ↔ any UI that shows skill text (search `PlayerSkill`, `player_skills`, skill IDs).
    - Site chrome: `web/app.js` `i18n` blocks; `web/index.html` visible copy; other `web/*.js` with user-facing strings.
 
 2. **English pass**
    - Fix grammar, **ambiguous phrasing**, and unclear TCG structure in **Go first** (authoritative).
-   - Mirror edits into **markdown** and **`cards-catalog.js` EN** (identical strings for cards).
+   - Mirror English edits into **markdown**. After any `cards.go` catalog change (text, costs, type, order), run **`go run ./cmd/export-card-metadata`** and commit **`web/card-metadata.gen.js`**.
    - For menus-only strings, edit **`app.js` en-US** (and mirror pt-BR).
 
 3. **Portuguese pass**

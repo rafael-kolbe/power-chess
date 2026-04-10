@@ -110,6 +110,62 @@ func TestRookTouchBuffAllowsRookMovementPattern(t *testing.T) {
 	}
 }
 
+func TestRookTouchOnPawnAllowsOnlyOneSquare(t *testing.T) {
+	card := gameplay.CardInstance{InstanceID: "r2", CardID: CardRookTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
+	state, _ := gameplay.NewMatchState(testDeckWith(card), testDeckWith(card))
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{card}
+	state.Players[gameplay.PlayerA].Mana = 10
+
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
+
+	e := NewEngine(state, board)
+	_ = e.StartTurn(gameplay.PlayerA)
+	_ = e.ActivateCard(gameplay.PlayerA, 0)
+	_ = state.ResolveIgnition(true)
+	_ = e.StartTurn(gameplay.PlayerA)
+	target := chess.Pos{Row: 6, Col: 4}
+	if err := e.ResolvePendingEffect(gameplay.PlayerA, EffectTarget{PiecePos: &target}); err != nil {
+		t.Fatalf("resolve pending effect: %v", err)
+	}
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 4}, To: chess.Pos{4, 4}}); err == nil {
+		t.Fatalf("rook-touch on pawn should reject multi-square rook move")
+	}
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 4}, To: chess.Pos{5, 4}}); err != nil {
+		t.Fatalf("rook-touch on pawn should allow one square: %v", err)
+	}
+}
+
+func TestBishopTouchOnPawnAllowsOnlyOneSquare(t *testing.T) {
+	card := gameplay.CardInstance{InstanceID: "b2", CardID: CardBishopTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
+	state, _ := gameplay.NewMatchState(testDeckWith(card), testDeckWith(card))
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{card}
+	state.Players[gameplay.PlayerA].Mana = 10
+
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
+
+	e := NewEngine(state, board)
+	_ = e.StartTurn(gameplay.PlayerA)
+	_ = e.ActivateCard(gameplay.PlayerA, 0)
+	_ = state.ResolveIgnition(true)
+	_ = e.StartTurn(gameplay.PlayerA)
+	target := chess.Pos{Row: 6, Col: 4}
+	if err := e.ResolvePendingEffect(gameplay.PlayerA, EffectTarget{PiecePos: &target}); err != nil {
+		t.Fatalf("resolve pending effect: %v", err)
+	}
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 4}, To: chess.Pos{4, 6}}); err == nil {
+		t.Fatalf("bishop-touch on pawn should reject multi-square diagonal")
+	}
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 4}, To: chess.Pos{5, 5}}); err != nil {
+		t.Fatalf("bishop-touch on pawn should allow one diagonal step: %v", err)
+	}
+}
+
 func TestSubmitMoveAdvancesTurnToOpponent(t *testing.T) {
 	state, _ := gameplay.NewMatchState(
 		testDeckWith(gameplay.CardInstance{InstanceID: "a", CardID: CardDoubleTurn, ManaCost: 1, Ignition: 1, Cooldown: 1}),

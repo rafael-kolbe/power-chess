@@ -46,26 +46,37 @@
     seq.setAttribute("aria-hidden", "true");
 
     const cardWidth = "168px";
-    for (const c of ordered) {
-      seq.appendChild(
-        create({
-          type: c.type,
-          name: c.name,
-          description: c.description,
-          example: c.example,
-          mana: c.mana,
-          ignition: c.ignition,
-          cooldown: c.cooldown,
-          cardWidth
-        })
-      );
+    function appendCards(target) {
+      for (const c of ordered) {
+        target.appendChild(
+          create({
+            type: c.type,
+            name: c.name,
+            description: c.description,
+            example: c.example,
+            mana: c.mana,
+            ignition: c.ignition,
+            cooldown: c.cooldown,
+            cardWidth
+          })
+        );
+      }
     }
 
-    const seqB = seq.cloneNode(true);
+    appendCards(seq);
+
+    const seqB = document.createElement("div");
+    seqB.className = "card-marquee__sequence";
     seqB.setAttribute("aria-hidden", "true");
+    appendCards(seqB);
 
     track.appendChild(seq);
     track.appendChild(seqB);
+
+    const finalize = globalThis.finalizePowerCardLayout;
+    if (typeof finalize === "function") {
+      track.querySelectorAll(".power-card").forEach((card) => finalize(card));
+    }
 
     const durationSec = Math.max(50, ordered.length * 3.2);
     track.style.setProperty("--marquee-duration", `${durationSec}s`);

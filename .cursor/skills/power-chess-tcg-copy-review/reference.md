@@ -8,7 +8,7 @@ Same mechanical effect → same phrasing pattern where possible. Different effec
 
 | Area | Canonical EN (server) | Docs | Web EN | Web pt-BR |
 |------|----------------------|------|--------|-----------|
-| Cards | `internal/gameplay/cards.go` | `Cards.md` | `web/cards-catalog.js` → `EN` | `web/cards-catalog.js` → `PT` |
+| Cards | `internal/gameplay/cards.go` | `Cards.md` | `web/card-metadata.gen.js` (generated EN + stats) | `web/cards-catalog.js` → `PT` only |
 | Player skills | `internal/gameplay/player_skills.go` | `PlayerSkills.md` | Mirror in docs; add UI module if skills get a catalog later | Same pattern as cards when exposed |
 | Menus / UI chrome | — | — | `web/app.js` → `i18n["en-US"]` | `web/app.js` → `i18n["pt-BR"]` |
 | Protocol strings | `PROTOCOL.md` | — | — | — |
@@ -41,7 +41,7 @@ Adjust only if `PROJECT.md` or existing copy establishes a different fixed term.
 
 ## Example sync check (cards)
 
-For each card ID in `CARD_ROWS` inside `web/cards-catalog.js`:
+For each card ID in `__POWER_CHESS_CARD_METADATA__` (`web/card-metadata.gen.js`, generated from Go) and text objects in `web/cards-catalog.js`:
 
 - `EN[id].description ===` Go `Description` and `EN[id].example ===` Go `Example` (after normalizing escapes in JS).
 

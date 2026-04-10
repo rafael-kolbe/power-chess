@@ -101,7 +101,7 @@ Target a piece you control, except the king, move it to an empty square in the s
 ```
 1. You control a bishop on b2.
 2. You activate "Zip Line".
-3. The bishop on b2 moves to b7.
+3. The bishop on b2 moves to g2.
 ```
 
 # Sacrifice of the Masses
@@ -134,7 +134,7 @@ Search your deck for a "Power" card that costs 3 mana or less, except "Archmage 
 # Rook Touch
 ## Type: Power
 ## Description
-Give any piece you control, except the king or a rook, the ability to move as if it were a rook for one turn.
+Give any piece you control, except the king or a rook, the ability to move as if it were a rook for one turn. If the target is a pawn, it may move only 1 square when using this movement.
 ## Cost: 3
 ## Ignition: 0
 ## Cooldown: 2
@@ -148,7 +148,7 @@ Give any piece you control, except the king or a rook, the ability to move as if
 # Bishop Touch
 ## Type: Power
 ## Description
-Give any piece you control, except the king or a bishop, the ability to move as if it were a bishop for one turn.
+Give any piece you control, except the king or a bishop, the ability to move as if it were a bishop for one turn. If the target is a pawn, it may move only 1 square when using this movement.
 ## Cost: 3
 ## Ignition: 0
 ## Cooldown: 2
@@ -185,10 +185,10 @@ If a piece you control would be captured by a piece buffed by a "Power" card thi
 ## Cooldown: 6
 ## Example:
 ```
-1. Opponent activates "Rook Touch" on his pawn on e4.
+1. Opponent activates "Rook Touch" on his knight on e4.
 2. Your opponent attempts to capture your queen on e6.
 3. You activate "Counterattack".
-4. The attacking pawn is captured instead.
+4. The attacking knight is captured instead.
 ```
 
 # Blockade
@@ -200,10 +200,10 @@ If a piece you control would be captured by the activation of a "Counter" card t
 ## Cooldown: 3
 ## Example:
 ```
-1. You move your pawn on e4 that was buffed by "Rook Touch" to e6 in an attempt to capture the opponent's queen.
-2. Opponent activates "Counterattack" on your pawn.
+1. You move your knight on e4 that was buffed by "Rook Touch" to e6 in an attempt to capture the opponent's queen.
+2. Opponent activates "Counterattack" on your knight.
 3. You activate "Blockade".
-4. The effect of "Counterattack" is negated and your pawn stays on e4.
+4. The effect of "Counterattack" is negated and your knight stays on e4.
 5. You choose another piece to move this turn.
 ```
 
@@ -283,7 +283,7 @@ While on the ignition slot, reveal your opponent's hand. When this card's igniti
 # Thunderstorm
 ## Type: Power
 ## Description
-Randomly choose 10 squares on the board, for each piece you control that is on one of the chosen squares, gain 2 mana, but they cannot move this turn, for each piece your opponent controls that is on one of the chosen squares, burn 2 mana from your opponent, and they cannot move their next turn.
+Randomly choose 10 squares on the board, for each piece you control that is on one of the chosen squares, gain 2 mana, but they cannot move this turn, for each piece your opponent controls that is on one of the chosen squares, burn 2 mana from your opponent, and they cannot move until the end of the next turn.
 ## Cost: 10
 ## Ignition: 1
 ## Cooldown: 10
@@ -293,7 +293,7 @@ Randomly choose 10 squares on the board, for each piece you control that is on o
 2. Ignition succeeds the next turn.
 3. You randomly choose 10 squares on the board.
 4. 3 pieces you control are hit, you gain 6 mana and they cannot move this turn.
-5. 4 pieces your opponent controls are hit, you burn 8 mana from your opponent and those pieces cannot move their next turn.
+5. 4 pieces your opponent controls are hit, you burn 8 mana from your opponent and those pieces cannot move until the end of the next turn.
 ```
 
 # Extinguish
