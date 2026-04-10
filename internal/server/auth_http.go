@@ -54,6 +54,14 @@ func bearerToken(r *http.Request) string {
 	return ""
 }
 
+// authTokenFromHTTP returns a JWT from Authorization: Bearer or the token query parameter (used by WebSocket clients).
+func authTokenFromHTTP(r *http.Request) string {
+	if t := bearerToken(r); t != "" {
+		return t
+	}
+	return strings.TrimSpace(r.URL.Query().Get("token"))
+}
+
 // handleAuthRegister creates a user with role "user" and returns a JWT.
 func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -144,10 +152,7 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "auth_unavailable")
 		return
 	}
-	raw := bearerToken(r)
-	if raw == "" {
-		raw = r.URL.Query().Get("token")
-	}
+	raw := authTokenFromHTTP(r)
 	claims, err := s.auth.ParseToken(raw)
 	if err != nil {
 		writeAuthError(w, http.StatusUnauthorized, "invalid_token")

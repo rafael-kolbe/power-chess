@@ -36,6 +36,8 @@ type Client struct {
 	server      *Server
 	room        *RoomSession
 	playerID    gameplay.PlayerID
+		// authUserID is set when the server runs with auth and the connection presented a valid JWT (same token as /api/auth/login).
+	authUserID  uint64
 	writeM      sync.Mutex
 	closeReason error
 }
@@ -124,15 +126,36 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 // handleWS upgrades HTTP connections and starts websocket read loop.
+// When the server is configured with auth (DATABASE_URL + JWT_SECRET), clients must pass the same JWT as for REST:
+// Authorization: Bearer <token> on the upgrade request, or ?token=<jwt> (browser-friendly).
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
+	var authUID uint64
+	if s.auth != nil {
+		raw := authTokenFromHTTP(r)
+		if raw == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		claims, err := s.auth.ParseToken(raw)
+		if err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if _, err := s.auth.UserByID(claims.UserID); err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		authUID = claims.UserID
+	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		http.Error(w, "upgrade failed", http.StatusBadRequest)
 		return
 	}
 	c := &Client{
-		conn:   conn,
-		server: s,
+		conn:       conn,
+		server:     s,
+		authUserID: authUID,
 	}
 	c.send(Envelope{Type: MessageHello})
 	c.readLoop()

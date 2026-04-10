@@ -12,7 +12,7 @@ import (
 
 // TestCleanupStaleRoomsRemovesIdleEmptyRoom evicts rooms with no websocket clients after idle TTL.
 func TestCleanupStaleRoomsRemovesIdleEmptyRoom(t *testing.T) {
-	s := NewServer()
+	s := NewServerWithStore(nil)
 	room, err := NewRoomSession("idle-room")
 	if err != nil {
 		t.Fatalf("new room: %v", err)
@@ -36,7 +36,7 @@ func TestCleanupStaleRoomsRemovesIdleEmptyRoom(t *testing.T) {
 
 // TestCleanupStaleRoomsRemovesEndedMatchWithNoClients evicts finished rooms once everyone left.
 func TestCleanupStaleRoomsRemovesEndedMatchWithNoClients(t *testing.T) {
-	s := NewServer()
+	s := NewServerWithStore(nil)
 	room, err := NewRoomSession("done-room")
 	if err != nil {
 		t.Fatalf("new room: %v", err)
@@ -61,7 +61,7 @@ func TestCleanupStaleRoomsRemovesEndedMatchWithNoClients(t *testing.T) {
 
 // TestHandleListRoomsSkipsEndedMatches ensures ended rooms are omitted from the lobby list.
 func TestHandleListRoomsSkipsEndedMatches(t *testing.T) {
-	s := NewServer()
+	s := NewServerWithStore(nil)
 
 	open, err := NewRoomSession("open-room")
 	if err != nil {

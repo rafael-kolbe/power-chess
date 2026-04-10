@@ -795,6 +795,22 @@
     return errMessage.includes("already occupied");
   }
 
+  function socketBaseURL() {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${location.host}/ws`;
+  }
+
+  /** Same JWT as REST; required by the server when DATABASE_URL auth is enabled. */
+  function socketURLWithAuth() {
+    const base = socketBaseURL();
+    if (!authBackendAvailable) return base;
+    const tok = readStoredToken();
+    if (!tok) return base;
+    const u = new URL(base);
+    u.searchParams.set("token", tok);
+    return u.toString();
+  }
+
   function connectToRoom(roomId, pieceTypeOverride, roomNameOverride, privateOverride, passwordOverride) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.close();
@@ -829,7 +845,7 @@
       attemptedFallback: false
     };
     syncPlayerRoleLabels();
-    ws = new WebSocket(`ws://${location.host}/ws`);
+    ws = new WebSocket(socketURLWithAuth());
     ws.onopen = () => {
       logEvent({ event: "socket_open" });
       send("join_match", {

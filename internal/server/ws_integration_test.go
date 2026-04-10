@@ -12,7 +12,7 @@ import (
 
 // TestWebSocketJoinAndSnapshotBroadcast validates join flow and snapshot delivery.
 func TestWebSocketJoinAndSnapshotBroadcast(t *testing.T) {
-	srv := NewServer()
+	srv := NewServerWithStore(nil)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
 
@@ -54,7 +54,7 @@ func TestWebSocketJoinAndSnapshotBroadcast(t *testing.T) {
 
 // TestWebSocketRequestIdempotency validates duplicate requestId handling.
 func TestWebSocketRequestIdempotency(t *testing.T) {
-	srv := NewServer()
+	srv := NewServerWithStore(nil)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
 
