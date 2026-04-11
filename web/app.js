@@ -1077,6 +1077,7 @@
         renderBoard(msg.payload.board);
         renderStatus(msg.payload);
         renderPlayerHud(msg.payload);
+        renderPlaymat(msg.payload);
         syncPlayerRoleLabels(msg.payload);
         handleAutoSkipReaction(msg.payload);
         renderTurnClocks();
@@ -1359,6 +1360,429 @@
     const pct = Math.min(100, Math.round((100 * (cur || 0)) / m));
     fillEl.style.width = `${pct}%`;
     labelEl.textContent = `${cur ?? 0}/${max ?? 0}`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Playmat zone elements (cached once)
+  // ---------------------------------------------------------------------------
+  const pmEl = {
+    deckSelf:          document.getElementById("deckSelf"),
+    deckOpp:           document.getElementById("deckOpp"),
+    deckSleeveSelf:    document.getElementById("deckSleeveSelf"),
+    deckSleeveOpp:     document.getElementById("deckSleeveOpp"),
+    deckCountSelf:     document.getElementById("deckCountSelf"),
+    deckCountOpp:      document.getElementById("deckCountOpp"),
+    drawBtn:           document.getElementById("drawBtn"),
+    graveyardGridSelf: document.getElementById("graveyardGridSelf"),
+    graveyardGridOpp:  document.getElementById("graveyardGridOpp"),
+    banishTopSelf:     document.getElementById("banishTopSelf"),
+    banishTopOpp:      document.getElementById("banishTopOpp"),
+    ignitionCardSelf:  document.getElementById("ignitionCardSelf"),
+    ignitionCardOpp:   document.getElementById("ignitionCardOpp"),
+    ignitionCounterSelf: document.getElementById("ignitionCounterSelf"),
+    ignitionCounterOpp:  document.getElementById("ignitionCounterOpp"),
+    cooldownCardsSelf: document.getElementById("cooldownCardsSelf"),
+    cooldownCardsOpp:  document.getElementById("cooldownCardsOpp"),
+    handSelf:          document.getElementById("handSelf"),
+    handOpp:           document.getElementById("handOpp"),
+    matchCardPreview:  document.getElementById("matchCardPreview"),
+    pileViewModal:     document.getElementById("pileViewModal"),
+    pileViewGrid:      document.getElementById("pileViewGrid"),
+    pileViewTitle:     document.getElementById("pileViewTitle"),
+    pileViewCloseBtn:  document.getElementById("pileViewCloseBtn"),
+    viewBanishSelf:    document.getElementById("viewBanishSelf"),
+    viewBanishOpp:     document.getElementById("viewBanishOpp"),
+    viewCooldownSelf:  document.getElementById("viewCooldownSelf"),
+    viewCooldownOpp:   document.getElementById("viewCooldownOpp"),
+    ignitionSelf:      document.getElementById("ignitionSelf"),
+  };
+
+  // ---------------------------------------------------------------------------
+  // Playmat: card preview hover (hover shows full card at cursor)
+  // ---------------------------------------------------------------------------
+  let pmPreviewCard = null;
+
+  function showCardPreview(cardData, anchorEl) {
+    if (!pmEl.matchCardPreview || !cardData) return;
+    pmEl.matchCardPreview.innerHTML = "";
+    const card = createPowerCard({
+      type: cardData.type,
+      name: cardData.name,
+      description: cardData.description,
+      example: cardData.example,
+      mana: cardData.manaCost ?? cardData.mana,
+      ignition: cardData.ignition,
+      cooldown: cardData.cooldown,
+      cardWidth: "220px"
+    });
+    pmEl.matchCardPreview.appendChild(card);
+    pmEl.matchCardPreview.classList.remove("hidden");
+    pmPreviewCard = anchorEl;
+    positionCardPreview(anchorEl);
+  }
+
+  function positionCardPreview(anchorEl) {
+    if (!pmEl.matchCardPreview || !anchorEl) return;
+    const rect = anchorEl.getBoundingClientRect();
+    const pw = 220;
+    const ph = pw * 965 / 639;
+    let left = rect.right + 10;
+    if (left + pw > window.innerWidth - 8) left = rect.left - pw - 10;
+    let top = rect.top;
+    if (top + ph > window.innerHeight - 8) top = window.innerHeight - ph - 8;
+    pmEl.matchCardPreview.style.left = `${left}px`;
+    pmEl.matchCardPreview.style.top = `${top}px`;
+  }
+
+  function hideCardPreview() {
+    if (!pmEl.matchCardPreview) return;
+    pmEl.matchCardPreview.classList.add("hidden");
+    pmEl.matchCardPreview.innerHTML = "";
+    pmPreviewCard = null;
+  }
+
+  function getCardDef(cardId) {
+    const catalog = getLocalizedCardCatalog(locale);
+    return catalog.find((c) => c.id === cardId) || null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Playmat: sleeve URL helper
+  // ---------------------------------------------------------------------------
+  function sleeveUrl(color) {
+    const valid = ["blue", "green", "pink", "red"];
+    const c = valid.includes(color) ? color : "blue";
+    return `/public/sleeves/${c}Sleeve.png`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Playmat: render all zones from snapshot
+  // ---------------------------------------------------------------------------
+
+  /** @param {object} snapshot */
+  function renderPlaymat(snapshot) {
+    if (!snapshot || !snapshot.players) return;
+    const localPID = playerEl.value; // "A" or "B"
+    const self = snapshot.players.find((p) => p.playerId === localPID);
+    const opp  = snapshot.players.find((p) => p.playerId !== localPID);
+    if (!self || !opp) return;
+
+    renderDeckZone(self, opp);
+    renderGraveyardZone(self, opp);
+    renderBanishZone(self, opp);
+    renderIgnitionZone(snapshot);
+    renderCooldownZone(self, opp);
+    renderHandZone(self, opp);
+    updateDrawButton(snapshot, self);
+  }
+
+  function renderDeckZone(self, opp) {
+    if (pmEl.deckCountSelf) pmEl.deckCountSelf.textContent = self.deckCount ?? "—";
+    if (pmEl.deckCountOpp)  pmEl.deckCountOpp.textContent  = opp.deckCount  ?? "—";
+    if (pmEl.deckSleeveSelf && self.sleeveColor) {
+      pmEl.deckSleeveSelf.style.backgroundImage = `url('${sleeveUrl(self.sleeveColor)}')`;
+    }
+    if (pmEl.deckSleeveOpp && opp.sleeveColor) {
+      pmEl.deckSleeveOpp.style.backgroundImage = `url('${sleeveUrl(opp.sleeveColor)}')`;
+    }
+  }
+
+  function renderGraveyardZone(self, opp) {
+    renderGraveyardGrid(pmEl.graveyardGridSelf, self.graveyardPieces || []);
+    renderGraveyardGrid(pmEl.graveyardGridOpp,  opp.graveyardPieces  || []);
+  }
+
+  function renderGraveyardGrid(container, pieces) {
+    if (!container) return;
+    container.innerHTML = "";
+    for (const code of pieces) {
+      const url = pieceImageURL(code);
+      if (!url) continue;
+      const img = document.createElement("img");
+      img.src = url;
+      img.className = "pm-graveyard-piece";
+      img.alt = code;
+      container.appendChild(img);
+    }
+  }
+
+  function renderBanishZone(self, opp) {
+    renderBanishTop(pmEl.banishTopSelf, self.banishedCards || [], self.sleeveColor);
+    renderBanishTop(pmEl.banishTopOpp,  opp.banishedCards  || [], opp.sleeveColor);
+  }
+
+  function renderBanishTop(container, cards, sleeve) {
+    if (!container) return;
+    container.innerHTML = "";
+    if (cards.length === 0) return;
+    const top = cards[0];
+    const def = getCardDef(top.cardId);
+    if (def) {
+      const card = createPowerCard({
+        type: def.type, name: def.name, description: def.description,
+        example: def.example, mana: def.manaCost ?? top.manaCost,
+        ignition: def.ignition, cooldown: def.cooldown, cardWidth: "86px"
+      });
+      card.dataset.cardId = top.cardId;
+      attachCardHover(card, { ...def, manaCost: def.mana });
+      container.appendChild(card);
+    } else {
+      const fb = document.createElement("div");
+      fb.className = "pm-sleeve-card";
+      fb.style.backgroundImage = `url('${sleeveUrl(sleeve)}')`;
+      container.appendChild(fb);
+    }
+  }
+
+  function renderIgnitionZone(snapshot) {
+    const localPID = playerEl.value;
+    // Global ignition slot — show on the owner's side.
+    const occupied = snapshot.ignitionOn;
+    const owner    = snapshot.ignitionOwner;
+    const turns    = snapshot.ignitionTurnsRemaining ?? 0;
+    const cardId   = snapshot.ignitionCard;
+
+    const isSelf = owner === localPID;
+    const cardEl   = isSelf ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
+    const counterEl = isSelf ? pmEl.ignitionCounterSelf : pmEl.ignitionCounterOpp;
+    const emptyCardEl   = isSelf ? pmEl.ignitionCardOpp : pmEl.ignitionCardSelf;
+    const emptyCounterEl = isSelf ? pmEl.ignitionCounterOpp : pmEl.ignitionCounterSelf;
+
+    // Clear the other side's ignition.
+    if (emptyCardEl)   emptyCardEl.innerHTML = "";
+    if (emptyCounterEl) emptyCounterEl.classList.add("hidden");
+
+    if (!occupied || !cardEl) return;
+
+    cardEl.innerHTML = "";
+    if (counterEl) {
+      counterEl.textContent = String(turns);
+      counterEl.classList.toggle("hidden", false);
+    }
+
+    const def = getCardDef(cardId);
+    if (def) {
+      const card = createPowerCard({
+        type: def.type, name: def.name, description: def.description,
+        example: def.example, mana: def.mana,
+        ignition: def.ignition, cooldown: def.cooldown, cardWidth: "86px"
+      });
+      attachCardHover(card, { ...def, manaCost: def.mana });
+      cardEl.appendChild(card);
+    }
+  }
+
+  function renderCooldownZone(self, opp) {
+    renderCooldownList(pmEl.cooldownCardsSelf, self.cooldownPreview || [], self.cooldownHiddenCount);
+    renderCooldownList(pmEl.cooldownCardsOpp,  opp.cooldownPreview  || [], opp.cooldownHiddenCount);
+  }
+
+  function renderCooldownList(container, preview, hidden) {
+    if (!container) return;
+    container.innerHTML = "";
+    for (const entry of preview) {
+      const def = getCardDef(entry.cardId);
+      const name = def ? def.name : entry.cardId;
+      const row = document.createElement("div");
+      row.className = "pm-cooldown-entry";
+      const nameEl = document.createElement("span");
+      nameEl.className = "pm-cooldown-entry__name";
+      nameEl.textContent = name;
+      const turnsEl = document.createElement("span");
+      turnsEl.className = "pm-cooldown-entry__turns";
+      turnsEl.textContent = `${entry.turnsRemaining}t`;
+      row.appendChild(nameEl);
+      row.appendChild(turnsEl);
+      if (def) attachCardHover(row, { ...def, manaCost: def.mana });
+      container.appendChild(row);
+    }
+    if (hidden > 0) {
+      const more = document.createElement("div");
+      more.className = "pm-cooldown-entry";
+      more.style.opacity = "0.5";
+      more.textContent = `+${hidden} more`;
+      container.appendChild(more);
+    }
+  }
+
+  function renderHandZone(self, opp) {
+    renderOwnHand(pmEl.handSelf, self);
+    renderOppHand(pmEl.handOpp, opp);
+  }
+
+  function renderOwnHand(container, self) {
+    if (!container) return;
+    container.innerHTML = "";
+    const slots = 5;
+    const hand = self.hand || [];
+    for (let i = 0; i < slots; i++) {
+      const slot = document.createElement("div");
+      slot.className = "pm-hand-slot" + (i >= hand.length ? " pm-hand-slot--empty" : "");
+      slot.dataset.handIndex = i;
+      if (i < hand.length) {
+        const entry = hand[i];
+        const def = getCardDef(entry.cardId);
+        const inner = document.createElement("div");
+        inner.className = "pm-hand-slot__card";
+        if (def) {
+          const card = createPowerCard({
+            type: def.type, name: def.name, description: def.description,
+            example: def.example, mana: def.mana,
+            ignition: def.ignition, cooldown: def.cooldown, cardWidth: "86px"
+          });
+          inner.appendChild(card);
+          attachCardHover(slot, { ...def, manaCost: def.mana });
+        }
+        slot.appendChild(inner);
+        slot.setAttribute("draggable", "true");
+        slot.addEventListener("dragstart", (ev) => onHandCardDragStart(ev, i, entry));
+      }
+      container.appendChild(slot);
+    }
+  }
+
+  function renderOppHand(container, opp) {
+    if (!container) return;
+    container.innerHTML = "";
+    const count = opp.handCount || 0;
+    const sleeve = opp.sleeveColor || "blue";
+    for (let i = 0; i < count; i++) {
+      const slot = document.createElement("div");
+      slot.className = "pm-hand-slot";
+      const inner = document.createElement("div");
+      inner.className = "pm-hand-slot__card";
+      const face = document.createElement("div");
+      face.className = "pm-sleeve-card";
+      face.style.backgroundImage = `url('${sleeveUrl(sleeve)}')`;
+      inner.appendChild(face);
+      slot.appendChild(inner);
+      container.appendChild(slot);
+    }
+  }
+
+  function updateDrawButton(snapshot, self) {
+    const btn = pmEl.drawBtn;
+    if (!btn) return;
+    const isMyTurn = snapshot.turnPlayer === playerEl.value;
+    const hasMana = (self.mana || 0) >= 2;
+    const hasSpace = (self.handCount || 0) < 5;
+    const gameOn = snapshot.gameStarted && !snapshot.matchEnded;
+    btn.disabled = !(isMyTurn && hasMana && hasSpace && gameOn);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Playmat: card hover wiring
+  // ---------------------------------------------------------------------------
+  function attachCardHover(el, cardData) {
+    el.addEventListener("mouseenter", () => showCardPreview(cardData, el));
+    el.addEventListener("mouseleave", () => {
+      if (pmPreviewCard === el) hideCardPreview();
+    });
+    el.addEventListener("mousemove", () => {
+      if (pmPreviewCard === el) positionCardPreview(el);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Playmat: drag-and-drop stub (wired in full in next phase)
+  // ---------------------------------------------------------------------------
+  let draggingHandIndex = null;
+  let draggingHandEntry = null;
+
+  function onHandCardDragStart(ev, handIndex, entry) {
+    draggingHandIndex = handIndex;
+    draggingHandEntry = entry;
+    if (pmEl.ignitionSelf) pmEl.ignitionSelf.classList.add("pm-drop-active");
+    ev.dataTransfer.effectAllowed = "move";
+    ev.currentTarget.addEventListener("dragend", () => {
+      if (pmEl.ignitionSelf) pmEl.ignitionSelf.classList.remove("pm-drop-active");
+      draggingHandIndex = null;
+      draggingHandEntry = null;
+    }, { once: true });
+  }
+
+  // Pile view modal (shared for cooldown/banish inspection)
+  function openPileView(title, cards, sleeve) {
+    if (!pmEl.pileViewModal || !pmEl.pileViewGrid) return;
+    pmEl.pileViewTitle.textContent = title;
+    pmEl.pileViewGrid.innerHTML = "";
+    const catalog = getLocalizedCardCatalog(locale);
+    const byId = new Map(catalog.map((c) => [c.id, c]));
+    for (const entry of cards) {
+      const def = byId.get(entry.cardId);
+      if (!def) continue;
+      const wrap = document.createElement("div");
+      wrap.className = "deck-view-card-wrap";
+      const card = createPowerCard({
+        type: def.type, name: def.name, description: def.description,
+        example: def.example, mana: def.mana, ignition: def.ignition,
+        cooldown: def.cooldown, cardWidth: "180px"
+      });
+      wrap.appendChild(card);
+      if (entry.turnsRemaining !== undefined) {
+        const badge = document.createElement("span");
+        badge.className = "count-badge";
+        badge.style.color = "#7ab0e0";
+        badge.textContent = `${entry.turnsRemaining}t`;
+        wrap.appendChild(badge);
+      }
+      pmEl.pileViewGrid.appendChild(wrap);
+    }
+    pmEl.pileViewModal.classList.remove("hidden");
+    pmEl.pileViewModal.setAttribute("aria-hidden", "false");
+  }
+
+  function closePileView() {
+    if (!pmEl.pileViewModal) return;
+    pmEl.pileViewModal.classList.add("hidden");
+    pmEl.pileViewModal.setAttribute("aria-hidden", "true");
+    pmEl.pileViewGrid.innerHTML = "";
+  }
+
+  if (pmEl.pileViewCloseBtn) {
+    pmEl.pileViewCloseBtn.addEventListener("click", closePileView);
+  }
+  if (pmEl.pileViewModal) {
+    pmEl.pileViewModal.addEventListener("click", (ev) => {
+      if (ev.target === pmEl.pileViewModal) closePileView();
+    });
+  }
+
+  // VIEW buttons
+  if (pmEl.viewBanishSelf) {
+    pmEl.viewBanishSelf.addEventListener("click", () => {
+      const snap = lastSnapshot;
+      const self = snap?.players?.find((p) => p.playerId === playerEl.value);
+      openPileView("Banished — Your pile", self?.banishedCards || []);
+    });
+  }
+  if (pmEl.viewBanishOpp) {
+    pmEl.viewBanishOpp.addEventListener("click", () => {
+      const snap = lastSnapshot;
+      const opp = snap?.players?.find((p) => p.playerId !== playerEl.value);
+      openPileView("Banished — Opponent", opp?.banishedCards || []);
+    });
+  }
+  if (pmEl.viewCooldownSelf) {
+    pmEl.viewCooldownSelf.addEventListener("click", () => {
+      const snap = lastSnapshot;
+      const self = snap?.players?.find((p) => p.playerId === playerEl.value);
+      openPileView("Cooldown — Your pile", self?.cooldownPreview || []);
+    });
+  }
+  if (pmEl.viewCooldownOpp) {
+    pmEl.viewCooldownOpp.addEventListener("click", () => {
+      const snap = lastSnapshot;
+      const opp = snap?.players?.find((p) => p.playerId !== playerEl.value);
+      openPileView("Cooldown — Opponent", opp?.cooldownPreview || []);
+    });
+  }
+
+  // DRAW button
+  if (pmEl.drawBtn) {
+    pmEl.drawBtn.addEventListener("click", () => {
+      send("draw_card", {});
+    });
   }
 
   /** Keeps opponent HUD above the board and the local player below (mirrors board flip for Player B). */

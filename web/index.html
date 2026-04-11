@@ -163,33 +163,131 @@
       <span id="inRoomLabel" class="in-room-label"></span>
       <button id="disconnectBtn" type="button">Leave room</button>
     </div>
-    <div id="boardArea">
-      <div id="boardWrap" class="board-wrap">
-        <div class="player-b-stack">
-          <div class="side-clock clock-b"><strong id="playerBLabel">Player B</strong> | <span id="clockLabelB">Clock</span>: <span id="clockB">--</span>s | <span id="strikesLabelB">Strikes</span>: <span id="strikesB">0</span></div>
-          <div class="bar-group">
-            <div class="bar mana-bar" id="manaBarB"><div class="fill" id="manaFillB"></div><span class="bar-label" id="manaLabelB">0/10</span></div>
-            <div class="bar energized-bar" id="energizedBarB"><div class="fill" id="energizedFillB"></div><span class="bar-label" id="energizedLabelB">0/20</span></div>
+    <div id="boardArea" class="playmat-area">
+
+      <!-- Left column: graveyard / banishment / deck  -->
+      <div class="playmat-col playmat-col--left" id="playmatColLeft">
+        <!-- Opponent's left zones (top half) -->
+        <div class="pm-side-group pm-side-group--opp" id="leftZonesOpp">
+          <div class="pm-zone pm-zone--graveyard" id="graveyardOpp" aria-label="Opponent graveyard">
+            <span class="pm-zone__label">Cemetery</span>
+            <div class="pm-graveyard-grid" id="graveyardGridOpp"></div>
+          </div>
+          <div class="pm-zone pm-zone--banish" id="banishOpp" aria-label="Opponent banished">
+            <span class="pm-zone__label">Banished</span>
+            <div class="pm-stack-top" id="banishTopOpp"></div>
+            <button class="pm-view-btn" id="viewBanishOpp">VIEW</button>
+          </div>
+          <div class="pm-zone pm-zone--deck" id="deckOpp" aria-label="Opponent deck">
+            <div class="pm-deck-sleeve" id="deckSleeveOpp"></div>
+            <span class="pm-deck-count" id="deckCountOpp">—</span>
           </div>
         </div>
-        <div id="boardFrame" class="board-frame"></div>
-        <div class="player-a-stack">
-          <div class="bar-group">
-            <div class="bar mana-bar" id="manaBarA"><div class="fill" id="manaFillA"></div><span class="bar-label" id="manaLabelA">0/10</span></div>
-            <div class="bar energized-bar" id="energizedBarA"><div class="fill" id="energizedFillA"></div><span class="bar-label" id="energizedLabelA">0/20</span></div>
+
+        <!-- Own left zones (bottom half) -->
+        <div class="pm-side-group pm-side-group--own" id="leftZonesSelf">
+          <div class="pm-zone pm-zone--graveyard" id="graveyardSelf" aria-label="Your graveyard">
+            <span class="pm-zone__label">Cemetery</span>
+            <div class="pm-graveyard-grid" id="graveyardGridSelf"></div>
           </div>
-          <div class="side-clock clock-a"><strong id="playerALabel">Player A</strong> | <span id="clockLabelA">Clock</span>: <span id="clockA">--</span>s | <span id="strikesLabelA">Strikes</span>: <span id="strikesA">0</span></div>
+          <div class="pm-zone pm-zone--banish" id="banishSelf" aria-label="Your banished">
+            <span class="pm-zone__label">Banished</span>
+            <div class="pm-stack-top" id="banishTopSelf"></div>
+            <button class="pm-view-btn" id="viewBanishSelf">VIEW</button>
+          </div>
+          <div class="pm-zone pm-zone--deck" id="deckSelf" aria-label="Your deck">
+            <button class="pm-draw-btn" id="drawBtn" type="button">DRAW</button>
+            <div class="pm-deck-sleeve" id="deckSleeveSelf"></div>
+            <span class="pm-deck-count" id="deckCountSelf">—</span>
+          </div>
         </div>
       </div>
-      <div class="match-board-tools" aria-label="Board options">
-        <label class="match-board-tool">
-          <input type="checkbox" id="reactionToggle" />
-          <span id="reactionToggleLabel" class="match-board-tool__text">Reactions: Off</span>
-        </label>
-        <label class="match-board-tool">
-          <input type="checkbox" id="coordsInSquares" />
-          <span id="coordsInSquaresText" class="match-board-tool__text">Coords in squares</span>
-        </label>
+
+      <!-- Center: chess board -->
+      <div class="playmat-center">
+        <div id="boardWrap" class="board-wrap">
+          <div class="player-b-stack">
+            <div class="side-clock clock-b"><strong id="playerBLabel">Player B</strong> | <span id="clockLabelB">Clock</span>: <span id="clockB">--</span>s | <span id="strikesLabelB">Strikes</span>: <span id="strikesB">0</span></div>
+            <div class="bar-group">
+              <div class="bar mana-bar" id="manaBarB"><div class="fill" id="manaFillB"></div><span class="bar-label" id="manaLabelB">0/10</span></div>
+              <div class="bar energized-bar" id="energizedBarB"><div class="fill" id="energizedFillB"></div><span class="bar-label" id="energizedLabelB">0/20</span></div>
+            </div>
+          </div>
+          <div id="boardFrame" class="board-frame"></div>
+          <div class="player-a-stack">
+            <div class="bar-group">
+              <div class="bar mana-bar" id="manaBarA"><div class="fill" id="manaFillA"></div><span class="bar-label" id="manaLabelA">0/10</span></div>
+              <div class="bar energized-bar" id="energizedBarA"><div class="fill" id="energizedFillA"></div><span class="bar-label" id="energizedLabelA">0/20</span></div>
+            </div>
+            <div class="side-clock clock-a"><strong id="playerALabel">Player A</strong> | <span id="clockLabelA">Clock</span>: <span id="clockA">--</span>s | <span id="strikesLabelA">Strikes</span>: <span id="strikesA">0</span></div>
+          </div>
+        </div>
+        <div class="match-board-tools" aria-label="Board options">
+          <label class="match-board-tool">
+            <input type="checkbox" id="reactionToggle" />
+            <span id="reactionToggleLabel" class="match-board-tool__text">Reactions: Off</span>
+          </label>
+          <label class="match-board-tool">
+            <input type="checkbox" id="coordsInSquares" />
+            <span id="coordsInSquaresText" class="match-board-tool__text">Coords in squares</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Right column: ignition / cooldown / hand -->
+      <div class="playmat-col playmat-col--right" id="playmatColRight">
+        <!-- Opponent's right zones (top half, mirrored) -->
+        <div class="pm-side-group pm-side-group--opp" id="rightZonesOpp">
+          <div class="pm-ignition-cooldown-row pm-ignition-cooldown-row--opp">
+            <div class="pm-zone pm-zone--cooldown" id="cooldownOpp" aria-label="Opponent cooldown pile">
+              <span class="pm-zone__label">Cooldown</span>
+              <div class="pm-cooldown-cards" id="cooldownCardsOpp"></div>
+              <button class="pm-view-btn" id="viewCooldownOpp">VIEW</button>
+            </div>
+            <div class="pm-zone pm-zone--ignition" id="ignitionOpp" aria-label="Opponent ignition slot">
+              <span class="pm-zone__label">Ignition</span>
+              <div class="pm-ignition-card" id="ignitionCardOpp"></div>
+              <span class="pm-ignition-counter hidden" id="ignitionCounterOpp">0</span>
+            </div>
+          </div>
+          <div class="pm-hand-row" id="handOpp" aria-label="Opponent hand">
+            <!-- sleeve-backed face-down cards injected by JS -->
+          </div>
+        </div>
+
+        <!-- Own right zones (bottom half) -->
+        <div class="pm-side-group pm-side-group--own" id="rightZonesSelf">
+          <div class="pm-ignition-cooldown-row pm-ignition-cooldown-row--self">
+            <div class="pm-zone pm-zone--ignition pm-zone--ignition-self" id="ignitionSelf" aria-label="Your ignition slot">
+              <span class="pm-zone__label">Ignition</span>
+              <div class="pm-ignition-card" id="ignitionCardSelf"></div>
+              <span class="pm-ignition-counter hidden" id="ignitionCounterSelf">0</span>
+            </div>
+            <div class="pm-zone pm-zone--cooldown" id="cooldownSelf" aria-label="Your cooldown pile">
+              <span class="pm-zone__label">Cooldown</span>
+              <div class="pm-cooldown-cards" id="cooldownCardsSelf"></div>
+              <button class="pm-view-btn" id="viewCooldownSelf">VIEW</button>
+            </div>
+          </div>
+          <div class="pm-hand-row" id="handSelf" aria-label="Your hand">
+            <!-- hand card slots injected by JS -->
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Card hover preview (shared by match and deck builder) -->
+    <div id="matchCardPreview" class="pm-card-preview hidden" aria-hidden="true"></div>
+
+    <!-- Pile view modal (reused for deck/cooldown/banish inspection) -->
+    <div id="pileViewModal" class="modal-overlay hidden" aria-hidden="true">
+      <div class="modal-dialog pile-view-dialog" role="dialog" aria-modal="true" aria-labelledby="pileViewTitle">
+        <div class="pile-view-dialog__head">
+          <h3 id="pileViewTitle">Cards</h3>
+          <button type="button" id="pileViewCloseBtn" class="match-end-btn-secondary">Close</button>
+        </div>
+        <div id="pileViewGrid" class="deck-view-grid"></div>
       </div>
     </div>
     <section class="match-debug">

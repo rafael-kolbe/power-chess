@@ -996,6 +996,356 @@ pre {
 }
 
 /* =============================================================================
+   Playmat layout — three-column match UI
+   ============================================================================= */
+
+:root {
+  --pm-card-width: 86px;
+  --pm-card-height: calc(var(--pm-card-width) * 965 / 639);
+  --pm-slot-bg: url('/public/playMatSlot.png') center / 100% 100% no-repeat;
+  --pm-zone-radius: 6px;
+  --pm-zone-border: 1px solid rgba(255 255 255 / 10%);
+  --pm-hand-gap: 6px;
+  --pm-col-width: 200px;
+}
+
+/* Outer 3-column grid: [left zones] [board] [right zones] */
+.playmat-area {
+  display: grid;
+  grid-template-columns: var(--pm-col-width) auto 1fr;
+  gap: 10px;
+  align-items: stretch;
+  width: max-content;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.playmat-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Columns: flex column, justify space-between so opp stays top, self stays bottom */
+.playmat-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.playmat-col--right {
+  min-width: calc(var(--pm-card-width) * 5 + var(--pm-hand-gap) * 4 + 20px + var(--pm-card-width) * 2 + 12px);
+}
+
+/* Each half (opp / own) fills available height equally */
+.pm-side-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pm-side-group--opp {
+  flex-direction: column-reverse; /* opponent zones stack from board outward (top) */
+}
+
+/* Generic playmat zone — uses playMatSlot.png */
+.pm-zone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 4px 4px;
+  background: var(--pm-slot-bg);
+  border-radius: var(--pm-zone-radius);
+  border: var(--pm-zone-border);
+  min-height: calc(var(--pm-card-height) + 24px);
+  overflow: hidden;
+}
+
+.pm-zone__label {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(200 210 220 / 55%);
+  pointer-events: none;
+}
+
+/* Deck zone */
+.pm-zone--deck {
+  gap: 6px;
+}
+
+.pm-deck-sleeve {
+  width: var(--pm-card-width);
+  height: var(--pm-card-height);
+  background: #263040 url('/public/sleeves/blueSleeve.png') center / 100% 100% no-repeat;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0 0 0 / 55%);
+}
+
+.pm-deck-count {
+  font-size: 13px;
+  font-weight: 700;
+  color: #e0e8f0;
+  text-shadow: 0 0 4px #000;
+}
+
+/* DRAW button */
+.pm-draw-btn {
+  width: 100%;
+  padding: 4px 0;
+  background: linear-gradient(180deg, #2a5a90, #163a60);
+  border: 1px solid #5090c0;
+  border-radius: 4px;
+  color: #b0d8ff;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.pm-draw-btn:hover:not(:disabled) {
+  background: linear-gradient(180deg, #3a70aa, #1f4d7a);
+  border-color: #70b0e0;
+}
+
+.pm-draw-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* VIEW button inside zones */
+.pm-view-btn {
+  padding: 3px 8px;
+  background: rgba(255 255 255 / 8%);
+  border: 1px solid rgba(255 255 255 / 16%);
+  border-radius: 3px;
+  color: rgba(200 210 220 / 70%);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  z-index: 1;
+}
+
+.pm-view-btn:hover {
+  background: rgba(255 255 255 / 14%);
+  border-color: rgba(255 255 255 / 28%);
+}
+
+/* Graveyard: 2-row grid of piece miniaturas */
+.pm-zone--graveyard {
+  min-height: 64px;
+  padding-bottom: 4px;
+}
+
+.pm-graveyard-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 16px);
+  grid-template-rows: repeat(2, 18px);
+  gap: 1px;
+  margin-top: 14px;
+}
+
+.pm-graveyard-piece {
+  width: 16px;
+  height: 18px;
+  object-fit: contain;
+  object-position: center;
+  filter: drop-shadow(0 1px 1px rgba(0 0 0 / 55%));
+  opacity: 0.85;
+}
+
+/* Banish zone */
+.pm-stack-top {
+  width: var(--pm-card-width);
+  height: var(--pm-card-height);
+  position: relative;
+}
+
+/* Ignition + cooldown row */
+.pm-ignition-cooldown-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.pm-ignition-cooldown-row--opp {
+  flex-direction: row-reverse; /* ignition aligns to the right edge, closer to board */
+}
+
+/* Ignition zone */
+.pm-zone--ignition {
+  min-width: calc(var(--pm-card-width) + 16px);
+  flex-shrink: 0;
+}
+
+/* Highlight the self ignition slot when a card is being dragged */
+.pm-zone--ignition-self.pm-drop-active {
+  box-shadow: 0 0 0 2px #f0c040, 0 0 12px 3px rgba(240 192 64 / 50%);
+}
+
+.pm-ignition-card {
+  width: var(--pm-card-width);
+  height: var(--pm-card-height);
+  position: relative;
+}
+
+.pm-ignition-counter {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  font-size: 18px;
+  font-weight: 700;
+  font-family: var(--font-ui);
+  color: #ffdc80;
+  text-shadow: 0 0 6px #000, 0 1px 3px #000;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Cooldown zone */
+.pm-zone--cooldown {
+  flex: 1;
+  min-width: 0;
+}
+
+.pm-cooldown-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  margin-top: 12px;
+}
+
+.pm-cooldown-entry {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #c0ccd8;
+  background: rgba(255 255 255 / 5%);
+  border-radius: 3px;
+  padding: 2px 4px;
+  min-width: 0;
+}
+
+.pm-cooldown-entry__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-cooldown-entry__turns {
+  font-weight: 700;
+  color: #7ab0e0;
+  flex-shrink: 0;
+}
+
+/* Hand row */
+.pm-hand-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--pm-hand-gap);
+  padding: 4px 0;
+  flex-wrap: nowrap;
+  overflow: visible;
+}
+
+.pm-side-group--opp .pm-hand-row {
+  align-items: flex-start;
+}
+
+/* Individual hand slot */
+.pm-hand-slot {
+  position: relative;
+  width: var(--pm-card-width);
+  height: var(--pm-card-height);
+  flex-shrink: 0;
+  background: var(--pm-slot-bg);
+  border-radius: 4px;
+  border: 1px solid rgba(255 255 255 / 8%);
+  cursor: grab;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pm-hand-slot:hover .pm-hand-slot__card {
+  transform: translateY(-10px) scale(1.04);
+}
+
+.pm-hand-slot--empty {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.pm-hand-slot__card {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.18s ease;
+  pointer-events: none;
+}
+
+/* Face-down (sleeve) card for opponent */
+.pm-sleeve-card {
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+  background: #263040 url('/public/sleeves/blueSleeve.png') center / 100% 100% no-repeat;
+  box-shadow: 0 4px 12px rgba(0 0 0 / 55%);
+}
+
+/* Card hover preview (fixed overlay for match screen) */
+.pm-card-preview {
+  position: fixed;
+  z-index: 2500;
+  pointer-events: none;
+  filter: drop-shadow(0 10px 28px rgba(0 0 0 / 70%));
+  max-width: min(92vw, 340px);
+}
+
+.pm-card-preview.hidden {
+  visibility: hidden;
+  opacity: 0;
+}
+
+/* Pile view dialog (reuses deck-view-dialog styles) */
+.pile-view-dialog {
+  max-width: 760px;
+  width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.pile-view-dialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+/* =============================================================================
    Match debug (below board)
    ============================================================================= */
 
