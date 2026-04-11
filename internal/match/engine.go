@@ -75,6 +75,18 @@ func (e *Engine) SetMoveBuffTarget(pid gameplay.PlayerID, kind MoveBuffKind, pos
 	e.moveBuffKind[pid] = kind
 }
 
+// DrawCard pays the draw-mana cost and moves one card from the player's deck to their hand.
+// Drawing is only permitted on the player's own turn and outside an open reaction window.
+func (e *Engine) DrawCard(pid gameplay.PlayerID) error {
+	if e.State.CurrentTurn != pid {
+		return errors.New("can only draw on your own turn")
+	}
+	if e.ReactionWindow != nil && e.ReactionWindow.Open {
+		return errors.New("cannot draw while a reaction window is open")
+	}
+	return e.State.DrawCard(pid)
+}
+
 // ActivateCard validates reaction constraints (if any) and delegates activation to gameplay state.
 func (e *Engine) ActivateCard(pid gameplay.PlayerID, handIndex int) error {
 	p := e.State.Players[pid]

@@ -467,3 +467,51 @@ func TestBlockadeNegatesCounterattackAndCancelsPendingCapture(t *testing.T) {
 		t.Fatalf("target piece should remain after blockade canceled capture")
 	}
 }
+
+// TestEngineDrawCard validates draw_card turn and mana constraints.
+func TestEngineDrawCard(t *testing.T) {
+	card := gameplay.CardInstance{InstanceID: "x1", CardID: "test", ManaCost: 1, Ignition: 0, Cooldown: 1}
+	state, err := gameplay.NewMatchState(testDeckWith(card), testDeckWith(card))
+	if err != nil {
+		t.Fatalf("state: %v", err)
+	}
+	e := NewEngine(state, chess.NewGame())
+
+	// Drawing on wrong turn (B's turn by default? No — A starts).
+	_ = e.State.EndTurn(gameplay.PlayerA)
+	if err := e.DrawCard(gameplay.PlayerA); err == nil {
+		t.Error("expected error: drawing on wrong turn")
+	}
+
+	// Reset to A's turn with sufficient mana.
+	_ = e.State.EndTurn(gameplay.PlayerB)
+	e.State.Players[gameplay.PlayerA].Mana = 10
+	handBefore := len(e.State.Players[gameplay.PlayerA].Hand)
+	deckBefore := len(e.State.Players[gameplay.PlayerA].Deck)
+
+	if err := e.DrawCard(gameplay.PlayerA); err != nil {
+		t.Fatalf("draw should succeed: %v", err)
+	}
+	if len(e.State.Players[gameplay.PlayerA].Hand) != handBefore+1 {
+		t.Errorf("hand should grow by 1")
+	}
+	if len(e.State.Players[gameplay.PlayerA].Deck) != deckBefore-1 {
+		t.Errorf("deck should shrink by 1")
+	}
+
+	// No mana.
+	e.State.Players[gameplay.PlayerA].Mana = 0
+	if err := e.DrawCard(gameplay.PlayerA); err == nil {
+		t.Error("expected error: no mana")
+	}
+
+	// Full hand.
+	e.State.Players[gameplay.PlayerA].Mana = 20
+	for len(e.State.Players[gameplay.PlayerA].Hand) < gameplay.DefaultMaxHandSize {
+		_ = e.State.Players[gameplay.PlayerA].Deck
+		e.State.Players[gameplay.PlayerA].Hand = append(e.State.Players[gameplay.PlayerA].Hand, card)
+	}
+	if err := e.DrawCard(gameplay.PlayerA); err == nil {
+		t.Error("expected error: hand full")
+	}
+}

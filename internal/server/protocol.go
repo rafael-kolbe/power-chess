@@ -15,6 +15,7 @@ const (
 	MessageLeaveMatch      MessageType = "leave_match"
 	MessageSubmitMove      MessageType = "submit_move"
 	MessageActivateCard    MessageType = "activate_card"
+	MessageDrawCard        MessageType = "draw_card"
 	MessageResolvePending  MessageType = "resolve_pending_effect"
 	MessageQueueReaction   MessageType = "queue_reaction"
 	MessageResolveReaction MessageType = "resolve_reactions"
@@ -102,7 +103,25 @@ type ErrorPayload struct {
 	Message string    `json:"message"`
 }
 
+// CardSnapshotEntry is a single card's public data exposed in hand, cooldown or banished zones.
+type CardSnapshotEntry struct {
+	CardID   string `json:"cardId"`
+	ManaCost int    `json:"manaCost"`
+	Ignition int    `json:"ignition"`
+	Cooldown int    `json:"cooldown"`
+}
+
+// CooldownPreviewEntry is a card currently in the cooldown pile with its remaining turns.
+type CooldownPreviewEntry struct {
+	CardID         string `json:"cardId"`
+	ManaCost       int    `json:"manaCost"`
+	Ignition       int    `json:"ignition"`
+	Cooldown       int    `json:"cooldown"`
+	TurnsRemaining int    `json:"turnsRemaining"`
+}
+
 // PlayerHUDState is the per-player summary used by the frontend HUD.
+// The Hand field is only populated when the snapshot is addressed to the owning player.
 type PlayerHUDState struct {
 	PlayerID       string `json:"playerId"`
 	Mana           int    `json:"mana"`
@@ -113,6 +132,14 @@ type PlayerHUDState struct {
 	CooldownCount  int    `json:"cooldownCount"`
 	GraveyardCount int    `json:"graveyardCount"`
 	Strikes        int    `json:"strikes"`
+	// Zone data — always public unless noted.
+	DeckCount          int                    `json:"deckCount"`
+	SleeveColor        string                 `json:"sleeveColor"`
+	Hand               []CardSnapshotEntry    `json:"hand,omitempty"`
+	BanishedCards      []CardSnapshotEntry    `json:"banishedCards"`
+	GraveyardPieces    []string               `json:"graveyardPieces"`
+	CooldownPreview    []CooldownPreviewEntry `json:"cooldownPreview"`
+	CooldownHiddenCount int                   `json:"cooldownHiddenCount"`
 }
 
 // PendingEffectState describes unresolved effects that need player input.
@@ -176,9 +203,13 @@ type StateSnapshotPayload struct {
 	TurnNumber              int                    `json:"turnNumber"`
 	IgnitionOn              bool                   `json:"ignitionOn"`
 	IgnitionCard            string                 `json:"ignitionCard,omitempty"`
+	IgnitionOwner           string                 `json:"ignitionOwner,omitempty"`
+	IgnitionTurnsRemaining  int                    `json:"ignitionTurnsRemaining"`
 	Board                   [8][8]string           `json:"board"`
 	EnPassant               EnPassantStateSnapshot `json:"enPassant"`
 	CastlingRights          CastlingRightsSnapshot `json:"castlingRights"`
+	// ViewerPlayerID identifies whose perspective this snapshot is for (drives hand visibility).
+	ViewerPlayerID          string                 `json:"viewerPlayerId,omitempty"`
 	Players                 []PlayerHUDState       `json:"players"`
 	PendingEffects          []PendingEffectState   `json:"pendingEffects"`
 	ReactionWindow          ReactionWindowState    `json:"reactionWindow"`

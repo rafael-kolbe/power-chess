@@ -293,32 +293,45 @@ func (s *DeckService) ListDecks(userID uint64) ([]userDeckModel, error) {
 
 // DeckInstancesAndSkillForLobby resolves the user's lobby deck to instances and skill for match setup.
 func (s *DeckService) DeckInstancesAndSkillForLobby(userID uint64) ([]gameplay.CardInstance, gameplay.PlayerSkillID, error) {
+	inst, skill, _, err := s.DeckInstancesSkillAndSleeveForLobby(userID)
+	return inst, skill, err
+}
+
+// DeckInstancesSkillAndSleeveForLobby resolves the user's lobby deck to instances, skill, and sleeve color.
+func (s *DeckService) DeckInstancesSkillAndSleeveForLobby(userID uint64) ([]gameplay.CardInstance, gameplay.PlayerSkillID, string, error) {
 	var u userModel
 	if err := s.db.Where("id = ?", userID).Take(&u).Error; err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	if u.LobbyDeckID == nil {
-		return nil, "", ErrNoLobbyDeck
+		return nil, "", "", ErrNoLobbyDeck
 	}
-	return s.DeckInstancesForDeck(userID, *u.LobbyDeckID)
+	inst, skill, sleeve, err := s.DeckInstancesSkillAndSleeveForDeck(userID, *u.LobbyDeckID)
+	return inst, skill, sleeve, err
 }
 
 // DeckInstancesForDeck loads a specific owned deck by id.
 func (s *DeckService) DeckInstancesForDeck(userID, deckID uint64) ([]gameplay.CardInstance, gameplay.PlayerSkillID, error) {
+	inst, skill, _, err := s.DeckInstancesSkillAndSleeveForDeck(userID, deckID)
+	return inst, skill, err
+}
+
+// DeckInstancesSkillAndSleeveForDeck loads a specific owned deck returning instances, skill, and sleeve color.
+func (s *DeckService) DeckInstancesSkillAndSleeveForDeck(userID, deckID uint64) ([]gameplay.CardInstance, gameplay.PlayerSkillID, string, error) {
 	var d userDeckModel
 	if err := s.db.Where("id = ? AND user_id = ?", deckID, userID).Take(&d).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, "", ErrDeckNotFound
+			return nil, "", "", ErrDeckNotFound
 		}
-		return nil, "", err
+		return nil, "", "", err
 	}
 	ids, err := parseCardIDsJSON(d.CardIDsJSON)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	inst, err := gameplay.DeckInstancesFromCardIDs(ids)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
-	return inst, gameplay.PlayerSkillID(d.PlayerSkillID), nil
+	return inst, gameplay.PlayerSkillID(d.PlayerSkillID), d.SleeveColor, nil
 }

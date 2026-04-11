@@ -44,6 +44,8 @@ type RoomSession struct {
 	parent *Server
 	// authUIDByPlayer maps each seat to the account id (0 = guest / no auth).
 	authUIDByPlayer map[gameplay.PlayerID]uint64
+	// sleeveByPlayer stores the sleeve color chosen for each seat (empty string = default blue).
+	sleeveByPlayer map[gameplay.PlayerID]string
 	// deckMatchInitialized is true after the engine was built from saved decks for both connected players, or when loaded from persistence.
 	deckMatchInitialized bool
 }
@@ -93,6 +95,10 @@ func newRoomSessionWithEngine(roomID, roomName string, engine *match.Engine) *Ro
 		authUIDByPlayer: map[gameplay.PlayerID]uint64{
 			gameplay.PlayerA: 0,
 			gameplay.PlayerB: 0,
+		},
+		sleeveByPlayer: map[gameplay.PlayerID]string{
+			gameplay.PlayerA: "",
+			gameplay.PlayerB: "",
 		},
 		deckMatchInitialized: false,
 	}
@@ -145,7 +151,14 @@ func (r *RoomSession) MarkRequestOnce(requestKey string) bool {
 }
 
 // Snapshot builds a compact state payload for UI synchronization.
+// Call SnapshotForPlayer to get a player-specific view with private hand data.
 func (r *RoomSession) Snapshot() StateSnapshotPayload {
+	return r.SnapshotForPlayer("")
+}
+
+// SnapshotForPlayer builds a state payload tailored to the requesting player.
+// When viewerPID is non-empty, the player's own hand cards are included in their PlayerHUDState.
+func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapshotPayload {
 	r.evaluateMatchOutcomeUnsafe()
 	s := r.Engine.State
 	cA := r.connectedByPlayer[gameplay.PlayerA]
@@ -168,27 +181,30 @@ func (r *RoomSession) Snapshot() StateSnapshotPayload {
 		board = serializeBoard(chess.NewGame().Board)
 	}
 	payload := StateSnapshotPayload{
-		RoomID:       r.RoomID,
-		RoomName:     r.RoomName,
-		RoomPrivate:  r.RoomPrivate,
-		RoomPassword: r.RoomPassword,
-		ConnectedA:   cA,
-		ConnectedB:   cB,
-		PlayerAName:  r.displayNameByPlayer[gameplay.PlayerA],
-		PlayerBName:  r.displayNameByPlayer[gameplay.PlayerB],
-		GameStarted:  (cA > 0 && cB > 0) || reconnectGrace,
-		TurnPlayer:   string(s.CurrentTurn),
-		TurnSeconds:  s.TurnSeconds,
-		TurnNumber:   s.TurnNumber,
-		IgnitionOn:   s.IgnitionSlot.Occupied,
-		Board:        board,
+		RoomID:         r.RoomID,
+		RoomName:       r.RoomName,
+		RoomPrivate:    r.RoomPrivate,
+		RoomPassword:   r.RoomPassword,
+		ConnectedA:     cA,
+		ConnectedB:     cB,
+		PlayerAName:    r.displayNameByPlayer[gameplay.PlayerA],
+		PlayerBName:    r.displayNameByPlayer[gameplay.PlayerB],
+		GameStarted:    (cA > 0 && cB > 0) || reconnectGrace,
+		TurnPlayer:     string(s.CurrentTurn),
+		TurnSeconds:    s.TurnSeconds,
+		TurnNumber:     s.TurnNumber,
+		IgnitionOn:     s.IgnitionSlot.Occupied,
+		ViewerPlayerID: string(viewerPID),
+		Board:          board,
 		Players: []PlayerHUDState{
-			playerHUDState(gameplay.PlayerA, s.Players[gameplay.PlayerA]),
-			playerHUDState(gameplay.PlayerB, s.Players[gameplay.PlayerB]),
+			playerHUDState(gameplay.PlayerA, s.Players[gameplay.PlayerA], r.sleeveByPlayer[gameplay.PlayerA], viewerPID),
+			playerHUDState(gameplay.PlayerB, s.Players[gameplay.PlayerB], r.sleeveByPlayer[gameplay.PlayerB], viewerPID),
 		},
 	}
 	if s.IgnitionSlot.Occupied {
 		payload.IgnitionCard = string(s.IgnitionSlot.Card.CardID)
+		payload.IgnitionOwner = string(s.IgnitionSlot.ActivationOwner)
+		payload.IgnitionTurnsRemaining = s.IgnitionSlot.TurnsRemaining
 	}
 	ep := r.Engine.Chess.EnPassant
 	payload.EnPassant = EnPassantStateSnapshot{Valid: ep.Valid}
@@ -256,10 +272,41 @@ func (r *RoomSession) Snapshot() StateSnapshotPayload {
 }
 
 // SnapshotSafe returns a room snapshot under room-state lock for consistency.
+// Use BroadcastSnapshot to send player-specific views over WebSocket.
 func (r *RoomSession) SnapshotSafe() StateSnapshotPayload {
 	r.stateM.Lock()
 	defer r.stateM.Unlock()
 	return r.Snapshot()
+}
+
+// SnapshotForPlayerSafe returns a player-specific snapshot under lock.
+func (r *RoomSession) SnapshotForPlayerSafe(viewerPID gameplay.PlayerID) StateSnapshotPayload {
+	r.stateM.Lock()
+	defer r.stateM.Unlock()
+	return r.SnapshotForPlayer(viewerPID)
+}
+
+// BroadcastSnapshot sends each connected client a snapshot tailored to their player seat.
+// Clients with no assigned seat receive a generic (no hand) snapshot.
+func (r *RoomSession) BroadcastSnapshot() {
+	r.stateM.Lock()
+	snapA := r.SnapshotForPlayer(gameplay.PlayerA)
+	snapB := r.SnapshotForPlayer(gameplay.PlayerB)
+	snapGeneric := r.SnapshotForPlayer("")
+	r.stateM.Unlock()
+
+	r.clientsM.RLock()
+	defer r.clientsM.RUnlock()
+	for c := range r.clients {
+		switch c.playerID {
+		case gameplay.PlayerA:
+			c.send(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(snapA)})
+		case gameplay.PlayerB:
+			c.send(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(snapB)})
+		default:
+			c.send(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(snapGeneric)})
+		}
+	}
 }
 
 // EvaluateMatchOutcome marks checkmate/stalemate results when the board has reached a terminal state.
@@ -752,19 +799,105 @@ func (r *RoomSession) assignJoinPlayer(p JoinMatchPayload) (gameplay.PlayerID, e
 	return r.joinSeat(gameplay.PlayerA)
 }
 
-// playerHUDState converts internal player state to transport-friendly HUD data.
-func playerHUDState(pid gameplay.PlayerID, p *gameplay.PlayerState) PlayerHUDState {
-	return PlayerHUDState{
-		PlayerID:       string(pid),
-		Mana:           p.Mana,
-		MaxMana:        p.MaxMana,
-		EnergizedMana:  p.EnergizedMana,
-		MaxEnergized:   p.MaxEnergizedMana,
-		HandCount:      len(p.Hand),
-		CooldownCount:  len(p.Cooldowns),
-		GraveyardCount: len(p.Graveyard),
-		Strikes:        p.Strikes,
+// graveyardPieceImportance returns a sort key for piece codes so the graveyard
+// is ordered from most to least important: Q > R > B > N > P (King never captured).
+func graveyardPieceImportance(code string) int {
+	if len(code) < 2 {
+		return 99
 	}
+	switch code[1] {
+	case 'Q':
+		return 0
+	case 'R':
+		return 1
+	case 'B':
+		return 2
+	case 'N':
+		return 3
+	case 'P':
+		return 4
+	}
+	return 5
+}
+
+// playerHUDState converts internal player state to transport-friendly HUD data.
+// sleeve is the player's chosen sleeve color; viewerPID restricts which hand is included.
+func playerHUDState(pid gameplay.PlayerID, p *gameplay.PlayerState, sleeve string, viewerPID gameplay.PlayerID) PlayerHUDState {
+	// Build cooldown preview (up to 4 shown, rest hidden).
+	const cooldownPreviewMax = 4
+	preview := make([]CooldownPreviewEntry, 0, cooldownPreviewMax)
+	hidden := 0
+	for i, cd := range p.Cooldowns {
+		if i < cooldownPreviewMax {
+			preview = append(preview, CooldownPreviewEntry{
+				CardID:         string(cd.Card.CardID),
+				ManaCost:       cd.Card.ManaCost,
+				Ignition:       cd.Card.Ignition,
+				Cooldown:       cd.Card.Cooldown,
+				TurnsRemaining: cd.TurnsRemaining,
+			})
+		} else {
+			hidden++
+		}
+	}
+
+	// Build banished card list (most recently banished first).
+	banished := make([]CardSnapshotEntry, 0, len(p.Banished))
+	for i := len(p.Banished) - 1; i >= 0; i-- {
+		c := p.Banished[i]
+		banished = append(banished, CardSnapshotEntry{
+			CardID:   string(c.CardID),
+			ManaCost: c.ManaCost,
+			Ignition: c.Ignition,
+			Cooldown: c.Cooldown,
+		})
+	}
+
+	// Build graveyard piece list ordered by importance.
+	graveyard := make([]string, 0, len(p.Graveyard))
+	for _, pr := range p.Graveyard {
+		graveyard = append(graveyard, pr.Color+pr.Type)
+	}
+	// Stable sort by importance order.
+	for i := 1; i < len(graveyard); i++ {
+		for j := i; j > 0 && graveyardPieceImportance(graveyard[j]) < graveyardPieceImportance(graveyard[j-1]); j-- {
+			graveyard[j], graveyard[j-1] = graveyard[j-1], graveyard[j]
+		}
+	}
+
+	hud := PlayerHUDState{
+		PlayerID:            string(pid),
+		Mana:                p.Mana,
+		MaxMana:             p.MaxMana,
+		EnergizedMana:       p.EnergizedMana,
+		MaxEnergized:        p.MaxEnergizedMana,
+		HandCount:           len(p.Hand),
+		CooldownCount:       len(p.Cooldowns),
+		GraveyardCount:      len(p.Graveyard),
+		Strikes:             p.Strikes,
+		DeckCount:           len(p.Deck),
+		SleeveColor:         sleeve,
+		BanishedCards:       banished,
+		GraveyardPieces:     graveyard,
+		CooldownPreview:     preview,
+		CooldownHiddenCount: hidden,
+	}
+
+	// Include hand only for the owning player.
+	if viewerPID == pid {
+		hand := make([]CardSnapshotEntry, 0, len(p.Hand))
+		for _, c := range p.Hand {
+			hand = append(hand, CardSnapshotEntry{
+				CardID:   string(c.CardID),
+				ManaCost: c.ManaCost,
+				Ignition: c.Ignition,
+				Cooldown: c.Cooldown,
+			})
+		}
+		hud.Hand = hand
+	}
+
+	return hud
 }
 
 // serializeBoard converts engine board pieces to compact string identifiers.
