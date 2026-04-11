@@ -1339,6 +1339,31 @@ pre {
   opacity: 0;
 }
 
+/* =============================================================================
+   Animation keyframes
+   ============================================================================= */
+
+@keyframes pm-card-draw-in {
+  from { opacity: 0; transform: translateY(-18px) scale(0.88); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes pm-counter-pulse {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.45); }
+  100% { transform: scale(1); }
+}
+
+@keyframes pm-ignition-activate {
+  0%   { box-shadow: 0 0 0 2px #f0c040, 0 0 12px 4px rgba(240 192 64 / 40%); }
+  50%  { box-shadow: 0 0 0 4px #fff, 0 0 32px 12px rgba(255 255 200 / 70%); }
+  100% { box-shadow: none; }
+}
+
+.pm-zone--ignition.pm-ignition-activating {
+  animation: pm-ignition-activate 0.6s ease-out forwards;
+}
+
 /* Pile view dialog (reuses deck-view-dialog styles) */
 .pile-view-dialog {
   max-width: 760px;

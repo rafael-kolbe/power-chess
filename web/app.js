@@ -1077,7 +1077,9 @@
         renderBoard(msg.payload.board);
         renderStatus(msg.payload);
         renderPlayerHud(msg.payload);
+        runSnapshotAnimations(pmPrevSnapshot, msg.payload);
         renderPlaymat(msg.payload);
+        pmPrevSnapshot = msg.payload;
         syncPlayerRoleLabels(msg.payload);
         handleAutoSkipReaction(msg.payload);
         renderTurnClocks();
@@ -1363,6 +1365,11 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Playmat: previous snapshot reference for animation diffing
+  // ---------------------------------------------------------------------------
+  let pmPrevSnapshot = null;
+
+  // ---------------------------------------------------------------------------
   // Playmat zone elements (cached once)
   // ---------------------------------------------------------------------------
   const pmEl = {
@@ -1395,6 +1402,7 @@
     viewCooldownSelf:  document.getElementById("viewCooldownSelf"),
     viewCooldownOpp:   document.getElementById("viewCooldownOpp"),
     ignitionSelf:      document.getElementById("ignitionSelf"),
+    ignitionOpp:       document.getElementById("ignitionOpp"),
   };
 
   // ---------------------------------------------------------------------------
@@ -1458,6 +1466,211 @@
   // ---------------------------------------------------------------------------
   // Playmat: render all zones from snapshot
   // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
+  // Playmat: animation utilities
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Flies a visual clone of `cardEl` from `fromRect` to `toRect`, then calls `done`.
+   * Used for all "fluid movement" animations between zones.
+   * @param {DOMRect} fromRect - source bounding rect
+   * @param {DOMRect} toRect   - destination bounding rect
+   * @param {HTMLElement|null} cardEl - element to clone (null = use sleeve)
+   * @param {string} [sleeve="blue"] - sleeve color when no card face available
+   * @param {number} [duration=400]  - animation duration in ms
+   * @param {Function} [done]        - called when animation completes
+   */
+  function flyCard(fromRect, toRect, cardEl, sleeve, duration, done) {
+    duration = duration || 400;
+    const overlay = document.createElement("div");
+    overlay.style.cssText = [
+      "position:fixed",
+      "pointer-events:none",
+      `width:${fromRect.width}px`,
+      `height:${fromRect.height}px`,
+      `left:${fromRect.left}px`,
+      `top:${fromRect.top}px`,
+      "z-index:3000",
+      "border-radius:4px",
+      "box-shadow:0 8px 24px rgba(0,0,0,.7)",
+      "transform-origin:center center"
+    ].join(";");
+
+    if (cardEl) {
+      const clone = cardEl.cloneNode(true);
+      clone.style.cssText = "width:100%;height:100%;pointer-events:none";
+      overlay.appendChild(clone);
+    } else {
+      overlay.style.background = `url('${sleeveUrl(sleeve)}') center/100% 100% no-repeat #263040`;
+    }
+
+    document.body.appendChild(overlay);
+
+    const dx = toRect.left + toRect.width / 2 - (fromRect.left + fromRect.width / 2);
+    const dy = toRect.top + toRect.height / 2 - (fromRect.top + fromRect.height / 2);
+    const scaleX = toRect.width / fromRect.width;
+    const scaleY = toRect.height / fromRect.height;
+
+    const anim = overlay.animate([
+      { transform: "translate(0,0) scale(1)", opacity: 1 },
+      { transform: `translate(${dx}px,${dy}px) scale(${scaleX},${scaleY})`, opacity: 0.9 }
+    ], { duration, easing: "cubic-bezier(0.22,0.61,0.36,1)", fill: "forwards" });
+
+    anim.onfinish = () => {
+      overlay.remove();
+      if (done) done();
+    };
+  }
+
+  /** Returns the bounding rect of the given element or null. */
+  function zoneRect(el) {
+    return el ? el.getBoundingClientRect() : null;
+  }
+
+  /**
+   * Animates counter value change on a given element.
+   * Briefly highlights (pulse) when the number decreases.
+   */
+  function animateCounter(el, oldVal, newVal) {
+    if (!el || oldVal === newVal) return;
+    el.textContent = String(newVal);
+    if (newVal < oldVal) {
+      el.animate([
+        { color: "#fff", textShadow: "0 0 12px #f0c040", transform: "scale(1.4)" },
+        { color: "#ffdc80", textShadow: "0 0 6px #000", transform: "scale(1)" }
+      ], { duration: 500, easing: "ease-out" });
+    }
+  }
+
+  /**
+   * Runs all animations needed when transitioning from prevSnap to nextSnap.
+   * Animations are fire-and-forget; the DOM update happens normally after.
+   */
+  function runSnapshotAnimations(prevSnap, nextSnap) {
+    if (!prevSnap || !nextSnap) return;
+    const localPID = playerEl.value;
+
+    const prevSelf = prevSnap.players?.find((p) => p.playerId === localPID);
+    const nextSelf = nextSnap.players?.find((p) => p.playerId === localPID);
+    const prevOpp  = prevSnap.players?.find((p) => p.playerId !== localPID);
+    const nextOpp  = nextSnap.players?.find((p) => p.playerId !== localPID);
+
+    if (!prevSelf || !nextSelf) return;
+
+    // 1. Card draw: self hand count increased → fly from deck to last hand slot.
+    if (nextSelf.handCount > prevSelf.handCount) {
+      animateCardDraw(pmEl.deckSelf, pmEl.handSelf, false, nextSelf.sleeveColor);
+    }
+    // Opponent drew a card (always show sleeve, never reveal face).
+    if (nextOpp && prevOpp && nextOpp.handCount > prevOpp.handCount) {
+      animateCardDraw(pmEl.deckOpp, pmEl.handOpp, true, nextOpp.sleeveColor);
+    }
+
+    // 2. Ignition counter decrease (card was in ignition both before and after, turns went down).
+    if (prevSnap.ignitionOn && nextSnap.ignitionOn &&
+        prevSnap.ignitionOwner === nextSnap.ignitionOwner &&
+        nextSnap.ignitionTurnsRemaining < prevSnap.ignitionTurnsRemaining) {
+      const counterEl = nextSnap.ignitionOwner === localPID
+        ? pmEl.ignitionCounterSelf
+        : pmEl.ignitionCounterOpp;
+      animateCounter(counterEl, prevSnap.ignitionTurnsRemaining, nextSnap.ignitionTurnsRemaining);
+    }
+
+    // 3a. Card placed in ignition: was not occupied, now is → brief glow on ignition zone.
+    if (!prevSnap.ignitionOn && nextSnap.ignitionOn) {
+      const slotEl = nextSnap.ignitionOwner === localPID ? pmEl.ignitionSelf : pmEl.ignitionOpp;
+      if (slotEl) {
+        slotEl.classList.remove("pm-ignition-activating");
+        void slotEl.offsetWidth; // force reflow to restart animation
+        slotEl.classList.add("pm-ignition-activating");
+        setTimeout(() => slotEl.classList.remove("pm-ignition-activating"), 650);
+      }
+    }
+
+    // 3b. Ignition resolved (was occupied, now gone) → fly to cooldown pile.
+    if (prevSnap.ignitionOn && !nextSnap.ignitionOn && prevSnap.ignitionOwner) {
+      const wasOwn = prevSnap.ignitionOwner === localPID;
+      const fromEl = wasOwn ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
+      const toEl   = wasOwn ? pmEl.cooldownCardsSelf : pmEl.cooldownCardsOpp;
+      const fr = zoneRect(fromEl);
+      const tr = zoneRect(toEl);
+      if (fr && tr) {
+        const def = getCardDef(prevSnap.ignitionCard);
+        const face = def ? (() => {
+          const el = createPowerCard({ type: def.type, name: def.name, description: def.description,
+            example: def.example, mana: def.mana, ignition: def.ignition, cooldown: def.cooldown, cardWidth: "86px" });
+          el.style.cssText = "width:100%;height:100%";
+          return el;
+        })() : null;
+        flyCard(fr, tr, face, prevSelf.sleeveColor || "blue", 450);
+      }
+    }
+
+    // 4. Card banished: banishedCards length increased → fly from deck or ignition area to banish zone.
+    if (nextSelf.banishedCards.length > prevSelf.banishedCards.length) {
+      const toEl = pmEl.banishTopSelf;
+      const fromEl = pmEl.ignitionCardSelf;
+      const fr = zoneRect(fromEl) || zoneRect(pmEl.deckSelf);
+      const tr = zoneRect(toEl);
+      if (fr && tr) flyCard(fr, tr, null, nextSelf.sleeveColor || "blue", 500);
+    }
+    if (nextOpp && prevOpp && nextOpp.banishedCards.length > prevOpp.banishedCards.length) {
+      const toEl = pmEl.banishTopOpp;
+      const fromEl = pmEl.ignitionCardOpp;
+      const fr = zoneRect(fromEl) || zoneRect(pmEl.deckOpp);
+      const tr = zoneRect(toEl);
+      if (fr && tr) flyCard(fr, tr, null, nextOpp?.sleeveColor || "blue", 500);
+    }
+
+    // 5. Card returned to deck: deckCount increased while hand/cooldown decreased → fly from source to deck.
+    if (nextSelf.deckCount > prevSelf.deckCount && nextSelf.cooldownCount < prevSelf.cooldownCount) {
+      const fromEl = pmEl.cooldownCardsSelf;
+      const toEl   = pmEl.deckSelf;
+      const fr = zoneRect(fromEl);
+      const tr = zoneRect(toEl);
+      if (fr && tr) flyCard(fr, tr, null, nextSelf.sleeveColor || "blue", 500);
+    }
+
+    // 6. Cooldown counters decreased: animate each visible entry.
+    animateCooldownCounters(prevSelf.cooldownPreview, nextSelf.cooldownPreview);
+    if (prevOpp && nextOpp) {
+      animateCooldownCounters(prevOpp.cooldownPreview, nextOpp.cooldownPreview);
+    }
+  }
+
+  function animateCardDraw(fromZoneEl, toHandRowEl, isFaceDown, sleeve) {
+    const fr = zoneRect(fromZoneEl);
+    if (!fr || !toHandRowEl) return;
+    const slots = toHandRowEl.querySelectorAll(".pm-hand-slot:not(.pm-hand-slot--empty)");
+    const lastSlot = slots[slots.length - 1] || toHandRowEl;
+    const tr = zoneRect(lastSlot);
+    if (!tr) return;
+    flyCard(fr, tr, null, sleeve || "blue", 380);
+  }
+
+  function animateCooldownCounters(prevList, nextList) {
+    if (!prevList || !nextList) return;
+    for (const nextEntry of nextList) {
+      const prevEntry = prevList.find((p) => p.cardId === nextEntry.cardId);
+      if (!prevEntry) continue;
+      if (nextEntry.turnsRemaining < prevEntry.turnsRemaining) {
+        // Find the corresponding DOM row (by card name text match).
+        // This is approximate but correct enough for the animation.
+        const def = getCardDef(nextEntry.cardId);
+        const name = def ? def.name : nextEntry.cardId;
+        const rows = document.querySelectorAll(".pm-cooldown-entry");
+        for (const row of rows) {
+          const nameEl = row.querySelector(".pm-cooldown-entry__name");
+          const turnsEl = row.querySelector(".pm-cooldown-entry__turns");
+          if (nameEl?.textContent === name && turnsEl) {
+            animateCounter(turnsEl, prevEntry.turnsRemaining, nextEntry.turnsRemaining);
+            break;
+          }
+        }
+      }
+    }
+  }
 
   /** @param {object} snapshot */
   function renderPlaymat(snapshot) {
@@ -2333,6 +2546,7 @@
     joinedRoom = false;
     gameStarted = false;
     lastSnapshot = null;
+    pmPrevSnapshot = null;
     setLobbyFooterVisible(true);
     lobbyScreenEl.classList.remove("hidden");
     gameShellEl.classList.add("hidden");
