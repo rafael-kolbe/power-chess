@@ -111,11 +111,29 @@ Broadcast do estado da sala. Campos principais:
 | Área | Conteúdo |
 |------|-----------|
 | Sala | `roomId`, `roomName`, `roomPrivate`, `roomPassword`, `connectedA/B`, `gameStarted` |
-| Turno | `turnPlayer`, `turnSeconds`, `turnNumber`, `ignitionOn`, `ignitionCard` |
+| Turno | `turnPlayer`, `turnSeconds`, `turnNumber`, `ignitionOn`, `ignitionCard`, `ignitionOwner`, `ignitionTurnsRemaining` |
+| Perspectiva | `viewerPlayerId` — identifica o destinatário deste snapshot (determina visibilidade da mão) |
 | Tabuleiro | `board` 8×8 (códigos `wK`, `bP`, `""` vazio), `enPassant`, `castlingRights` |
-| Jogadores | `players[]`: `mana`, `maxMana`, `energizedMana`, `maxEnergized`, `handCount`, `cooldownCount`, `graveyardCount`, `strikes` |
+| Jogadores | `players[]`: `mana`, `maxMana`, `energizedMana`, `maxEnergized`, `handCount`, `cooldownCount`, `graveyardCount`, `strikes`, `deckCount`, `sleeveColor`, `hand` (privado — só no snapshot do próprio jogador), `banishedCards[]`, `graveyardPieces[]` (ordenado Q>R>B>N>P), `cooldownPreview[]` (até 4), `cooldownHiddenCount` |
 | Efeitos | `pendingEffects`, `pendingCapture`, `reactionWindow` |
 | Fim | `matchEnded`, `winner`, `endReason`, `rematchA/B`, `postMatchMsLeft` |
+
+**Privacidade**: o servidor envia um snapshot por cliente via `BroadcastSnapshot()`; apenas o campo `hand` do próprio jogador é populado; oponentes recebem `hand: null`.
+
+**Campos de zona por jogador:**
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `deckCount` | `int` | Quantidade de cartas restantes no deck |
+| `sleeveColor` | `string` | Cor do sleeve: `blue`, `green`, `pink`, `red` |
+| `hand` | `CardSnapshotEntry[]` | Mão do jogador (só no snapshot do dono) |
+| `banishedCards` | `CardSnapshotEntry[]` | Cartas banidas, topo = mais recente |
+| `graveyardPieces` | `string[]` | Peças capturadas pelo oponente (código `wQ`, `bP`, …) ordenadas por importância |
+| `cooldownPreview` | `CooldownPreviewEntry[]` | Até 4 cartas com recarga mais próxima de terminar |
+| `cooldownHiddenCount` | `int` | Quantidade de cartas na fila de recarga além das 4 exibidas |
+
+**`CardSnapshotEntry`**: `{ cardId, manaCost, ignition, cooldown }`  
+**`CooldownPreviewEntry`**: `{ cardId, manaCost, ignition, cooldown, turnsRemaining }`
 
 **Exemplo ilustrativo** (estrutura; valores reais variam):
 
@@ -257,6 +275,14 @@ Broadcast do estado da sala. Campos principais:
 
 ```json
 { "id": "req-4", "type": "activate_card", "payload": { "handIndex": 0 } }
+```
+
+### `draw_card`
+
+Compra uma carta do deck pagando 2 mana. Só permitido no próprio turno, fora de janelas de reação abertas, com pelo menos 1 slot vazio na mão.
+
+```json
+{ "id": "req-4b", "type": "draw_card", "payload": {} }
 ```
 
 ### `resolve_pending_effect`
