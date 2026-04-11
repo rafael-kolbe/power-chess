@@ -1200,6 +1200,12 @@ pre {
   box-shadow: 0 0 0 2px #f0c040, 0 0 12px 3px rgba(240 192 64 / 50%);
 }
 
+/* Stronger glow when dragging directly over ignition slot */
+.pm-zone--ignition-self.pm-drop-hover {
+  box-shadow: 0 0 0 3px #f8d860, 0 0 20px 6px rgba(248 216 96 / 65%);
+  background-blend-mode: screen;
+}
+
 .pm-ignition-card {
   width: var(--pm-card-width);
   height: var(--pm-card-height);
@@ -1293,6 +1299,11 @@ pre {
 .pm-hand-slot--empty {
   cursor: default;
   opacity: 0.35;
+}
+
+.pm-hand-slot--inactive {
+  cursor: default;
+  filter: brightness(0.75) saturate(0.6);
 }
 
 .pm-hand-slot__card {
