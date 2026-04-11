@@ -1615,11 +1615,15 @@
     container.innerHTML = "";
     const slots = 5;
     const hand = self.hand || [];
+    const snap = lastSnapshot;
+    const isMyTurn = snap && snap.turnPlayer === playerEl.value;
+    const ignitionOccupied = snap && snap.ignitionOn;
     for (let i = 0; i < slots; i++) {
       const slot = document.createElement("div");
-      slot.className = "pm-hand-slot" + (i >= hand.length ? " pm-hand-slot--empty" : "");
+      const hasCard = i < hand.length;
+      slot.className = "pm-hand-slot" + (hasCard ? "" : " pm-hand-slot--empty");
       slot.dataset.handIndex = i;
-      if (i < hand.length) {
+      if (hasCard) {
         const entry = hand[i];
         const def = getCardDef(entry.cardId);
         const inner = document.createElement("div");
@@ -1634,7 +1638,10 @@
           attachCardHover(slot, { ...def, manaCost: def.mana });
         }
         slot.appendChild(inner);
-        slot.setAttribute("draggable", "true");
+        // Only mark as draggable when it could be activated.
+        const canActivate = isMyTurn && (!ignitionOccupied || entry.cardId === "save-it-for-later");
+        slot.setAttribute("draggable", canActivate ? "true" : "false");
+        slot.classList.toggle("pm-hand-slot--inactive", !canActivate);
         slot.addEventListener("dragstart", (ev) => onHandCardDragStart(ev, i, entry));
       }
       container.appendChild(slot);
@@ -1684,22 +1691,79 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Playmat: drag-and-drop stub (wired in full in next phase)
+  // Playmat: drag-and-drop (hand card → ignition slot)
   // ---------------------------------------------------------------------------
   let draggingHandIndex = null;
   let draggingHandEntry = null;
 
   function onHandCardDragStart(ev, handIndex, entry) {
+    const snap = lastSnapshot;
+    // Gate: ignition slot occupied and this is not a "save-it-for-later" type card.
+    if (snap && snap.ignitionOn && entry.cardId !== "save-it-for-later") {
+      ev.preventDefault();
+      return;
+    }
+    // Gate: not the player's turn.
+    if (!snap || snap.turnPlayer !== playerEl.value) {
+      ev.preventDefault();
+      return;
+    }
     draggingHandIndex = handIndex;
     draggingHandEntry = entry;
     if (pmEl.ignitionSelf) pmEl.ignitionSelf.classList.add("pm-drop-active");
     ev.dataTransfer.effectAllowed = "move";
+    ev.dataTransfer.setData("text/plain", String(handIndex));
     ev.currentTarget.addEventListener("dragend", () => {
       if (pmEl.ignitionSelf) pmEl.ignitionSelf.classList.remove("pm-drop-active");
       draggingHandIndex = null;
       draggingHandEntry = null;
     }, { once: true });
   }
+
+  // Wire up the ignition slot as a drop target.
+  function setupIgnitionDropTarget() {
+    const slot = pmEl.ignitionSelf;
+    if (!slot) return;
+
+    slot.addEventListener("dragover", (ev) => {
+      // Only allow drop when a hand card is being dragged.
+      if (draggingHandIndex === null) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = "move";
+    });
+
+    slot.addEventListener("dragleave", (ev) => {
+      // Ignore dragleave events that fire when entering a child element.
+      if (slot.contains(ev.relatedTarget)) return;
+      slot.classList.remove("pm-drop-hover");
+    });
+
+    slot.addEventListener("dragenter", (ev) => {
+      if (draggingHandIndex === null) return;
+      ev.preventDefault();
+      slot.classList.add("pm-drop-hover");
+    });
+
+    slot.addEventListener("drop", (ev) => {
+      ev.preventDefault();
+      slot.classList.remove("pm-drop-hover");
+      slot.classList.remove("pm-drop-active");
+      const idx = draggingHandIndex;
+      draggingHandIndex = null;
+      draggingHandEntry = null;
+      if (idx === null) return;
+      send("activate_card", { handIndex: idx });
+    });
+  }
+
+  setupIgnitionDropTarget();
+
+  // Prevent cards from being dropped anywhere outside the game shell.
+  document.addEventListener("dragover", (ev) => {
+    if (!gameShellEl.contains(ev.target) && draggingHandIndex !== null) {
+      ev.dataTransfer.dropEffect = "none";
+    }
+  });
 
   // Pile view modal (shared for cooldown/banish inspection)
   function openPileView(title, cards, sleeve) {
