@@ -91,6 +91,13 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusInternalServerError, "registration_failed")
 		return
 	}
+	if s.decks != nil {
+		if err := s.decks.EnsureDefaultDeckForUser(user.ID); err != nil {
+			_ = s.auth.DeleteUserByID(user.ID)
+			writeAuthError(w, http.StatusInternalServerError, "registration_failed")
+			return
+		}
+	}
 	token, err := s.auth.IssueToken(user)
 	if err != nil {
 		writeAuthError(w, http.StatusInternalServerError, "token_failed")

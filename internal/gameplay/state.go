@@ -396,12 +396,7 @@ func (s *MatchState) handleSaveItForLater(pid PlayerID) error {
 }
 
 func hasSkill(id PlayerSkillID) bool {
-	for _, s := range InitialPlayerSkills() {
-		if s.ID == id {
-			return true
-		}
-	}
-	return false
+	return ValidPlayerSkillID(id)
 }
 
 func (s *MatchState) addMana(pid PlayerID, amount int) {

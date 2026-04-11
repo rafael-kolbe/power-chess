@@ -159,36 +159,36 @@ type CastlingRightsSnapshot struct {
 
 // StateSnapshotPayload is a transport-friendly match summary for HUD updates.
 type StateSnapshotPayload struct {
-	RoomID          string                 `json:"roomId"`
-	RoomName        string                 `json:"roomName"`
-	RoomPrivate     bool                   `json:"roomPrivate"`
-	RoomPassword    string                 `json:"roomPassword,omitempty"`
-	ConnectedA      int                    `json:"connectedA"`
-	ConnectedB      int                    `json:"connectedB"`
-	PlayerAName     string                 `json:"playerAName,omitempty"`
-	PlayerBName     string                 `json:"playerBName,omitempty"`
-	GameStarted     bool                   `json:"gameStarted"`
+	RoomID       string `json:"roomId"`
+	RoomName     string `json:"roomName"`
+	RoomPrivate  bool   `json:"roomPrivate"`
+	RoomPassword string `json:"roomPassword,omitempty"`
+	ConnectedA   int    `json:"connectedA"`
+	ConnectedB   int    `json:"connectedB"`
+	PlayerAName  string `json:"playerAName,omitempty"`
+	PlayerBName  string `json:"playerBName,omitempty"`
+	GameStarted  bool   `json:"gameStarted"`
 	// ReconnectPendingFor is "A" or "B" while that seat's socket is gone but the grace timer has not fired yet.
-	ReconnectPendingFor     string `json:"reconnectPendingFor,omitempty"`
-	ReconnectDeadlineUnixMs int64  `json:"reconnectDeadlineUnixMs,omitempty"`
-	TurnPlayer      string                 `json:"turnPlayer"`
-	TurnSeconds     int                    `json:"turnSeconds"`
-	TurnNumber      int                    `json:"turnNumber"`
-	IgnitionOn      bool                   `json:"ignitionOn"`
-	IgnitionCard    string                 `json:"ignitionCard,omitempty"`
-	Board           [8][8]string           `json:"board"`
-	EnPassant       EnPassantStateSnapshot `json:"enPassant"`
-	CastlingRights  CastlingRightsSnapshot `json:"castlingRights"`
-	Players         []PlayerHUDState       `json:"players"`
-	PendingEffects  []PendingEffectState   `json:"pendingEffects"`
-	ReactionWindow  ReactionWindowState    `json:"reactionWindow"`
-	PendingCapture  PendingCaptureState    `json:"pendingCapture"`
-	MatchEnded      bool                   `json:"matchEnded"`
-	Winner          string                 `json:"winner,omitempty"`
-	EndReason       string                 `json:"endReason,omitempty"`
-	RematchA        bool                   `json:"rematchA"`
-	RematchB        bool                   `json:"rematchB"`
-	PostMatchMsLeft int64                  `json:"postMatchMsLeft,omitempty"`
+	ReconnectPendingFor     string                 `json:"reconnectPendingFor,omitempty"`
+	ReconnectDeadlineUnixMs int64                  `json:"reconnectDeadlineUnixMs,omitempty"`
+	TurnPlayer              string                 `json:"turnPlayer"`
+	TurnSeconds             int                    `json:"turnSeconds"`
+	TurnNumber              int                    `json:"turnNumber"`
+	IgnitionOn              bool                   `json:"ignitionOn"`
+	IgnitionCard            string                 `json:"ignitionCard,omitempty"`
+	Board                   [8][8]string           `json:"board"`
+	EnPassant               EnPassantStateSnapshot `json:"enPassant"`
+	CastlingRights          CastlingRightsSnapshot `json:"castlingRights"`
+	Players                 []PlayerHUDState       `json:"players"`
+	PendingEffects          []PendingEffectState   `json:"pendingEffects"`
+	ReactionWindow          ReactionWindowState    `json:"reactionWindow"`
+	PendingCapture          PendingCaptureState    `json:"pendingCapture"`
+	MatchEnded              bool                   `json:"matchEnded"`
+	Winner                  string                 `json:"winner,omitempty"`
+	EndReason               string                 `json:"endReason,omitempty"`
+	RematchA                bool                   `json:"rematchA"`
+	RematchB                bool                   `json:"rematchB"`
+	PostMatchMsLeft         int64                  `json:"postMatchMsLeft,omitempty"`
 }
 
 // DecodeEnvelope validates and decodes a raw websocket frame into Envelope.

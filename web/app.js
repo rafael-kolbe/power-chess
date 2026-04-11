@@ -94,6 +94,39 @@
   const privateJoinErrorEl = document.getElementById("privateJoinError");
   const cardMarqueeLabelEl = document.getElementById("cardMarqueeLabel");
   const mainFooterEl = document.getElementById("mainFooter");
+  const lobbyDeckRowEl = document.getElementById("lobbyDeckRow");
+  const lobbyDeckSelectEl = document.getElementById("lobbyDeckSelect");
+  const lobbyDeckHintEl = document.getElementById("lobbyDeckHint");
+  const lobbyDeckAlertEl = document.getElementById("lobbyDeckAlert");
+  const lobbyDeckCreatePanelEl = document.getElementById("lobbyDeckCreatePanel");
+  const newDeckNameEl = document.getElementById("newDeckName");
+  const newDeckSkillEl = document.getElementById("newDeckSkill");
+  const newDeckSleeveEl = document.getElementById("newDeckSleeve");
+  const newDeckSubmitBtnEl = document.getElementById("newDeckSubmitBtn");
+
+  /** Mirrors server gameplay.DefaultDeckPresetCardIDs — keep in sync when the default list changes. */
+  const DEFAULT_DECK_CARD_IDS = [
+    "energy-gain",
+    "energy-gain",
+    "energy-gain",
+    "knight-touch",
+    "knight-touch",
+    "bishop-touch",
+    "bishop-touch",
+    "rook-touch",
+    "rook-touch",
+    "sacrifice-of-the-masses",
+    "backstab",
+    "backstab",
+    "extinguish",
+    "extinguish",
+    "clairvoyance",
+    "save-it-for-later",
+    "retaliate",
+    "retaliate",
+    "retaliate",
+    "counterattack"
+  ];
 
   const i18n = {
     "en-US": {
@@ -203,6 +236,14 @@
       authUnavailable: "Accounts are disabled on this server (no database). You can still play as a guest.",
       lobbySignedInAs: "Signed in as {username}",
       lobbyGuest: "Guest (no account)",
+      lobbyDeckLabel: "Deck for match",
+      lobbyDeckHint: "This deck is used when you join or create a room. Change it before connecting.",
+      noSavedDeckAlert: "You have no saved deck. Create one below (20 cards) before playing.",
+      newDeckNameLabel: "New deck name",
+      newDeckSkillLabel: "Player skill",
+      newDeckSleeveLabel: "Sleeve",
+      newDeckSubmit: "Save deck (20 cards)",
+      deckNameRequired: "Enter a deck name.",
       debugLogsTitle: "Debug logs"
     },
     "pt-BR": {
@@ -312,6 +353,14 @@
       authUnavailable: "Contas desativadas neste servidor (sem banco). Você ainda pode jogar como convidado.",
       lobbySignedInAs: "Conectado como {username}",
       lobbyGuest: "Convidado (sem conta)",
+      lobbyDeckLabel: "Deck para a partida",
+      lobbyDeckHint: "Este deck é usado ao criar ou entrar em uma sala. Altere antes de conectar.",
+      noSavedDeckAlert: "Você não tem nenhum deck salvo. Crie um abaixo (20 cartas) antes de jogar.",
+      newDeckNameLabel: "Nome do novo deck",
+      newDeckSkillLabel: "Habilidade do jogador",
+      newDeckSleeveLabel: "Sleeve",
+      newDeckSubmit: "Salvar deck (20 cartas)",
+      deckNameRequired: "Informe o nome do deck.",
       debugLogsTitle: "Logs de debug"
     }
   };
@@ -363,6 +412,7 @@
     if (!authBackendAvailable) {
       lobbyUserLabelEl.textContent = t("lobbyGuest");
       logoutBtnEl.classList.add("hidden");
+      void refreshLobbyDecks();
       return;
     }
     if (authUser) {
@@ -412,6 +462,7 @@
       hideAuthOverlay();
       authUnavailableHintEl.classList.add("hidden");
       refreshLobbyUserLabel();
+      await refreshLobbyDecks();
       return;
     }
     authUser = null;
@@ -419,10 +470,12 @@
     if (r.status === 401) {
       showAuthOverlay();
       refreshLobbyUserLabel();
+      await refreshLobbyDecks();
       return;
     }
     hideAuthOverlay();
     refreshLobbyUserLabel();
+    await refreshLobbyDecks();
   }
 
   async function bootstrapAuthSession() {
@@ -482,6 +535,7 @@
       authUser = data.user || null;
       hideAuthOverlay();
       refreshLobbyUserLabel();
+      await refreshLobbyDecks();
     } catch (_) {
       setAuthErrorVisible(t("authErrorNetwork"));
     }
@@ -513,6 +567,7 @@
       authUser = data.user || null;
       hideAuthOverlay();
       refreshLobbyUserLabel();
+      await refreshLobbyDecks();
     } catch (_) {
       setAuthErrorVisible(t("authErrorNetwork"));
     }
@@ -525,6 +580,92 @@
     refreshLobbyUserLabel();
     authLoginEmailEl.value = "";
     authLoginPasswordEl.value = "";
+    void refreshLobbyDecks();
+  }
+
+  function populateDeckBuilderSelects() {
+    if (newDeckSkillEl.options.length > 0) return;
+    const skills = [
+      ["reinforcements", "Reinforcements"],
+      ["march-forward", "March Forward!"],
+      ["limitless-potential", "Limitless Potential"],
+      ["dimension-shift", "Dimension Shift"]
+    ];
+    for (const [id, label] of skills) {
+      const o = document.createElement("option");
+      o.value = id;
+      o.textContent = label;
+      newDeckSkillEl.appendChild(o);
+    }
+    const sleeves = [
+      ["blue", "Blue"],
+      ["green", "Green"],
+      ["pink", "Pink"],
+      ["red", "Red"]
+    ];
+    for (const [id, label] of sleeves) {
+      const o = document.createElement("option");
+      o.value = id;
+      o.textContent = label;
+      newDeckSleeveEl.appendChild(o);
+    }
+  }
+
+  async function refreshLobbyDecks() {
+    lobbyDeckRowEl.classList.add("hidden");
+    lobbyDeckCreatePanelEl.classList.add("hidden");
+    lobbyDeckAlertEl.classList.add("hidden");
+    lobbyDeckHintEl.textContent = "";
+    lobbyDeckSelectEl.innerHTML = "";
+    if (!authBackendAvailable || !authUser || !readStoredToken()) {
+      return;
+    }
+    populateDeckBuilderSelects();
+    try {
+      const r = await fetch("/api/decks", { headers: { ...authFetchHeaders(), Accept: "application/json" } });
+      if (r.status === 503 || r.status === 401) return;
+      if (!r.ok) return;
+      const data = await r.json();
+      const decks = data.decks || [];
+      const lobbyId = data.lobbyDeckId;
+      for (const d of decks) {
+        const opt = document.createElement("option");
+        opt.value = String(d.id);
+        opt.textContent = `${d.name} (#${d.id})`;
+        lobbyDeckSelectEl.appendChild(opt);
+      }
+      if (lobbyId != null && lobbyDeckSelectEl.querySelector(`option[value="${lobbyId}"]`)) {
+        lobbyDeckSelectEl.value = String(lobbyId);
+      } else if (decks[0]) {
+        lobbyDeckSelectEl.value = String(decks[0].id);
+      }
+      lobbyDeckHintEl.textContent = t("lobbyDeckHint");
+      lobbyDeckRowEl.classList.remove("hidden");
+      lobbyDeckCreatePanelEl.classList.remove("hidden");
+      if (decks.length === 0) {
+        lobbyDeckAlertEl.textContent = t("noSavedDeckAlert");
+        lobbyDeckAlertEl.classList.remove("hidden");
+      }
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  async function ensureHasDeckForMatch() {
+    try {
+      const r = await fetch("/api/decks", { headers: { ...authFetchHeaders(), Accept: "application/json" } });
+      if (!r.ok) return true;
+      const data = await r.json();
+      const decks = data.decks || [];
+      if (decks.length === 0) {
+        alert(t("noSavedDeckAlert"));
+        await refreshLobbyDecks();
+        return false;
+      }
+      return true;
+    } catch (_) {
+      return true;
+    }
   }
 
   function applyTranslations() {
@@ -593,6 +734,12 @@
     if (cardMarqueeLabelEl) {
       cardMarqueeLabelEl.textContent = t("cardMarqueeTitle");
     }
+    document.getElementById("lobbyDeckLabel").textContent = t("lobbyDeckLabel");
+    document.getElementById("newDeckNameLabel").textContent = t("newDeckNameLabel");
+    document.getElementById("newDeckSkillLabel").textContent = t("newDeckSkillLabel");
+    document.getElementById("newDeckSleeveLabel").textContent = t("newDeckSleeveLabel");
+    newDeckSubmitBtnEl.textContent = t("newDeckSubmit");
+    lobbyDeckHintEl.textContent = lobbyDeckRowEl.classList.contains("hidden") ? "" : t("lobbyDeckHint");
   }
 
   /**
@@ -842,7 +989,10 @@
     return u.toString();
   }
 
-  function connectToRoom(roomId, pieceTypeOverride, roomNameOverride, privateOverride, passwordOverride) {
+  async function connectToRoom(roomId, pieceTypeOverride, roomNameOverride, privateOverride, passwordOverride) {
+    if (readStoredToken() && authBackendAvailable) {
+      if (!(await ensureHasDeckForMatch())) return;
+    }
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.close();
     }
@@ -1715,6 +1865,7 @@
     hideLobbyPrivatePasswordError();
     renderTurnClocks();
     startRoomListPolling();
+    void refreshLobbyDecks();
   }
 
   function renderRoomList(rooms) {
@@ -1745,7 +1896,7 @@
             if (typed == null) return;
             joinPassword = typed;
           }
-          connectToRoom(rm.roomId, pieceType, rm.roomName || "Let's Play!", false, joinPassword);
+          void connectToRoom(rm.roomId, pieceType, rm.roomName || "Let's Play!", false, joinPassword);
         })();
       });
       roomListEl.appendChild(li);
@@ -1798,7 +1949,50 @@
   }
 
   document.getElementById("connectBtn").addEventListener("click", () => {
-    connectToRoom("", pieceTypeEl.value, roomNameEl.value);
+    void connectToRoom("", pieceTypeEl.value, roomNameEl.value);
+  });
+
+  lobbyDeckSelectEl.addEventListener("change", async () => {
+    const id = Number(lobbyDeckSelectEl.value, 10);
+    if (!id || !readStoredToken()) return;
+    try {
+      await fetch("/api/me/lobby-deck", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authFetchHeaders() },
+        body: JSON.stringify({ deckId: id })
+      });
+    } catch (_) {
+      /* ignore */
+    }
+  });
+
+  newDeckSubmitBtnEl.addEventListener("click", async () => {
+    const name = (newDeckNameEl.value || "").trim();
+    if (!name) {
+      alert(t("deckNameRequired"));
+      return;
+    }
+    try {
+      const r = await fetch("/api/decks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authFetchHeaders() },
+        body: JSON.stringify({
+          name,
+          cardIds: DEFAULT_DECK_CARD_IDS,
+          playerSkillId: newDeckSkillEl.value,
+          sleeveColor: newDeckSleeveEl.value
+        })
+      });
+      if (!r.ok) {
+        const errTxt = await authResponseErrorMessage(r, "authErrorGeneric");
+        alert(errTxt);
+        return;
+      }
+      newDeckNameEl.value = "";
+      await refreshLobbyDecks();
+    } catch (_) {
+      alert(t("authErrorNetwork"));
+    }
   });
 
   function returnToLobbyAfterMatch() {

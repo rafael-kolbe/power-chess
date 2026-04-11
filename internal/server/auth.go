@@ -32,8 +32,10 @@ type userModel struct {
 	Email        string `gorm:"size:255;uniqueIndex:idx_users_email;not null"`
 	PasswordHash string `gorm:"size:255;not null"`
 	Role         string `gorm:"size:16;not null;default:user"`
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// LobbyDeckID is the deck selected for the next match (FK to user_decks.id, same user).
+	LobbyDeckID *uint64 `gorm:"index:idx_users_lobby_deck"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // TableName keeps a stable table name for migrations.
@@ -160,6 +162,11 @@ func (s *AuthService) ParseToken(tokenString string) (*jwtUserClaims, error) {
 		return nil, errors.New("invalid token")
 	}
 	return &claims, nil
+}
+
+// DeleteUserByID removes a user row (e.g. rollback after failed post-registration steps).
+func (s *AuthService) DeleteUserByID(id uint64) error {
+	return s.db.Delete(&userModel{}, id).Error
 }
 
 // UserByID loads a user by primary key.

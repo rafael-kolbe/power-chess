@@ -14,32 +14,38 @@ import (
 
 // RoomSession stores per-room runtime state used by websocket handlers.
 type RoomSession struct {
-	RoomID            string
-	RoomName          string
-	RoomPrivate       bool
-	RoomPassword      string
-	Engine            *match.Engine
-	Players           map[string]gameplay.PlayerID
-	clients           map[*Client]struct{}
-	clientsM          sync.RWMutex
-	stateM            sync.Mutex
-	seen              map[string]struct{}
-	connectedByPlayer map[gameplay.PlayerID]int
-	disconnectTimers    map[gameplay.PlayerID]*time.Timer
-	disconnectDeadline  map[gameplay.PlayerID]time.Time // when grace timer fires for that seat
-	DisconnectGrace     time.Duration
-	matchEnded        bool
-	winner            gameplay.PlayerID
-	endReason         string
-	reactionTimeout   time.Duration
-	reactionDeadline  time.Time
-	turnDeadline      time.Time
-	turnDeadlineFor   gameplay.PlayerID
-	postMatchDeadline time.Time
-	rematchVotes      map[gameplay.PlayerID]bool
-	lastActivity      time.Time
+	RoomID             string
+	RoomName           string
+	RoomPrivate        bool
+	RoomPassword       string
+	Engine             *match.Engine
+	Players            map[string]gameplay.PlayerID
+	clients            map[*Client]struct{}
+	clientsM           sync.RWMutex
+	stateM             sync.Mutex
+	seen               map[string]struct{}
+	connectedByPlayer  map[gameplay.PlayerID]int
+	disconnectTimers   map[gameplay.PlayerID]*time.Timer
+	disconnectDeadline map[gameplay.PlayerID]time.Time // when grace timer fires for that seat
+	DisconnectGrace    time.Duration
+	matchEnded         bool
+	winner             gameplay.PlayerID
+	endReason          string
+	reactionTimeout    time.Duration
+	reactionDeadline   time.Time
+	turnDeadline       time.Time
+	turnDeadlineFor    gameplay.PlayerID
+	postMatchDeadline  time.Time
+	rematchVotes       map[gameplay.PlayerID]bool
+	lastActivity       time.Time
 	// displayNameByPlayer holds authenticated usernames per seat for the match HUD (cleared when a seat disconnects).
 	displayNameByPlayer map[gameplay.PlayerID]string
+	// parent is set when the room is registered on a Server (used to resolve saved decks); nil in isolated tests.
+	parent *Server
+	// authUIDByPlayer maps each seat to the account id (0 = guest / no auth).
+	authUIDByPlayer map[gameplay.PlayerID]uint64
+	// deckMatchInitialized is true after the engine was built from saved decks for both connected players, or when loaded from persistence.
+	deckMatchInitialized bool
 }
 
 const defaultRoomName = "Let's Play!"
@@ -77,14 +83,26 @@ func newRoomSessionWithEngine(roomID, roomName string, engine *match.Engine) *Ro
 		disconnectTimers:   map[gameplay.PlayerID]*time.Timer{},
 		disconnectDeadline: map[gameplay.PlayerID]time.Time{},
 		DisconnectGrace:    60 * time.Second,
-		reactionTimeout:  10 * time.Second,
-		rematchVotes:     map[gameplay.PlayerID]bool{},
-		lastActivity:     time.Now().UTC(),
+		reactionTimeout:    10 * time.Second,
+		rematchVotes:       map[gameplay.PlayerID]bool{},
+		lastActivity:       time.Now().UTC(),
 		displayNameByPlayer: map[gameplay.PlayerID]string{
 			gameplay.PlayerA: "",
 			gameplay.PlayerB: "",
 		},
+		authUIDByPlayer: map[gameplay.PlayerID]uint64{
+			gameplay.PlayerA: 0,
+			gameplay.PlayerB: 0,
+		},
+		deckMatchInitialized: false,
 	}
+}
+
+// BothPlayersConnected reports whether at least one client is connected on each side.
+func (r *RoomSession) BothPlayersConnected() bool {
+	r.stateM.Lock()
+	defer r.stateM.Unlock()
+	return r.connectedByPlayer[gameplay.PlayerA] > 0 && r.connectedByPlayer[gameplay.PlayerB] > 0
 }
 
 // AddClient registers a client connection in the room.
@@ -624,13 +642,16 @@ func (r *RoomSession) swapConnectedPlayerSidesUnsafe() {
 	nameB := r.displayNameByPlayer[gameplay.PlayerB]
 	r.displayNameByPlayer[gameplay.PlayerA] = nameB
 	r.displayNameByPlayer[gameplay.PlayerB] = nameA
+	if r.authUIDByPlayer != nil {
+		aUID := r.authUIDByPlayer[gameplay.PlayerA]
+		bUID := r.authUIDByPlayer[gameplay.PlayerB]
+		r.authUIDByPlayer[gameplay.PlayerA] = bUID
+		r.authUIDByPlayer[gameplay.PlayerB] = aUID
+	}
 }
 
 func (r *RoomSession) resetForNewMatchUnsafe() {
-	newState, err := gameplay.NewMatchState(gameplay.StarterDeck(), gameplay.StarterDeck())
-	if err == nil {
-		r.Engine = match.NewEngine(newState, chess.NewGame())
-	}
+	r.resetMatchEngineFromSavedDecksUnsafe(r.parent)
 	r.matchEnded = false
 	r.winner = ""
 	r.endReason = ""

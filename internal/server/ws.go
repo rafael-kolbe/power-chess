@@ -26,6 +26,7 @@ type Server struct {
 	roomsM     sync.RWMutex
 	store      RoomStore
 	auth       *AuthService
+	decks      *DeckService
 	telemetry  *Telemetry
 	nextRoomID int
 	// userRoom maps authenticated user ID -> room ID they are currently joined to (at most one room).
@@ -77,6 +78,14 @@ func NewServer() *Server {
 	}
 	s := NewServerWithStore(store)
 	s.auth = auth
+	if s.auth != nil && store != nil {
+		if pg, ok := store.(*PostgresRoomStore); ok {
+			s.decks = NewDeckService(pg.DB(), s.userInActiveRoom)
+			if err := s.decks.BackfillDefaultDecksForUsersWithout(context.Background()); err != nil {
+				log.Printf("deck backfill: %v", err)
+			}
+		}
+	}
 	return s
 }
 
@@ -118,6 +127,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/auth/register", s.handleAuthRegister)
 	mux.HandleFunc("/api/auth/login", s.handleAuthLogin)
 	mux.HandleFunc("/api/auth/me", s.handleAuthMe)
+	mux.HandleFunc("/api/me/lobby-deck", s.handleMeLobbyDeck)
+	mux.HandleFunc("/api/decks/validate", s.handleDeckValidate)
+	mux.HandleFunc("/api/decks/", s.handleDecksPath)
+	mux.HandleFunc("/api/decks", s.handleDecksCollection)
 	mux.HandleFunc("/ws", s.handleWS)
 	mux.Handle("/", http.FileServer(http.Dir("web")))
 	return mux
@@ -362,6 +375,15 @@ func (c *Client) handleJoinMatch(env Envelope) error {
 	if err != nil {
 		return err
 	}
+	if c.authUserID != 0 && c.server.decks != nil {
+		ok, err := c.server.decks.UserHasAnyDeck(c.authUserID)
+		if err != nil {
+			return protocolError{code: ErrorActionFailed, message: "deck_lookup_failed"}
+		}
+		if !ok {
+			return protocolError{code: ErrorActionFailed, message: "no_saved_deck"}
+		}
+	}
 	if err := c.server.ensureUserCanJoinRoom(c.authUserID, room.RoomID); err != nil {
 		return protocolError{code: ErrorActionFailed, message: err.Error()}
 	}
@@ -375,6 +397,13 @@ func (c *Client) handleJoinMatch(env Envelope) error {
 			return assignErr
 		}
 		c.playerID = selected
+		if room.authUIDByPlayer == nil {
+			room.authUIDByPlayer = map[gameplay.PlayerID]uint64{
+				gameplay.PlayerA: 0,
+				gameplay.PlayerB: 0,
+			}
+		}
+		room.authUIDByPlayer[selected] = c.authUserID
 		room.Players[c.conn.RemoteAddr().String()] = c.playerID
 		if dn := c.server.resolveClientDisplayName(c); dn != "" {
 			room.SetPlayerDisplayNameUnsafe(selected, dn)
@@ -390,6 +419,9 @@ func (c *Client) handleJoinMatch(env Envelope) error {
 	c.room = room
 	c.server.bindUserToRoom(c.authUserID, room.RoomID)
 	room.RegisterPlayerConnection(c.playerID)
+	if err := room.MaybeRebuildEngineWithSavedDecks(c.server); err != nil {
+		return protocolError{code: ErrorActionFailed, message: err.Error()}
+	}
 	room.EvaluateMatchOutcome()
 	_ = room.Persist(context.Background(), c.server.store)
 	_ = c.sendAck(env, "ok", "", "")
@@ -409,6 +441,9 @@ func (c *Client) handleSubmitMove(env Envelope) error {
 	mv := chess.Move{
 		From: chess.Pos{Row: p.FromRow, Col: p.FromCol},
 		To:   chess.Pos{Row: p.ToRow, Col: p.ToCol},
+	}
+	if !c.room.BothPlayersConnected() {
+		return protocolError{code: ErrorActionFailed, message: "waiting_for_opponent"}
 	}
 	if err := c.room.Execute(func() error {
 		requestKey := c.requestKey(env)
@@ -438,6 +473,9 @@ func (c *Client) handleActivateCard(env Envelope) error {
 	var p ActivateCardPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		return err
+	}
+	if !c.room.BothPlayersConnected() {
+		return protocolError{code: ErrorActionFailed, message: "waiting_for_opponent"}
 	}
 	if err := c.room.Execute(func() error {
 		requestKey := c.requestKey(env)
@@ -473,6 +511,9 @@ func (c *Client) handleResolvePending(env Envelope) error {
 		pos := chess.Pos{Row: *p.PieceRow, Col: *p.PieceCol}
 		target.PiecePos = &pos
 	}
+	if !c.room.BothPlayersConnected() {
+		return protocolError{code: ErrorActionFailed, message: "waiting_for_opponent"}
+	}
 	if err := c.room.Execute(func() error {
 		requestKey := c.requestKey(env)
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
@@ -507,6 +548,9 @@ func (c *Client) handleQueueReaction(env Envelope) error {
 		pos := chess.Pos{Row: *p.PieceRow, Col: *p.PieceCol}
 		target.PiecePos = &pos
 	}
+	if !c.room.BothPlayersConnected() {
+		return protocolError{code: ErrorActionFailed, message: "waiting_for_opponent"}
+	}
 	if err := c.room.Execute(func() error {
 		requestKey := c.requestKey(env)
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
@@ -529,6 +573,9 @@ func (c *Client) handleQueueReaction(env Envelope) error {
 func (c *Client) handleResolveReactions(env Envelope) error {
 	if c.room == nil {
 		return protocolError{code: ErrorJoinRequired, message: "join_match is required before resolve_reactions"}
+	}
+	if !c.room.BothPlayersConnected() {
+		return protocolError{code: ErrorActionFailed, message: "waiting_for_opponent"}
 	}
 	if err := c.room.Execute(func() error {
 		requestKey := c.requestKey(env)
@@ -611,6 +658,7 @@ func (s *Server) getOrCreateRoom(roomID, roomName string, isPrivate bool, passwo
 			return nil, err
 		}
 		if ok {
+			loaded.parent = s
 			s.rooms[roomID] = loaded
 			return loaded, nil
 		}
@@ -622,6 +670,7 @@ func (s *Server) getOrCreateRoom(roomID, roomName string, isPrivate bool, passwo
 	if err != nil {
 		return nil, err
 	}
+	created.parent = s
 	created.RoomPrivate = isPrivate
 	created.RoomPassword = strings.TrimSpace(password)
 	s.rooms[roomID] = created

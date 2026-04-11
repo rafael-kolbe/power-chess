@@ -14,7 +14,7 @@ func openAuthTestDB(t *testing.T) (*gorm.DB, *AuthService) {
 	if err != nil {
 		t.Fatalf("sqlite open: %v", err)
 	}
-	if err := db.AutoMigrate(&userModel{}); err != nil {
+	if err := db.AutoMigrate(&userModel{}, &userDeckModel{}); err != nil {
 		t.Fatalf("auto migrate users: %v", err)
 	}
 	auth := NewAuthService(db, []byte("test-jwt-secret-ok"))

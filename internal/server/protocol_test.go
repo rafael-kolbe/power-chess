@@ -29,4 +29,3 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 		t.Fatalf("round-trip mismatch")
 	}
 }
-

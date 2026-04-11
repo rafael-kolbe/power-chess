@@ -883,6 +883,19 @@ pre {
   flex: 0 0 auto;
 }
 
+.lobby-deck-row,
+.lobby-deck-create {
+  align-items: flex-end;
+}
+
+.lobby-deck-field select {
+  min-width: 220px;
+}
+
+.lobby-deck-create .field {
+  min-width: 160px;
+}
+
 /* =============================================================================
    Match debug (below board)
    ============================================================================= */

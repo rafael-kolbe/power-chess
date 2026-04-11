@@ -44,6 +44,20 @@
         <span id="lobbyUserLabel" class="lobby-user-label"></span>
         <button type="button" id="logoutBtn" class="match-end-btn-secondary hidden">Log out</button>
       </div>
+      <div id="lobbyDeckRow" class="row lobby-deck-row hidden">
+        <label class="field lobby-deck-field">
+          <span id="lobbyDeckLabel">Deck for match</span>
+          <select id="lobbyDeckSelect" aria-describedby="lobbyDeckHint"></select>
+        </label>
+        <p id="lobbyDeckHint" class="lobby-hint"></p>
+        <p id="lobbyDeckAlert" class="lobby-private-password-error hidden" role="alert"></p>
+      </div>
+      <div id="lobbyDeckCreatePanel" class="row lobby-deck-create hidden">
+        <label class="field"><span id="newDeckNameLabel">New deck name</span><input id="newDeckName" type="text" autocomplete="off" placeholder="My deck" /></label>
+        <label class="field"><span id="newDeckSkillLabel">Player skill</span><select id="newDeckSkill"></select></label>
+        <label class="field"><span id="newDeckSleeveLabel">Sleeve</span><select id="newDeckSleeve"></select></label>
+        <button type="button" id="newDeckSubmitBtn" class="connect-btn">Save deck (20 cards)</button>
+      </div>
       <div class="row lobby-row-primary">
         <label class="field">
           <span id="languageLabel">Language</span>

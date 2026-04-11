@@ -26,6 +26,22 @@ Contrato atual entre cliente e servidor. Mudanças de comportamento devem ser re
 
 **Resposta de `/api/rooms`:** `{ "rooms": [ { "roomId", "roomName", "roomPrivate", "connectedA", "connectedB", "gameStarted", "occupiedByColor?" } ] }` — apenas partidas com `matchEnded` falso. Com ocupação `1/2`, `occupiedByColor` pode ser `White` ou `Black`.
 
+### Contas, decks (REST, JWT)
+
+Com `DATABASE_URL` + `JWT_SECRET`, o cliente usa os mesmos endpoints de autenticação (`/api/auth/register`, `/api/auth/login`, `/api/auth/me`) e pode persistir **decks** (máx. 10 por conta, 20 cartas cada, limite de cópias do catálogo). O baralho usado na próxima partida é o **deck do lobby** (`lobbyDeckId` no utilizador), escolhido via UI ou `PUT /api/me/lobby-deck`.
+
+| Método | Caminho | Descrição |
+|--------|---------|-----------|
+| `GET` | `/api/decks` | Lista `{ "decks": [...], "lobbyDeckId": number \| null }` |
+| `POST` | `/api/decks` | Cria deck: `{ "name", "cardIds": string[], "playerSkillId", "sleeveColor" }` |
+| `GET` | `/api/decks/{id}` | Detalhe de um deck do utilizador |
+| `PUT` | `/api/decks/{id}` | Atualiza nome, cartas, skill, sleeve |
+| `DELETE` | `/api/decks/{id}` | Remove; reatribui lobby se necessário |
+| `POST` | `/api/decks/validate` | Valida `cardIds` sem gravar |
+| `PUT` | `/api/me/lobby-deck` | `{ "deckId": number }` — falha se o utilizador estiver numa sala (partida ativa no servidor) |
+
+Registo de conta cria automaticamente um deck **Default** (composição fixa no servidor) e define o lobby. Utilizadores antigos sem decks recebem backfill ao arranque do servidor.
+
 ---
 
 ## Envelope JSON
@@ -225,6 +241,7 @@ Broadcast do estado da sala. Campos principais:
 - `roomName`: nome exibido; vazio → padrão do servidor.  
 - `pieceType`: `white` | `black` | `random`.  
 - `isPrivate` + `password`: salas privadas na criação/entrada.
+- Com conta autenticada e serviço de decks ativo: é obrigatório existir **pelo menos um deck** salvo; caso contrário o pedido falha com `action_failed` / mensagem `no_saved_deck`. O motor da partida usa o deck de lobby desse utilizador (e a skill guardada no deck). Convidados sem JWT continuam com o baralho starter do servidor.
 
 ### `submit_move`
 

@@ -15,6 +15,16 @@ type PlayerSkillDefinition struct {
 	Example     string
 }
 
+// ValidPlayerSkillID reports whether id is one of the selectable skills from InitialPlayerSkills.
+func ValidPlayerSkillID(id PlayerSkillID) bool {
+	for _, s := range InitialPlayerSkills() {
+		if s.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 // InitialPlayerSkills returns the canonical set of selectable player skills.
 func InitialPlayerSkills() []PlayerSkillDefinition {
 	return []PlayerSkillDefinition{
@@ -48,4 +58,3 @@ func InitialPlayerSkills() []PlayerSkillDefinition {
 		},
 	}
 }
-

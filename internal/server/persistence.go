@@ -43,6 +43,9 @@ type roomServerState struct {
 	Winner       gameplay.PlayerID   `json:"winner"`
 	EndReason    string              `json:"endReason"`
 	Seen         map[string]struct{} `json:"seen"`
+	AuthUserA    uint64              `json:"authUserA,omitempty"`
+	AuthUserB    uint64              `json:"authUserB,omitempty"`
+	DeckMatchOK  bool                `json:"deckMatchOk,omitempty"`
 }
 
 // PostgresRoomStore stores room snapshots in PostgreSQL.
@@ -69,7 +72,7 @@ func NewPostgresRoomStoreFromEnv() (*PostgresRoomStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := db.AutoMigrate(&roomSnapshotModel{}, &userModel{}); err != nil {
+	if err := db.AutoMigrate(&roomSnapshotModel{}, &userModel{}, &userDeckModel{}); err != nil {
 		return nil, err
 	}
 	return &PostgresRoomStore{db: db}, nil
@@ -87,6 +90,11 @@ func (s *PostgresRoomStore) SaveRoom(ctx context.Context, room *RoomSession) err
 	if err != nil {
 		return err
 	}
+	var authA, authB uint64
+	if room.authUIDByPlayer != nil {
+		authA = room.authUIDByPlayer[gameplay.PlayerA]
+		authB = room.authUIDByPlayer[gameplay.PlayerB]
+	}
 	serverRaw, err := json.Marshal(roomServerState{
 		RoomName:     room.RoomName,
 		RoomPrivate:  room.RoomPrivate,
@@ -95,6 +103,9 @@ func (s *PostgresRoomStore) SaveRoom(ctx context.Context, room *RoomSession) err
 		Winner:       room.winner,
 		EndReason:    room.endReason,
 		Seen:         room.seen,
+		AuthUserA:    authA,
+		AuthUserB:    authB,
+		DeckMatchOK:  room.deckMatchInitialized,
 	})
 	if err != nil {
 		return err
@@ -144,6 +155,12 @@ func (s *PostgresRoomStore) LoadRoom(ctx context.Context, roomID string) (*RoomS
 	if state.Seen != nil {
 		room.seen = state.Seen
 	}
+	room.authUIDByPlayer = map[gameplay.PlayerID]uint64{
+		gameplay.PlayerA: state.AuthUserA,
+		gameplay.PlayerB: state.AuthUserB,
+	}
+	// Persisted engine is authoritative; do not run MaybeRebuild again.
+	room.deckMatchInitialized = true
 	return room, true, nil
 }
 
