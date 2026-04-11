@@ -1577,10 +1577,13 @@
     renderCooldownList(pmEl.cooldownCardsOpp,  opp.cooldownPreview  || [], opp.cooldownHiddenCount);
   }
 
-  function renderCooldownList(container, preview, hidden) {
+  const COOLDOWN_INLINE_MAX = 4;
+
+  function renderCooldownList(container, allEntries, hiddenCount) {
     if (!container) return;
     container.innerHTML = "";
-    for (const entry of preview) {
+    const visible = allEntries.slice(0, COOLDOWN_INLINE_MAX);
+    for (const entry of visible) {
       const def = getCardDef(entry.cardId);
       const name = def ? def.name : entry.cardId;
       const row = document.createElement("div");
@@ -1596,11 +1599,12 @@
       if (def) attachCardHover(row, { ...def, manaCost: def.mana });
       container.appendChild(row);
     }
-    if (hidden > 0) {
+    const extraCount = hiddenCount || (allEntries.length > COOLDOWN_INLINE_MAX ? allEntries.length - COOLDOWN_INLINE_MAX : 0);
+    if (extraCount > 0) {
       const more = document.createElement("div");
       more.className = "pm-cooldown-entry";
       more.style.opacity = "0.5";
-      more.textContent = `+${hidden} more`;
+      more.textContent = `+${extraCount} more`;
       container.appendChild(more);
     }
   }
@@ -1766,10 +1770,17 @@
   });
 
   // Pile view modal (shared for cooldown/banish inspection)
-  function openPileView(title, cards, sleeve) {
+  // showTurns=true renders a "Xt" badge on each card (used for cooldown pile).
+  function openPileView(title, cards, sleeve, showTurns) {
     if (!pmEl.pileViewModal || !pmEl.pileViewGrid) return;
     pmEl.pileViewTitle.textContent = title;
     pmEl.pileViewGrid.innerHTML = "";
+    if (cards.length === 0) {
+      const empty = document.createElement("p");
+      empty.style.cssText = "color:#888;text-align:center;width:100%;padding:24px 0";
+      empty.textContent = "Empty pile.";
+      pmEl.pileViewGrid.appendChild(empty);
+    }
     const catalog = getLocalizedCardCatalog(locale);
     const byId = new Map(catalog.map((c) => [c.id, c]));
     for (const entry of cards) {
@@ -1783,7 +1794,7 @@
         cooldown: def.cooldown, cardWidth: "180px"
       });
       wrap.appendChild(card);
-      if (entry.turnsRemaining !== undefined) {
+      if (showTurns && entry.turnsRemaining !== undefined) {
         const badge = document.createElement("span");
         badge.className = "count-badge";
         badge.style.color = "#7ab0e0";
@@ -1831,14 +1842,14 @@
     pmEl.viewCooldownSelf.addEventListener("click", () => {
       const snap = lastSnapshot;
       const self = snap?.players?.find((p) => p.playerId === playerEl.value);
-      openPileView("Cooldown — Your pile", self?.cooldownPreview || []);
+      openPileView("Cooldown — Your pile", self?.cooldownPreview || [], null, true);
     });
   }
   if (pmEl.viewCooldownOpp) {
     pmEl.viewCooldownOpp.addEventListener("click", () => {
       const snap = lastSnapshot;
       const opp = snap?.players?.find((p) => p.playerId !== playerEl.value);
-      openPileView("Cooldown — Opponent", opp?.cooldownPreview || []);
+      openPileView("Cooldown — Opponent", opp?.cooldownPreview || [], null, true);
     });
   }
 

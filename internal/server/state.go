@@ -823,22 +823,20 @@ func graveyardPieceImportance(code string) int {
 // playerHUDState converts internal player state to transport-friendly HUD data.
 // sleeve is the player's chosen sleeve color; viewerPID restricts which hand is included.
 func playerHUDState(pid gameplay.PlayerID, p *gameplay.PlayerState, sleeve string, viewerPID gameplay.PlayerID) PlayerHUDState {
-	// Build cooldown preview (up to 4 shown, rest hidden).
-	const cooldownPreviewMax = 4
-	preview := make([]CooldownPreviewEntry, 0, cooldownPreviewMax)
+	// Build the full cooldown list (all entries sent; frontend picks first 4 for inline display).
+	preview := make([]CooldownPreviewEntry, 0, len(p.Cooldowns))
+	for _, cd := range p.Cooldowns {
+		preview = append(preview, CooldownPreviewEntry{
+			CardID:         string(cd.Card.CardID),
+			ManaCost:       cd.Card.ManaCost,
+			Ignition:       cd.Card.Ignition,
+			Cooldown:       cd.Card.Cooldown,
+			TurnsRemaining: cd.TurnsRemaining,
+		})
+	}
 	hidden := 0
-	for i, cd := range p.Cooldowns {
-		if i < cooldownPreviewMax {
-			preview = append(preview, CooldownPreviewEntry{
-				CardID:         string(cd.Card.CardID),
-				ManaCost:       cd.Card.ManaCost,
-				Ignition:       cd.Card.Ignition,
-				Cooldown:       cd.Card.Cooldown,
-				TurnsRemaining: cd.TurnsRemaining,
-			})
-		} else {
-			hidden++
-		}
+	if len(preview) > 4 {
+		hidden = len(preview) - 4
 	}
 
 	// Build banished card list (most recently banished first).
