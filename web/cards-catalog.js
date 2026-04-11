@@ -230,6 +230,61 @@ function getLocalizedCardCatalog(locale) {
   });
 }
 
+/**
+ * Display/deck sort order: Power > Continuous > Retribution > Counter.
+ * @type {Record<string, number>}
+ */
+const CARD_TYPE_SORT_ORDER = {
+  power: 0,
+  continuous: 1,
+  retribution: 2,
+  counter: 3
+};
+
+/**
+ * Sort rank for a card type string (lower = earlier). Unknown types sort last.
+ * @param {string} [type]
+ * @returns {number}
+ */
+function cardTypeSortRank(type) {
+  if (!type || typeof type !== "string") return 999;
+  const k = type.toLowerCase();
+  const rank = CARD_TYPE_SORT_ORDER[k];
+  return rank !== undefined ? rank : 999;
+}
+
+/**
+ * Compare two catalog rows by type order, then name.
+ * @param {{ type?: string, name?: string }} a
+ * @param {{ type?: string, name?: string }} b
+ * @returns {number}
+ */
+function compareCatalogRowsByTypeThenName(a, b) {
+  const ra = cardTypeSortRank(a?.type);
+  const rb = cardTypeSortRank(b?.type);
+  if (ra !== rb) return ra - rb;
+  return String(a?.name || "").localeCompare(String(b?.name || ""));
+}
+
+/**
+ * Compare two card ids using localized catalog rows (type, then name).
+ * @param {string} idA
+ * @param {string} idB
+ * @param {Map<string, { type?: string, name?: string }>} byId
+ * @returns {number}
+ */
+function compareCardIdsByTypeThenName(idA, idB, byId) {
+  const a = byId.get(idA);
+  const b = byId.get(idB);
+  return compareCatalogRowsByTypeThenName(
+    a || { name: idA },
+    b || { name: idB }
+  );
+}
+
 globalThis.getLocalizedCardCatalog = getLocalizedCardCatalog;
+globalThis.cardTypeSortRank = cardTypeSortRank;
+globalThis.compareCatalogRowsByTypeThenName = compareCatalogRowsByTypeThenName;
+globalThis.compareCardIdsByTypeThenName = compareCardIdsByTypeThenName;
 /** @deprecated Use getLocalizedCardCatalog(locale) */
 globalThis.GAME_CARDS_CATALOG = getLocalizedCardCatalog("en-US");

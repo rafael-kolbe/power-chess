@@ -44,19 +44,19 @@
         <span id="lobbyUserLabel" class="lobby-user-label"></span>
         <button type="button" id="logoutBtn" class="match-end-btn-secondary hidden">Log out</button>
       </div>
-      <div id="lobbyDeckRow" class="row lobby-deck-row hidden">
-        <label class="field lobby-deck-field">
-          <span id="lobbyDeckLabel">Deck for match</span>
-          <select id="lobbyDeckSelect" aria-describedby="lobbyDeckHint"></select>
-        </label>
+      <div id="lobbyDeckRow" class="lobby-deck-block hidden">
+        <div class="lobby-deck-top">
+          <label class="field lobby-deck-field">
+            <span id="lobbyDeckLabel">Deck for match</span>
+            <select id="lobbyDeckSelect" aria-describedby="lobbyDeckHint"></select>
+          </label>
+          <div class="lobby-deck-actions">
+            <button type="button" id="lobbyDeckViewBtn" class="match-end-btn-secondary">View</button>
+            <a href="/deck-builder.html" id="lobbyDeckBuilderLink" class="match-end-btn-secondary lobby-deck-builder-link">Deck builder</a>
+          </div>
+        </div>
         <p id="lobbyDeckHint" class="lobby-hint"></p>
         <p id="lobbyDeckAlert" class="lobby-private-password-error hidden" role="alert"></p>
-      </div>
-      <div id="lobbyDeckCreatePanel" class="row lobby-deck-create hidden">
-        <label class="field"><span id="newDeckNameLabel">New deck name</span><input id="newDeckName" type="text" autocomplete="off" placeholder="My deck" /></label>
-        <label class="field"><span id="newDeckSkillLabel">Player skill</span><select id="newDeckSkill"></select></label>
-        <label class="field"><span id="newDeckSleeveLabel">Sleeve</span><select id="newDeckSleeve"></select></label>
-        <button type="button" id="newDeckSubmitBtn" class="connect-btn">Save deck (20 cards)</button>
       </div>
       <div class="row lobby-row-primary">
         <label class="field">
@@ -106,6 +106,16 @@
       <ul id="roomList"></ul>
       <p id="roomListEmpty" class="room-list-empty hidden">No active rooms right now.</p>
     </aside>
+  </div>
+
+  <div id="deckViewModal" class="modal-overlay hidden" aria-hidden="true">
+    <div class="modal-dialog deck-view-dialog" role="dialog" aria-modal="true" aria-labelledby="deckViewTitle">
+      <div class="deck-view-dialog__head">
+        <h3 id="deckViewTitle">Deck</h3>
+        <button type="button" id="deckViewCloseBtn" class="match-end-btn-secondary">Close</button>
+      </div>
+      <div id="deckViewGrid" class="deck-view-grid"></div>
+    </div>
   </div>
 
   <div id="privateJoinOverlay" class="modal-overlay hidden" aria-hidden="true">

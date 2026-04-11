@@ -1,6 +1,9 @@
 /* =============================================================================
    Power card templates — shared art 639×965, text as overlay (no per-card PNGs)
-   Fonts: Cinzel (title), EB Garamond (body) — loaded in index.html
+   Fonts (load Cinzel + EB Garamond on any page that includes card.css — see index.html):
+   - Titles: same stack as the lobby footer marquee (.card-marquee)
+   - Description / example: same stack as deck builder “Your deck” (explicit below)
+   - Mana / ignition / cooldown numerals: same stack as the lobby marquee orbs
    ============================================================================= */
 
 :root {
@@ -38,6 +41,7 @@
   border-radius: 4px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   color: var(--card-color-body);
+  /* Do not inherit UI font (e.g. Oxanium) from body — keep card typography consistent everywhere */
   font-family: var(--card-font-body);
   line-height: 1.25;
   -webkit-font-smoothing: antialiased;
@@ -97,6 +101,7 @@
   white-space: nowrap;
   transform-origin: 50% 50%;
   vertical-align: middle;
+  font-family: inherit;
 }
 
 /* Mana — center over blue orb (top-right); slight translateY to optically center numeral */
@@ -148,6 +153,7 @@
   padding-top: 0.3em;
   padding-bottom: 0.1em;
   box-sizing: border-box;
+  font-family: var(--card-font-body);
 }
 
 .power-card__desc,
@@ -156,6 +162,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+  font-family: var(--card-font-body);
   font-size: min(var(--card-effect-font-max), calc(var(--card-width) * 0.04 + 1.05pt + 2pt));
   font-weight: 500;
   line-height: 1.24;

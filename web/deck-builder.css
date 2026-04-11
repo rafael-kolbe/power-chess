@@ -1,0 +1,389 @@
+/* Deck builder page */
+
+body.deck-builder-page {
+  padding: 16px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.db-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.db-header h1 {
+  margin: 0;
+  flex: 1 1 auto;
+  font-size: 1.25rem;
+}
+
+.db-back {
+  color: #9cf;
+  text-decoration: none;
+}
+
+.db-back:hover {
+  text-decoration: underline;
+}
+
+.db-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: rgb(0 0 0 / 25%);
+  border: 1px solid #333;
+  border-radius: 8px;
+}
+
+.db-filters .field {
+  min-width: 120px;
+}
+
+.db-filters .field--search {
+  flex: 1 1 200px;
+  min-width: 180px;
+}
+
+.db-clear-filters-btn {
+  align-self: flex-end;
+  margin-left: auto;
+  padding: 8px 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid #555;
+  background: var(--color-bg-input);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.db-clear-filters-btn:hover {
+  filter: brightness(1.08);
+}
+
+.db-carousel-section {
+  margin-bottom: 16px;
+}
+
+.db-carousel-section h2 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  color: #bbb;
+}
+
+/* Between catalog box and deck panel — same typography as "Catalog" */
+.db-your-deck-heading {
+  margin: 4px 0 8px;
+  font-size: 0.95rem;
+  color: #bbb;
+}
+
+.db-carousel-wrap {
+  position: relative;
+  border: 1px solid #333;
+  border-radius: 8px;
+  background: #0d0d0d;
+  overflow: hidden;
+}
+
+.db-carousel {
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  padding: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  cursor: grab;
+  scroll-behavior: auto;
+  scrollbar-width: thin;
+  user-select: none;
+}
+
+.db-carousel:active {
+  cursor: grabbing;
+}
+
+.db-carousel .db-cat-card {
+  flex: 0 0 auto;
+  position: relative;
+}
+
+.db-carousel .db-cat-card--disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.db-deck-panel {
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 12px;
+  background: #121212;
+}
+
+.db-deck-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 8px;
+}
+
+.db-deck-meta .field {
+  min-width: 160px;
+}
+
+.db-deck-meta .field--decksel {
+  min-width: 220px;
+  flex: 1 1 260px;
+}
+
+.db-deck-select-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.db-deck-select-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.db-reload-deck-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid #555;
+  background: var(--color-bg-input);
+  color: #c8c8c8;
+  cursor: pointer;
+}
+
+.db-reload-deck-btn:hover {
+  filter: brightness(1.12);
+  border-color: #777;
+  color: #eee;
+}
+
+.db-reload-deck-btn:focus-visible {
+  outline: 2px solid #6a9fff;
+  outline-offset: 2px;
+}
+
+.db-reload-deck-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.db-deck-meta__divider {
+  width: 1px;
+  align-self: stretch;
+  min-height: 36px;
+  background: #444;
+  flex-shrink: 0;
+}
+
+.db-deck-meta__divider--actions {
+  min-height: 28px;
+  align-self: center;
+  margin: 0 2px;
+}
+
+.db-deck-meta__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.db-action-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #eee;
+}
+
+.db-action-btn--save {
+  border: 1px solid #40916c;
+  background: linear-gradient(180deg, #2d6a4f, #1b4332);
+}
+
+.db-action-btn--save:hover {
+  filter: brightness(1.07);
+}
+
+.db-action-btn--new {
+  border: 1px solid #7b6ba8;
+  background: linear-gradient(180deg, #4a3f6b, #35285c);
+}
+
+.db-action-btn--new:hover {
+  filter: brightness(1.07);
+}
+
+.db-action-btn--clear {
+  border: 1px solid #5a5a5a;
+  background: linear-gradient(180deg, #3d3d3d, #2c2c2c);
+}
+
+.db-action-btn--clear:hover {
+  filter: brightness(1.07);
+}
+
+.db-action-btn--danger {
+  border: 1px solid #c44;
+  background: linear-gradient(180deg, #8b2e2e, #5c1c1c);
+}
+
+.db-action-btn--danger:hover {
+  filter: brightness(1.08);
+}
+
+.db-deck-grid-wrap {
+  position: relative;
+  border: 1px solid #333;
+  border-radius: 8px;
+  background: #0d0d0d;
+  padding: 12px;
+}
+
+.db-deck-grid {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  grid-template-rows: repeat(2, auto);
+  gap: 8px;
+  min-height: 120px;
+}
+
+@media (max-width: 1100px) {
+  .db-deck-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-rows: repeat(4, auto);
+  }
+}
+
+.db-deck-slot {
+  position: relative;
+  min-width: 0;
+}
+
+.db-deck-slot .power-card {
+  display: block;
+  margin: 0 auto;
+}
+
+.db-deck-slot .count-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  text-shadow: 0 0 4px #000, 0 1px 2px #000;
+  z-index: 2;
+}
+
+.db-deck-slot--empty {
+  border: 1px dashed #333;
+  border-radius: 6px;
+  min-height: 100px;
+}
+
+.db-deck-count {
+  font-size: 13px;
+  color: #888;
+  margin: 0 0 10px;
+}
+
+.db-deck-hover-preview {
+  position: fixed;
+  z-index: 2500;
+  left: 0;
+  top: 0;
+  max-width: min(92vw, 340px);
+  pointer-events: none;
+  filter: drop-shadow(0 10px 28px rgba(0, 0, 0, 0.65));
+}
+
+.db-deck-hover-preview.hidden {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.db-deck-hover-preview:not(.hidden) {
+  visibility: visible;
+  opacity: 1;
+}
+
+.modal-dialog.db-mini-modal {
+  max-width: 400px;
+  padding: 22px 24px 18px;
+}
+
+.db-mini-modal__title {
+  margin: 0 0 12px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #f0f0f0;
+}
+
+.db-mini-modal__body {
+  margin: 0 0 18px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #c8c8c8;
+}
+
+.db-mini-modal__actions {
+  justify-content: flex-end;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.db-mini-modal--confirm .db-mini-modal__actions .db-action-btn--danger {
+  min-height: 36px;
+  padding: 0 16px;
+}
+
+.modal-dialog.db-new-deck-dialog {
+  max-width: 420px;
+  padding: 26px 28px 22px;
+}
+
+.db-new-deck-dialog h3 {
+  margin: 0 0 18px;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #f2f2f2;
+}
+
+.db-new-deck-dialog__field {
+  margin-bottom: 22px;
+  gap: 8px;
+}
+
+.db-new-deck-dialog__field input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.db-new-deck-dialog__actions {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid #333;
+  gap: 12px;
+}

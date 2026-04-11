@@ -883,17 +883,116 @@ pre {
   flex: 0 0 auto;
 }
 
-.lobby-deck-row,
-.lobby-deck-create {
+.lobby-deck-block {
+  margin-bottom: 12px;
+}
+
+.lobby-deck-top {
+  display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
+  gap: 12px;
+}
+
+.lobby-deck-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.lobby-deck-builder-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  box-sizing: border-box;
+  min-height: 36px;
+  padding: 0 14px;
+  font-weight: 600;
+  /* <a> does not use global button rules; match View control shape */
+  border: 1px solid #4a5868;
+  border-radius: 6px;
+}
+
+/* Same family as match-end-btn-secondary, slightly cooler/lighter than flat black */
+.lobby-deck-builder-link.match-end-btn-secondary {
+  color: var(--color-text);
+  background: linear-gradient(180deg, #2a3440, #1e252e);
+}
+
+.lobby-deck-builder-link.match-end-btn-secondary:hover {
+  filter: brightness(1.06);
 }
 
 .lobby-deck-field select {
   min-width: 220px;
 }
 
-.lobby-deck-create .field {
-  min-width: 160px;
+.lobby-deck-block > .lobby-hint {
+  margin-top: 12px;
+}
+
+/* Deck view modal (lobby) */
+.deck-view-dialog {
+  max-width: min(1200px, 98vw);
+  max-height: min(92vh, 960px);
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.deck-view-dialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.deck-view-dialog__head h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.deck-view-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+  overflow: auto;
+  padding: 8px 0;
+}
+
+.deck-view-card-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.deck-view-card-wrap .power-card {
+  display: block;
+}
+
+.deck-view-card-wrap .count-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  text-shadow: 0 0 4px #000, 0 1px 2px #000;
+  z-index: 2;
+}
+
+.count-badge--1 {
+  color: #cd7f32;
+}
+
+.count-badge--2 {
+  color: #c8c8d0;
+}
+
+.count-badge--3 {
+  color: #e6c200;
 }
 
 /* =============================================================================

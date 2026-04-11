@@ -98,35 +98,12 @@
   const lobbyDeckSelectEl = document.getElementById("lobbyDeckSelect");
   const lobbyDeckHintEl = document.getElementById("lobbyDeckHint");
   const lobbyDeckAlertEl = document.getElementById("lobbyDeckAlert");
-  const lobbyDeckCreatePanelEl = document.getElementById("lobbyDeckCreatePanel");
-  const newDeckNameEl = document.getElementById("newDeckName");
-  const newDeckSkillEl = document.getElementById("newDeckSkill");
-  const newDeckSleeveEl = document.getElementById("newDeckSleeve");
-  const newDeckSubmitBtnEl = document.getElementById("newDeckSubmitBtn");
-
-  /** Mirrors server gameplay.DefaultDeckPresetCardIDs — keep in sync when the default list changes. */
-  const DEFAULT_DECK_CARD_IDS = [
-    "energy-gain",
-    "energy-gain",
-    "energy-gain",
-    "knight-touch",
-    "knight-touch",
-    "bishop-touch",
-    "bishop-touch",
-    "rook-touch",
-    "rook-touch",
-    "sacrifice-of-the-masses",
-    "backstab",
-    "backstab",
-    "extinguish",
-    "extinguish",
-    "clairvoyance",
-    "save-it-for-later",
-    "retaliate",
-    "retaliate",
-    "retaliate",
-    "counterattack"
-  ];
+  const lobbyDeckViewBtnEl = document.getElementById("lobbyDeckViewBtn");
+  const lobbyDeckBuilderLinkEl = document.getElementById("lobbyDeckBuilderLink");
+  const deckViewModalEl = document.getElementById("deckViewModal");
+  const deckViewGridEl = document.getElementById("deckViewGrid");
+  const deckViewTitleEl = document.getElementById("deckViewTitle");
+  const deckViewCloseBtnEl = document.getElementById("deckViewCloseBtn");
 
   const i18n = {
     "en-US": {
@@ -238,12 +215,10 @@
       lobbyGuest: "Guest (no account)",
       lobbyDeckLabel: "Deck for match",
       lobbyDeckHint: "This deck is used when you join or create a room. Change it before connecting.",
-      noSavedDeckAlert: "You have no saved deck. Create one below (20 cards) before playing.",
-      newDeckNameLabel: "New deck name",
-      newDeckSkillLabel: "Player skill",
-      newDeckSleeveLabel: "Sleeve",
-      newDeckSubmit: "Save deck (20 cards)",
-      deckNameRequired: "Enter a deck name.",
+      noSavedDeckAlert: "You have no saved deck. Use Deck builder to create one (20 cards) before playing.",
+      lobbyDeckView: "View",
+      lobbyDeckBuilder: "Deck builder",
+      deckViewClose: "Close",
       debugLogsTitle: "Debug logs"
     },
     "pt-BR": {
@@ -355,12 +330,10 @@
       lobbyGuest: "Convidado (sem conta)",
       lobbyDeckLabel: "Deck para a partida",
       lobbyDeckHint: "Este deck é usado ao criar ou entrar em uma sala. Altere antes de conectar.",
-      noSavedDeckAlert: "Você não tem nenhum deck salvo. Crie um abaixo (20 cartas) antes de jogar.",
-      newDeckNameLabel: "Nome do novo deck",
-      newDeckSkillLabel: "Habilidade do jogador",
-      newDeckSleeveLabel: "Sleeve",
-      newDeckSubmit: "Salvar deck (20 cartas)",
-      deckNameRequired: "Informe o nome do deck.",
+      noSavedDeckAlert: "Você não tem nenhum deck salvo. Use o Deck builder para criar um (20 cartas) antes de jogar.",
+      lobbyDeckView: "Visualizar",
+      lobbyDeckBuilder: "Deck builder",
+      deckViewClose: "Fechar",
       debugLogsTitle: "Logs de debug"
     }
   };
@@ -583,44 +556,14 @@
     void refreshLobbyDecks();
   }
 
-  function populateDeckBuilderSelects() {
-    if (newDeckSkillEl.options.length > 0) return;
-    const skills = [
-      ["reinforcements", "Reinforcements"],
-      ["march-forward", "March Forward!"],
-      ["limitless-potential", "Limitless Potential"],
-      ["dimension-shift", "Dimension Shift"]
-    ];
-    for (const [id, label] of skills) {
-      const o = document.createElement("option");
-      o.value = id;
-      o.textContent = label;
-      newDeckSkillEl.appendChild(o);
-    }
-    const sleeves = [
-      ["blue", "Blue"],
-      ["green", "Green"],
-      ["pink", "Pink"],
-      ["red", "Red"]
-    ];
-    for (const [id, label] of sleeves) {
-      const o = document.createElement("option");
-      o.value = id;
-      o.textContent = label;
-      newDeckSleeveEl.appendChild(o);
-    }
-  }
-
   async function refreshLobbyDecks() {
     lobbyDeckRowEl.classList.add("hidden");
-    lobbyDeckCreatePanelEl.classList.add("hidden");
     lobbyDeckAlertEl.classList.add("hidden");
     lobbyDeckHintEl.textContent = "";
     lobbyDeckSelectEl.innerHTML = "";
     if (!authBackendAvailable || !authUser || !readStoredToken()) {
       return;
     }
-    populateDeckBuilderSelects();
     try {
       const r = await fetch("/api/decks", { headers: { ...authFetchHeaders(), Accept: "application/json" } });
       if (r.status === 503 || r.status === 401) return;
@@ -631,7 +574,7 @@
       for (const d of decks) {
         const opt = document.createElement("option");
         opt.value = String(d.id);
-        opt.textContent = `${d.name} (#${d.id})`;
+        opt.textContent = d.name;
         lobbyDeckSelectEl.appendChild(opt);
       }
       if (lobbyId != null && lobbyDeckSelectEl.querySelector(`option[value="${lobbyId}"]`)) {
@@ -641,11 +584,63 @@
       }
       lobbyDeckHintEl.textContent = t("lobbyDeckHint");
       lobbyDeckRowEl.classList.remove("hidden");
-      lobbyDeckCreatePanelEl.classList.remove("hidden");
       if (decks.length === 0) {
         lobbyDeckAlertEl.textContent = t("noSavedDeckAlert");
         lobbyDeckAlertEl.classList.remove("hidden");
       }
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  function closeDeckViewModal() {
+    deckViewModalEl.classList.add("hidden");
+    deckViewModalEl.setAttribute("aria-hidden", "true");
+    deckViewGridEl.innerHTML = "";
+  }
+
+  async function openDeckViewModal() {
+    const id = Number(lobbyDeckSelectEl.value, 10);
+    if (!id || !readStoredToken()) return;
+    try {
+      const r = await fetch(`/api/decks/${id}`, { headers: { ...authFetchHeaders(), Accept: "application/json" } });
+      if (!r.ok) return;
+      const deck = await r.json();
+      const cardIds = deck.cardIds || [];
+      const counts = new Map();
+      for (const cid of cardIds) {
+        counts.set(cid, (counts.get(cid) || 0) + 1);
+      }
+      const catalog = getLocalizedCardCatalog(locale);
+      const byId = new Map(catalog.map((c) => [c.id, c]));
+      deckViewTitleEl.textContent = deck.name;
+      deckViewGridEl.innerHTML = "";
+      const sorted = [...counts.keys()].sort((a, b) => compareCardIdsByTypeThenName(a, b, byId));
+      for (const cid of sorted) {
+        const c = byId.get(cid);
+        if (!c) continue;
+        const wrap = document.createElement("div");
+        wrap.className = "deck-view-card-wrap";
+        const n = counts.get(cid);
+        const badge = document.createElement("span");
+        badge.className = `count-badge count-badge--${n}`;
+        badge.textContent = `x${n}`;
+        const cardEl = createPowerCard({
+          type: c.type,
+          name: c.name,
+          description: c.description,
+          example: c.example,
+          mana: c.mana,
+          ignition: c.ignition,
+          cooldown: c.cooldown,
+          cardWidth: "180px"
+        });
+        wrap.appendChild(cardEl);
+        wrap.appendChild(badge);
+        deckViewGridEl.appendChild(wrap);
+      }
+      deckViewModalEl.classList.remove("hidden");
+      deckViewModalEl.setAttribute("aria-hidden", "false");
     } catch (_) {
       /* ignore */
     }
@@ -735,10 +730,9 @@
       cardMarqueeLabelEl.textContent = t("cardMarqueeTitle");
     }
     document.getElementById("lobbyDeckLabel").textContent = t("lobbyDeckLabel");
-    document.getElementById("newDeckNameLabel").textContent = t("newDeckNameLabel");
-    document.getElementById("newDeckSkillLabel").textContent = t("newDeckSkillLabel");
-    document.getElementById("newDeckSleeveLabel").textContent = t("newDeckSleeveLabel");
-    newDeckSubmitBtnEl.textContent = t("newDeckSubmit");
+    lobbyDeckViewBtnEl.textContent = t("lobbyDeckView");
+    lobbyDeckBuilderLinkEl.textContent = t("lobbyDeckBuilder");
+    deckViewCloseBtnEl.textContent = t("deckViewClose");
     lobbyDeckHintEl.textContent = lobbyDeckRowEl.classList.contains("hidden") ? "" : t("lobbyDeckHint");
   }
 
@@ -1966,33 +1960,12 @@
     }
   });
 
-  newDeckSubmitBtnEl.addEventListener("click", async () => {
-    const name = (newDeckNameEl.value || "").trim();
-    if (!name) {
-      alert(t("deckNameRequired"));
-      return;
-    }
-    try {
-      const r = await fetch("/api/decks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authFetchHeaders() },
-        body: JSON.stringify({
-          name,
-          cardIds: DEFAULT_DECK_CARD_IDS,
-          playerSkillId: newDeckSkillEl.value,
-          sleeveColor: newDeckSleeveEl.value
-        })
-      });
-      if (!r.ok) {
-        const errTxt = await authResponseErrorMessage(r, "authErrorGeneric");
-        alert(errTxt);
-        return;
-      }
-      newDeckNameEl.value = "";
-      await refreshLobbyDecks();
-    } catch (_) {
-      alert(t("authErrorNetwork"));
-    }
+  lobbyDeckViewBtnEl.addEventListener("click", () => {
+    void openDeckViewModal();
+  });
+  deckViewCloseBtnEl.addEventListener("click", () => closeDeckViewModal());
+  deckViewModalEl.addEventListener("click", (ev) => {
+    if (ev.target === deckViewModalEl) closeDeckViewModal();
   });
 
   function returnToLobbyAfterMatch() {

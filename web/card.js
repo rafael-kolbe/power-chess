@@ -12,6 +12,8 @@
  * @property {number|string} [ignition] Ignition value (bottom-left)
  * @property {number|string} [cooldown] Cooldown / recharge (bottom-right)
  * @property {string} [cardWidth] CSS length for --card-width (default 220px)
+ * @property {boolean} [showExampleInitially] If true and example text exists, start in example view
+ * @property {(showingExample: boolean) => void} [onExampleToggle] Fires after toggling description/example
  */
 
 (function () {
@@ -56,6 +58,44 @@
    * @param {PowerCardOptions} opts
    * @returns {HTMLElement}
    */
+  /**
+   * Sets whether the card shows example or description (same as footer toggle).
+   * @param {HTMLElement} article
+   * @param {boolean} showExample
+   */
+  function setPowerCardExampleMode(article, showExample) {
+    if (!article || !article.classList.contains("power-card")) return;
+    const descEl = article.querySelector(".power-card__desc");
+    const exampleEl = article.querySelector(".power-card__example");
+    const toggleBtn = article.querySelector(".power-card__toggle");
+    if (!exampleEl || !toggleBtn || !descEl) return;
+    const locale = readLocaleForCards();
+    const exLabel = locale === "pt-BR" ? "Exemplo" : "Example";
+    const descLabel = locale === "pt-BR" ? "Descrição" : "Description";
+    const on = Boolean(showExample);
+    article.classList.toggle("power-card--show-example", on);
+    if (on) {
+      descEl.setAttribute("hidden", "");
+      exampleEl.removeAttribute("hidden");
+      toggleBtn.textContent = descLabel;
+      toggleBtn.setAttribute("aria-pressed", "true");
+      toggleBtn.setAttribute(
+        "aria-label",
+        locale === "pt-BR" ? "Mostrar descrição da carta" : "Show card description"
+      );
+    } else {
+      exampleEl.setAttribute("hidden", "");
+      descEl.removeAttribute("hidden");
+      toggleBtn.textContent = exLabel;
+      toggleBtn.setAttribute("aria-pressed", "false");
+      toggleBtn.setAttribute(
+        "aria-label",
+        locale === "pt-BR" ? "Mostrar texto de exemplo" : "Show example text"
+      );
+    }
+    finalizePowerCardLayout(article);
+  }
+
   function createPowerCard(opts) {
     const type = normalizeType(opts.type);
     const meta = TYPE_META[type];
@@ -131,7 +171,8 @@
       toggleBtn.setAttribute("aria-label", loc === "pt-BR" ? "Mostrar texto de exemplo" : "Show example text");
       toggleBtn.setAttribute("aria-pressed", "false");
 
-      toggleBtn.addEventListener("click", () => {
+      toggleBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
         const on = article.classList.toggle("power-card--show-example");
         if (on) {
           descEl.setAttribute("hidden", "");
@@ -153,11 +194,17 @@
               : "Show example text"
         );
         finalizePowerCardLayout(article);
+        if (typeof opts.onExampleToggle === "function") {
+          opts.onExampleToggle(on);
+        }
       });
 
       footer.appendChild(toggleBtn);
       body.appendChild(textStack);
       body.appendChild(footer);
+      if (opts.showExampleInitially) {
+        setPowerCardExampleMode(article, true);
+      }
     } else {
       body.appendChild(textStack);
     }
@@ -294,6 +341,7 @@
   }
 
   globalThis.createPowerCard = createPowerCard;
+  globalThis.setPowerCardExampleMode = setPowerCardExampleMode;
 
   function schedulePreview() {
     if (document.readyState === "loading") {
