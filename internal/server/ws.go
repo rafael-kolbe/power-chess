@@ -191,7 +191,7 @@ func (c *Client) readLoop() {
 					c.room.HandlePlayerDisconnect(c.playerID)
 				}
 				_ = c.room.Persist(context.Background(), c.server.store)
-				c.room.Broadcast(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(c.room.SnapshotSafe())})
+				c.room.BroadcastSnapshot()
 			}
 		}
 		_ = c.conn.Close()
@@ -240,6 +240,8 @@ func (c *Client) handle(env Envelope) error {
 		return c.handleSubmitMove(env)
 	case MessageActivateCard:
 		return c.handleActivateCard(env)
+	case MessageDrawCard:
+		return c.handleDrawCard(env)
 	case MessageResolvePending:
 		return c.handleResolvePending(env)
 	case MessageQueueReaction:
@@ -265,7 +267,7 @@ func (c *Client) handleStayInRoom(env Envelope) error {
 	_ = c.sendAck(env, "ok", "", "")
 	_ = c.room.Persist(context.Background(), c.server.store)
 	c.room.TouchActivity()
-	c.room.Broadcast(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(c.room.SnapshotSafe())})
+	c.room.BroadcastSnapshot()
 	return nil
 }
 
@@ -279,7 +281,7 @@ func (c *Client) handleRequestRematch(env Envelope) error {
 	_ = c.sendAck(env, "ok", "", "")
 	_ = c.room.Persist(context.Background(), c.server.store)
 	c.room.TouchActivity()
-	c.room.Broadcast(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(c.room.SnapshotSafe())})
+	c.room.BroadcastSnapshot()
 	return nil
 }
 
@@ -304,7 +306,7 @@ func (c *Client) handleLeaveMatch(env Envelope) error {
 	_ = c.sendAck(env, "ok", "", "")
 	_ = c.room.Persist(context.Background(), c.server.store)
 	c.room.TouchActivity()
-	c.room.Broadcast(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(c.room.SnapshotSafe())})
+	c.room.BroadcastSnapshot()
 	return errClientLeaveMatch
 }
 
@@ -425,7 +427,7 @@ func (c *Client) handleJoinMatch(env Envelope) error {
 	room.EvaluateMatchOutcome()
 	_ = room.Persist(context.Background(), c.server.store)
 	_ = c.sendAck(env, "ok", "", "")
-	room.Broadcast(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(room.SnapshotSafe())})
+	room.BroadcastSnapshot()
 	return nil
 }
 
@@ -461,7 +463,7 @@ func (c *Client) handleSubmitMove(env Envelope) error {
 	c.room.EvaluateMatchOutcome()
 	_ = c.room.Persist(context.Background(), c.server.store)
 	c.room.TouchActivity()
-	c.room.Broadcast(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(c.room.SnapshotSafe())})
+	c.room.BroadcastSnapshot()
 	return nil
 }
 
@@ -493,7 +495,34 @@ func (c *Client) handleActivateCard(env Envelope) error {
 	c.room.EvaluateMatchOutcome()
 	_ = c.room.Persist(context.Background(), c.server.store)
 	c.room.TouchActivity()
-	c.room.Broadcast(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(c.room.SnapshotSafe())})
+	c.room.BroadcastSnapshot()
+	return nil
+}
+
+// handleDrawCard pays the draw-mana cost and moves a card from the player's deck to hand.
+func (c *Client) handleDrawCard(env Envelope) error {
+	if c.room == nil {
+		return protocolError{code: ErrorJoinRequired, message: "join_match is required before draw_card"}
+	}
+	if !c.room.BothPlayersConnected() {
+		return protocolError{code: ErrorActionFailed, message: "waiting_for_opponent"}
+	}
+	if err := c.room.Execute(func() error {
+		requestKey := c.requestKey(env)
+		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
+			return errDuplicateRequest
+		}
+		return c.room.Engine.DrawCard(c.playerID)
+	}); err != nil {
+		if errors.Is(err, errDuplicateRequest) {
+			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
+		}
+		return protocolError{code: ErrorActionFailed, message: err.Error()}
+	}
+	_ = c.sendAck(env, "ok", "", "")
+	_ = c.room.Persist(context.Background(), c.server.store)
+	c.room.TouchActivity()
+	c.room.BroadcastSnapshot()
 	return nil
 }
 
@@ -530,7 +559,7 @@ func (c *Client) handleResolvePending(env Envelope) error {
 	c.room.EvaluateMatchOutcome()
 	_ = c.room.Persist(context.Background(), c.server.store)
 	c.room.TouchActivity()
-	c.room.Broadcast(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(c.room.SnapshotSafe())})
+	c.room.BroadcastSnapshot()
 	return nil
 }
 
@@ -593,7 +622,7 @@ func (c *Client) handleResolveReactions(env Envelope) error {
 	c.room.EvaluateMatchOutcome()
 	_ = c.room.Persist(context.Background(), c.server.store)
 	c.room.TouchActivity()
-	c.room.Broadcast(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(c.room.SnapshotSafe())})
+	c.room.BroadcastSnapshot()
 	return nil
 }
 
@@ -704,7 +733,7 @@ func (s *Server) runReactionTimeoutLoop() {
 			if resolved {
 				_ = room.Persist(context.Background(), s.store)
 				room.TouchActivity()
-				room.Broadcast(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(room.SnapshotSafe())})
+				room.BroadcastSnapshot()
 			}
 		}
 	}
@@ -729,7 +758,7 @@ func (s *Server) runTurnTimeoutLoop() {
 			if resolved {
 				_ = room.Persist(context.Background(), s.store)
 				room.TouchActivity()
-				room.Broadcast(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(room.SnapshotSafe())})
+				room.BroadcastSnapshot()
 			}
 		}
 	}
