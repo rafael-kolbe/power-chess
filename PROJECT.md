@@ -26,6 +26,20 @@
 - O **rei nunca é capturado** diretamente; jogadas que “capturam” o rei são ilegais.
 - Peças capturadas vão para o **cemitério** (graveyard); alguns efeitos podem interagir com isso.
 
+### Ordem de turno (referência canônica)
+
+1. **Início do turno** — +1 mana ao pool do jogador ativo.
+2. **Tick de ignição** — contador da carta no slot de ignição −1 (animação); se chegar a 0, o efeito ativa.
+3. **Tick de recarga** — contador de cada carta na pilha de recarga −1 (animação); ao chegar a 0, a carta volta ao fundo do deck com movimento fluído.
+4. **Janela de ação** (opcional, durante o próprio turno): o jogador pode comprar cartas (2 mana/carta, mão < 5) e/ou colocar uma carta **Power** ou **Continuous** na ignição (slot deve estar vazio, salvo `save-it-for-later`).
+5. **Janela de Retribution**: se o jogador ativou uma carta, o oponente tem **10 s** para responder com uma carta **Retribution**. Efeitos resolvem em cadeia LIFO.
+6. **Movimento de peça**: jogador executa a jogada de xadrez.
+7. **Tentativa de captura**: se a jogada capturaria uma peça, abre **janela de Counter** (10 s). O oponente pode responder com carta **Counter**. Efeitos resolvem em cadeia LIFO.
+8. **Peça capturada** (ou não, dependendo dos efeitos) — vai ao cemitério do capturado.
+9. **Fim de turno**.
+
+> Efeitos completos das cartas e resolução de cadeia detalhada estão em `Cards.md`. O motor é a fonte da verdade.
+
 ---
 
 ## Mana e mana energizada
