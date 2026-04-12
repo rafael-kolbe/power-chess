@@ -19,16 +19,33 @@
   --color-text-label: #ccc;
   --color-board-light: #d8c6a0;
   --color-board-dark: #7d5a3c;
-  /* Playmat (match UI) */
-  --pm-card-width: 110px;
+  /* Board: fallback tokens (match board uses fluid fr grid + aspect-ratio on .board-frame) */
+  --board-edge: clamp(14px, 2.6vmin, 22px);
+  --board-cell: clamp(26px, 4.2vmin, 70px);
+  /* Playmat (match UI): card slot size */
+  --pm-card-width: clamp(56px, 11vmin, 110px);
   --pm-card-height: calc(var(--pm-card-width) * 965 / 639);
   --pm-zone-radius: 8px;
   --pm-zone-border: 1px solid rgba(255 255 255 / 18%);
-  --pm-hand-gap: 6px;
+  /* Single rhythm for playmat: column grid, zone pairs, hand row, stacks */
+  --pm-gutter: 8px;
+  --pm-hand-gap: var(--pm-gutter);
   /* Deck row: third column width (DRAW / invisible placeholder) for space-evenly alignment */
-  --pm-deck-draw-slot: 4.75rem;
+  --pm-deck-draw-slot: clamp(2.75rem, 10vmin, 4.75rem);
   /* Left column: two card-width zones side by side + gap */
   --pm-col-width: calc(var(--pm-card-width) * 2 + var(--pm-hand-gap));
+}
+
+/*
+ * Match screen: larger card slots (+40px height vs base) while keeping 639:965 proportion.
+ * Column grid fractions (playmat-area) stay unchanged — only slot and dependent tokens grow.
+ */
+body[data-page="match"] {
+  --pm-card-width: calc(clamp(56px, 11vmin, 110px) + 40px * 639 / 965);
+  --pm-card-height: calc(var(--pm-card-width) * 965 / 639);
+  --pm-col-width: calc(var(--pm-card-width) * 2 + var(--pm-hand-gap));
+  /* Match UI: keep gutter token available for overrides */
+  --pm-gutter: 8px;
 }
 
 /* Match screen: charcoal canvas + crisp chrome (reference tabletop mockup) */
@@ -315,6 +332,10 @@ button:disabled {
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - 16px);
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .opponent-disconnect-overlay {
@@ -363,13 +384,14 @@ button:disabled {
   color: #a9b6c4;
 }
 
+/* Top half of board-wrap = opponent band (cemetery + HUD); stays above all with z-index */
 .waiting-banner {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   height: 50%;
-  z-index: 10;
+  z-index: 10000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -390,33 +412,56 @@ button:disabled {
 #boardArea {
   position: relative;
   width: 100%;
+  min-width: 0;
+  flex: 1;
+  min-height: 0;
+  /* Reserve vertical space for the board stack; page scrolls and debug sits below */
+  min-height: max(400px, 52vmin);
 }
 
 
 .board-wrap {
   position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  align-items: center;
-  width: fit-content;
-  margin-top: 12px;
+  gap: var(--pm-gutter);
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  max-width: 100%;
+  margin-top: 0;
   margin-right: auto;
   margin-left: auto;
 }
 
 .player-b-stack,
 .player-a-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pm-gutter);
+  flex-shrink: 0;
   width: 100%;
-  max-width: calc(22px + 8 * 70px + 22px + 16px);
+  max-width: 100%;
+  align-items: stretch;
 }
 
 .player-b-stack {
-  align-self: flex-start;
+  align-self: stretch;
 }
 
 .player-a-stack {
-  align-self: flex-end;
+  align-self: stretch;
+}
+
+/* Stack gap replaces clock margins */
+.player-b-stack .clock-b {
+  margin-bottom: 0;
+}
+
+.player-a-stack .clock-a {
+  margin-top: 0;
 }
 
 /* Player B: opponent (A) on top, self on bottom — same as flipped board view. */
@@ -506,25 +551,43 @@ button:disabled {
 .board-frame {
   display: grid;
   gap: 2px;
-  grid-template-columns: 22px repeat(8, 70px) 22px;
-  grid-template-rows: 22px repeat(8, 70px) 22px;
+  /* Classic 22:70 edge:cell ratio; cells grow with the frame */
+  grid-template-columns: minmax(0, 22fr) repeat(8, minmax(0, 70fr)) minmax(0, 22fr);
+  grid-template-rows: minmax(0, 22fr) repeat(8, minmax(0, 70fr)) minmax(0, 22fr);
   user-select: none;
+  /* Fill center column width (no side gutters); height follows square */
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: min(100%, max(280px, 44vmin));
+  aspect-ratio: 1;
+  height: auto;
+  align-self: stretch;
+  margin-top: auto;
+  margin-bottom: auto;
+  box-sizing: border-box;
+}
+
+/* Slightly smaller board so cemeteries + HUD fit in the center column */
+.playmat-center .board-frame {
+  max-width: min(100%, 74vmin);
+  margin-inline: auto;
 }
 
 .edge-label {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 22px;
-  min-height: 22px;
-  font-size: 13px;
+  min-width: 0;
+  min-height: 0;
+  font-size: clamp(10px, 1.8vmin, 13px);
   font-weight: 600;
   color: rgb(230 232 236);
 }
 
 .grid-cell {
-  width: 70px;
-  height: 70px;
+  min-width: 0;
+  min-height: 0;
 }
 
 .sq {
@@ -532,8 +595,10 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 70px;
-  height: 70px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   line-height: 1;
   border: 1px solid var(--color-border-soft);
 }
@@ -551,8 +616,8 @@ button:disabled {
   flex-shrink: 0;
   width: 87.5%;
   height: 87.5%;
-  max-width: 58px;
-  max-height: 58px;
+  max-width: min(58px, 88%);
+  max-height: min(58px, 88%);
   pointer-events: none;
   user-select: none;
   object-fit: contain;
@@ -1040,38 +1105,59 @@ pre {
    Playmat layout — three-column match UI
    ============================================================================= */
 
-/* Grid: side columns symmetric, center sized to board content */
+/* Playmat: 1.6fr | 1.88fr | 1.6fr — center slightly narrower than sides */
 .playmat-area {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.3fr) minmax(0, 1.6fr);
+  gap: var(--pm-gutter);
   align-items: stretch;
+  justify-items: stretch;
   width: 100%;
   flex: 1;
   min-height: 0;
-}
-
-.playmat-center {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-/* Columns: flex column, space-between so opp stays top, self stays bottom */
-.playmat-col {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 8px;
   min-width: 0;
 }
 
-/* Each half (opp / own) fills available height equally */
+/* Keep board column aligned with side columns (no extra top offset) */
+.playmat-center {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: var(--pm-gutter);
+  align-self: stretch;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+}
+
+/*
+ * Side columns: opponent band (top) vs self band (bottom). Rows size to content so
+ * deck/banish are not stretched; align-content: space-between pushes the two bands
+ * apart when the column is taller than their combined height.
+ */
+.playmat-col {
+  display: grid;
+  grid-template-rows: auto auto;
+  /* Minimum gap; extra column height is distributed between opponent (row 1) and self (row 2). */
+  gap: var(--pm-gutter);
+  align-content: space-between;
+  align-items: stretch;
+  justify-items: stretch;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Each half stacks zones with the same gutter as everywhere else */
 .pm-side-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--pm-gutter);
+  min-height: 0;
+  min-width: 0;
+  height: auto;
+  align-self: stretch;
+  overflow: visible;
 }
 
 .pm-side-group--opp {
@@ -1150,28 +1236,21 @@ pre {
   padding: 0 0 14px;
 }
 
-.pm-side-group--opp .pm-graveyard-grid {
-  margin-top: 2px;
-  margin-bottom: 0;
-}
-
-.pm-side-group--opp .pm-cooldown-cards {
-  margin-top: 4px;
-  margin-bottom: 12px;
-}
-
 /* Left-column pair: banish + deck side by side */
 .pm-left-zones-pair {
   display: flex;
   align-items: stretch;
   gap: var(--pm-hand-gap);
+  flex: 0 0 auto;
+  min-height: 0;
 }
 
 .pm-left-zones-pair .pm-zone {
   flex: 1;
   min-width: 0;
   height: auto;
-  min-height: var(--pm-card-height);
+  /* Deck + banish: slightly taller than a single card slot */
+  min-height: calc(var(--pm-card-height) + var(--pm-gutter));
   align-self: stretch;
 }
 
@@ -1197,9 +1276,14 @@ pre {
 }
 
 .pm-zone--banish .pm-stack-top {
+  --cd-stack-n: 1;
   flex-shrink: 0;
+  width: 100%;
+  height: auto;
+  min-height: calc(var(--pm-card-height) + var(--pm-gutter));
   margin-top: auto;
   margin-bottom: auto;
+  overflow: visible;
 }
 
 /* Deck: label + row (count / sleeve / draw) with space-evenly */
@@ -1218,11 +1302,14 @@ pre {
 .pm-deck-row {
   display: flex;
   flex-direction: row;
+  flex-wrap: wrap;
   justify-content: space-evenly;
   align-items: center;
+  align-content: center;
+  gap: var(--pm-gutter);
   width: 100%;
-  flex: 1;
-  min-height: var(--pm-card-height);
+  flex: 0 0 auto;
+  min-height: calc(var(--pm-card-height) + var(--pm-gutter));
   box-sizing: border-box;
 }
 
@@ -1239,7 +1326,7 @@ pre {
 .pm-deck-count {
   position: static;
   flex-shrink: 0;
-  font-size: 24px;
+  font-size: clamp(16px, 4vmin, 24px);
   font-weight: 700;
   color: #e0e8f0;
   text-shadow: 0 0 6px #000, 0 0 3px #000;
@@ -1293,44 +1380,142 @@ pre {
 }
 
 
-/* Graveyard: half-height — shows piece thumbnails */
+/* Graveyard — compact vertical padding; height follows content */
 .pm-zone--graveyard {
-  height: calc(var(--pm-card-height) / 2);
-  justify-content: center;
-  align-items: center;
-  padding: 4px;
+  flex: 0 0 auto;
+  min-height: 0;
+  height: auto;
+  overflow: visible;
+  justify-content: flex-start;
+  align-items: stretch;
+  padding: 11px 8px;
+  box-sizing: border-box;
 }
 
+/* Cemeteries in center column (full width of board strip) */
+.pm-zone--graveyard.pm-graveyard--board {
+  width: 100%;
+  max-width: 100%;
+  align-self: stretch;
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 9px 8px 11px;
+  /* Width-only container: piece size is driven by cqi (no fixed tall band) */
+  container-type: inline-size;
+  container-name: pm-graveyard;
+}
+
+/* Opponent cemetery: label reads from opponent side of the board */
+.pm-graveyard--board.pm-graveyard--opp .pm-zone__label {
+  top: auto;
+  bottom: 4px;
+  transform: rotate(180deg);
+}
+
+.pm-graveyard--board.pm-graveyard--opp {
+  padding: 11px 8px 13px;
+}
+
+.pm-graveyard--board.pm-graveyard--own {
+  padding: 9px 8px 11px;
+}
+
+/* Row of type-groups; own = flush left, opponent = flush right */
 .pm-graveyard-grid {
-  display: grid;
-  grid-template-columns: repeat(10, 16px);
-  grid-template-rows: repeat(2, 18px);
-  gap: 1px;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  align-content: flex-start;
+  gap: 6px 10px;
+  width: 100%;
   margin-top: 0;
+  min-height: 0;
+  box-sizing: border-box;
 }
 
-.pm-graveyard-piece {
-  width: 16px;
-  height: 18px;
+.pm-graveyard-grid--align-left {
+  justify-content: flex-start;
+}
+
+.pm-graveyard-grid--align-right {
+  justify-content: flex-end;
+}
+
+/* Balatro-style horizontal stack per piece type (default: 3× former 16px thumbnails) */
+.pm-graveyard-group {
+  position: relative;
+  flex: 0 0 auto;
+  --gy-piece-w: 48px;
+  --gy-step: calc(var(--gy-piece-w) * 5 / 16);
+  height: calc(var(--gy-piece-w) * 18 / 16);
+  width: calc((var(--gy-n, 1) - 1) * var(--gy-step) + var(--gy-piece-w));
+}
+
+.pm-graveyard-group .pm-graveyard-piece {
+  position: absolute;
+  bottom: 0;
+  left: calc(var(--i, 0) * var(--gy-step));
+  width: var(--gy-piece-w);
+  height: calc(var(--gy-piece-w) * 18 / 16);
   object-fit: contain;
-  object-position: center;
+  object-position: center bottom;
   filter: drop-shadow(0 1px 1px rgba(0 0 0 / 55%));
   opacity: 0.85;
+  z-index: calc(10 + var(--i, 0));
+  pointer-events: none;
 }
 
-/* Banish zone */
+/*
+ * Board cemeteries: scale pieces from available width (15 pieces / 5 groups).
+ * min-height keeps one row when empty so the match layout does not collapse without test data.
+ */
+.pm-zone--graveyard.pm-graveyard--board .pm-graveyard-grid {
+  --gy-gap: clamp(6px, 1.5cqw, 14px);
+  --gy-piece-w: max(
+    48px,
+    min(
+      calc((100cqi - 4 * var(--gy-gap)) * 16 / 130),
+      96px
+    )
+  );
+  --gy-step: calc(var(--gy-piece-w) * 5 / 16);
+  gap: var(--gy-gap);
+  flex: 0 0 auto;
+  align-self: stretch;
+  min-height: calc(var(--gy-piece-w) * 18 / 16);
+  align-content: flex-start;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.pm-zone--graveyard.pm-graveyard--board .pm-graveyard-group {
+  height: calc(var(--gy-piece-w) * 18 / 16);
+  width: calc((var(--gy-n, 1) - 1) * var(--gy-step) + var(--gy-piece-w));
+}
+
+.pm-zone--graveyard.pm-graveyard--board .pm-graveyard-group .pm-graveyard-piece {
+  width: var(--gy-piece-w);
+  height: calc(var(--gy-piece-w) * 18 / 16);
+  left: calc(var(--i, 0) * var(--gy-step));
+}
+
+/* Banish top mount: full width for Balatro-style overlap stack */
 .pm-stack-top {
-  width: var(--pm-card-width);
-  height: var(--pm-card-height);
   position: relative;
-  overflow: hidden;
 }
 
 /* Ignition + cooldown row — both zones share the same card height */
 .pm-ignition-cooldown-row {
   display: flex;
-  gap: 6px;
+  gap: var(--pm-gutter);
   align-items: stretch;
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: visible;
 }
 
 .pm-ignition-cooldown-row--opp {
@@ -1375,11 +1560,14 @@ pre {
   z-index: 2;
 }
 
-/* Cooldown zone — fills remaining row width, height from row align-items: stretch */
+/* Cooldown zone — fills remaining row width; tall stack must not clip (base .pm-zone is overflow:hidden) */
 .pm-zone--cooldown {
   flex: 1;
   min-width: 0;
   height: auto;
+  min-height: calc(var(--pm-card-height) + 2 * var(--pm-gutter) + 1rem);
+  justify-content: flex-start;
+  overflow: visible;
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 7%),
     inset 12px 0 24px rgb(0 0 0 / 22%),
@@ -1387,47 +1575,125 @@ pre {
     0 1px 0 rgb(0 0 0 / 50%);
 }
 
+/* Cooldown: Balatro-style row — left-aligned, soonest-to-resolve first; step fits row in container */
 .pm-cooldown-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  --cd-stack-n: 1;
+  position: relative;
   width: 100%;
-  margin-top: 12px;
+  flex: 1 1 auto;
+  min-height: calc(var(--pm-card-height) + var(--pm-gutter) + 1rem);
+  margin-top: 0;
+  /* Extra top space for peek lift (-4px) so cards do not paint over the header */
+  padding: calc(var(--pm-gutter) + 6px) 2px var(--pm-gutter);
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
-.pm-cooldown-entry {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: rgb(236 239 245);
-  background: rgb(20 22 28 / 92%);
-  border: 1px solid rgb(255 255 255 / 12%);
-  border-radius: 4px;
-  padding: 2px 5px;
-  min-width: 0;
+.pm-cooldown-stack,
+.pm-banish-stack,
+.pm-hand-stack {
+  position: relative;
+  display: block;
+  width: 100%;
+  margin-left: 0;
+  margin-right: auto;
+  min-height: calc(var(--pm-card-height) + 6px);
+  pointer-events: auto;
+  cursor: default;
+  /* Step between left edges so last card’s right edge meets the stack’s right (Balatro-style fit). */
+  --cd-step: calc((100% - var(--pm-card-width)) / max(1, var(--cd-stack-n) - 1));
 }
 
-.pm-cooldown-entry__name {
-  flex: 1;
-  min-width: 0;
+.pm-hand-stack {
+  user-select: none;
+  touch-action: none;
+  cursor: grab;
+}
+
+.pm-cooldown-card-wrap,
+.pm-banish-card-wrap,
+.pm-hand-stack .pm-hand-card-wrap {
+  container-type: inline-size;
+  position: absolute;
+  bottom: 0;
+  left: calc(var(--i) * var(--cd-step));
+  width: var(--pm-card-width);
+  max-width: min(100%, var(--pm-card-width));
+  aspect-ratio: 639 / 965;
+  height: auto;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  cursor: default;
+  --i: 0;
+  flex: unset;
+  min-width: 0;
+  pointer-events: none;
+  /* Left index on top; stack tucks under toward the right */
+  z-index: calc(10 + var(--cd-stack-n) - var(--i));
+  transition: z-index 0s, transform 0.15s ease;
 }
 
-.pm-cooldown-entry__turns {
+.pm-cooldown-card-wrap--peek,
+.pm-banish-card-wrap--peek,
+.pm-hand-card-wrap--peek {
+  z-index: 1000;
+  transform: translateY(-4px);
+}
+
+.pm-cooldown-card-wrap > .pm-sleeve-card,
+.pm-banish-card-wrap > .pm-sleeve-card {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.pm-cooldown-card-wrap > .power-card,
+.pm-banish-card-wrap > .power-card {
+  position: relative;
+  z-index: 1;
+  max-width: none;
+  transform-origin: top left;
+  transform: scale(calc(100cqw / 220px));
+  pointer-events: none;
+}
+
+.pm-cooldown-turns {
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  font-size: 11px;
   font-weight: 700;
   color: #9ec8f5;
-  flex-shrink: 0;
+  text-shadow: 0 0 4px #000, 0 1px 2px #000;
+  z-index: 4;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-cooldown-card-wrap--hidden {
+  background: linear-gradient(145deg, #2a3444 0%, #1a2230 100%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 45%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--pm-card-height);
+}
+
+.pm-cooldown-hidden-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: rgb(200 210 230 / 90%);
+  text-shadow: 0 0 6px #000;
 }
 
 /* Hand: outer row + single area that spans the column foot */
 .pm-hand-row {
   display: flex;
   width: 100%;
-  padding: 4px 0;
-  flex-shrink: 0;
+  padding: 0;
+  flex: 0 0 auto;
+  min-height: 0;
 }
 
 /* One container: label + inner row of cards (inner preserves label when JS refreshes) */
@@ -1437,8 +1703,8 @@ pre {
   flex-direction: column;
   flex: 1;
   width: 100%;
-  min-height: calc(var(--pm-card-height) + 28px);
-  padding: 14px 10px 10px;
+  min-height: calc(var(--pm-card-height) + 2 * var(--pm-gutter) + 1.25rem);
+  padding: calc(10px + var(--pm-gutter)) 10px var(--pm-gutter);
   justify-content: center;
   align-items: stretch;
   box-sizing: border-box;
@@ -1464,6 +1730,19 @@ pre {
   overflow-y: visible;
 }
 
+/* Overlap row (Balatro-style): same mechanics as cooldown */
+.pm-hand-cards.pm-hand-cards--overlap {
+  display: block;
+  position: relative;
+  flex: 1;
+  width: 100%;
+  --cd-stack-n: 1;
+  min-height: calc(var(--pm-card-height) + 12px);
+  overflow-x: hidden;
+  overflow-y: visible;
+  gap: 0;
+}
+
 .pm-hand-area__label {
   position: absolute;
   top: 4px;
@@ -1483,11 +1762,10 @@ pre {
  * Opponent hand: row-reverse on the cards row — DOM index 0 nearest the board.
  */
 .pm-side-group--opp .pm-hand-area {
-  padding-top: 10px;
-  padding-bottom: 16px;
+  padding: var(--pm-gutter) 10px calc(10px + var(--pm-gutter));
 }
 
-.pm-side-group--opp .pm-hand-cards {
+.pm-side-group--opp .pm-hand-cards:not(.pm-hand-cards--overlap) {
   flex-direction: row-reverse;
   justify-content: center;
 }
@@ -1499,13 +1777,19 @@ pre {
 }
 
 /*
- * Per-card wrapper: flex item; overflow clips scaled 220px card to playmat size.
+ * Per-card wrapper: flex item shares row width (up to --pm-card-width) so 5 cards fit;
+ * container for cqw-based scale of the 220px power-card.
  */
 .pm-hand-card-wrap {
   position: relative;
-  width: var(--pm-card-width);
-  height: var(--pm-card-height);
-  flex-shrink: 0;
+  container-type: inline-size;
+  container-name: pm-hand-slot;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: var(--pm-card-width);
+  width: auto;
+  aspect-ratio: 639 / 965;
+  height: auto;
   cursor: grab;
   overflow: hidden;
 }
@@ -1518,20 +1802,31 @@ pre {
 /*
  * Miniature card rendering: card.js uses cardWidth "220px"; CSS scale shrinks to slot size.
  */
-.pm-hand-card-wrap > .power-card,
+.pm-hand-card-wrap > .power-card {
+  position: relative;
+  z-index: 1;
+  max-width: none;
+  transform-origin: top left;
+  transform: scale(calc(100cqw / 220px));
+  pointer-events: none;
+}
+
 .pm-ignition-card > .power-card,
 .pm-stack-top > .power-card {
   position: relative;
   z-index: 1;
   max-width: none;
   transform-origin: top left;
-  transform: scale(calc(110 / 220));
+  transform: scale(calc(var(--pm-card-width) / 220px));
   pointer-events: none;
 }
 
 .pm-hand-card-wrap > .pm-sleeve-card {
   position: relative;
   z-index: 1;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
 }
 
 /* Face-down (sleeve) card for opponent */
@@ -1604,6 +1899,7 @@ pre {
    ============================================================================= */
 
 .match-debug {
+  flex-shrink: 0;
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid #333;

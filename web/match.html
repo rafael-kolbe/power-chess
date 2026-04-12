@@ -49,7 +49,7 @@
     </div>
     <div id="boardArea" class="playmat-area">
 
-      <!-- Left column: opp hand/ignition/cooldown (top) + self cemetery/banish/deck (bottom) -->
+      <!-- Left column: opp hand/ignition/cooldown (top) + self banish/deck (bottom) -->
       <div class="playmat-col playmat-col--left" id="playmatColLeft">
 
         <!-- Opponent block — hand on the left from player's view -->
@@ -73,14 +73,8 @@
           </div>
         </div>
 
-        <!-- Player block — column puts cemetery on top, pair on bottom -->
+        <!-- Player block — banish + deck -->
         <div class="pm-side-group pm-side-group--own" id="leftZonesSelf">
-          <!-- DOM first → visual top (cemetery, half-height) -->
-          <div class="pm-zone pm-zone--graveyard" id="graveyardSelf" aria-label="Your graveyard">
-            <span class="pm-zone__label">Cemetery</span>
-            <div class="pm-graveyard-grid" id="graveyardGridSelf"></div>
-          </div>
-          <!-- DOM second → visual bottom (banish + deck side by side) -->
           <div class="pm-left-zones-pair">
             <div class="pm-zone pm-zone--banish" id="banishSelf" aria-label="Your banished">
               <span class="pm-zone__label">Banished</span>
@@ -99,10 +93,14 @@
 
       </div>
 
-      <!-- Center: chess board -->
+      <!-- Center: cemeteries + chess board (board slightly smaller than column width) -->
       <div class="playmat-center">
         <div id="boardWrap" class="board-wrap">
           <div class="player-b-stack">
+            <div class="pm-zone pm-zone--graveyard pm-graveyard--board pm-graveyard--opp" id="graveyardOpp" aria-label="Opponent graveyard">
+              <span class="pm-zone__label">Cemetery</span>
+              <div class="pm-graveyard-grid" id="graveyardGridOpp"></div>
+            </div>
             <div class="side-clock clock-b"><strong id="playerBLabel">Player B</strong> | <span id="clockLabelB">Clock</span>: <span id="clockB">--</span>s | <span id="strikesLabelB">Strikes</span>: <span id="strikesB">0</span></div>
             <div class="bar-group">
               <div class="bar mana-bar" id="manaBarB"><div class="fill" id="manaFillB"></div><span class="bar-label" id="manaLabelB">0/10</span></div>
@@ -117,20 +115,18 @@
               <div class="bar energized-bar" id="energizedBarA"><div class="fill" id="energizedFillA"></div><span class="bar-label" id="energizedLabelA">0/20</span></div>
             </div>
             <div class="side-clock clock-a"><strong id="playerALabel">Player A</strong> | <span id="clockLabelA">Clock</span>: <span id="clockA">--</span>s | <span id="strikesLabelA">Strikes</span>: <span id="strikesA">0</span></div>
+            <div class="pm-zone pm-zone--graveyard pm-graveyard--board pm-graveyard--own" id="graveyardSelf" aria-label="Your graveyard">
+              <span class="pm-zone__label">Cemetery</span>
+              <div class="pm-graveyard-grid" id="graveyardGridSelf"></div>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Right column: opp cemetery/banish/deck (top) + self ignition/cooldown/hand (bottom) -->
+      <!-- Right column: opp banish/deck (top) + self ignition/cooldown/hand (bottom) -->
       <div class="playmat-col playmat-col--right" id="playmatColRight">
         <!-- Opponent block — deck on the right from player's view -->
         <div class="pm-side-group pm-side-group--opp" id="leftZonesOpp">
-          <!-- DOM first → visual bottom (cemetery, half-height) -->
-          <div class="pm-zone pm-zone--graveyard" id="graveyardOpp" aria-label="Opponent graveyard">
-            <span class="pm-zone__label">Cemetery</span>
-            <div class="pm-graveyard-grid" id="graveyardGridOpp"></div>
-          </div>
-          <!-- DOM second → visual top (banish + deck side by side) -->
           <div class="pm-left-zones-pair">
             <div class="pm-zone pm-zone--deck" id="deckOpp" aria-label="Opponent deck">
               <span class="pm-zone__label" id="deckLabelOpp">Deck</span>
