@@ -1,0 +1,27 @@
+---
+description: Never discard uncommitted work with git restore/checkout/reset unless user explicitly orders it
+alwaysApply: true
+---
+
+# Git safety — do not wipe working tree
+
+## Hard rule
+
+**Do not** run commands that overwrite or discard the user’s uncommitted changes **unless the user explicitly asks** for that exact operation (e.g. “run `git restore` on X”, “reset to HEAD”, “discard my local changes”).
+
+This includes (non-exhaustive):
+
+- `git restore` / `git checkout -- <paths>` (restoring files from index/HEAD)
+- `git reset --hard`, `git clean -fd`
+- `git checkout <branch>` when it would overwrite tracked files the user cares about without confirmation
+- Any variant that **replaces working-tree files** with committed versions and **destroys hours of uncommitted edits**
+
+## What to do instead
+
+- Prefer **editing files** with apply_patch / search_replace to undo specific changes.
+- If the user wants to “go back” conceptually, **ask** whether they mean editor undo (Ctrl+Z), **Timeline / Local History**, or a **targeted** revert of named files/commits — **never** assume they want `git restore` of the whole tree.
+- If a git operation is needed, **state the risk** (“this will discard uncommitted changes in these files”) and wait for **explicit** confirmation tied to that risk.
+
+## Rationale
+
+`git restore` and similar commands are **not** the same as Ctrl+Z; they can permanently remove uncommitted work. The agent must not run them on its own initiative.

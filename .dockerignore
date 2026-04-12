@@ -23,6 +23,11 @@ package-lock.json
 docker-compose.yml
 docker-compose.override.yml
 
+# Test artifacts
+test-result
+test-result/
+test-results/
+
 # Local binaries and caches
 bin/
 dist/
