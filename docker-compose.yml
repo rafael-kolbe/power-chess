@@ -4,10 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: power-chess-server
-    environment:
-      SERVER_ADDR: ":8080"
-      DATABASE_URL: "postgres://postgres:postgres@postgres:5432/powerchess?sslmode=disable"
-      JWT_SECRET: "${JWT_SECRET:-dev-only-change-this-secret-key-32chars!}"
+    env_file:
+      - .env
     ports:
       - "8080:8080"
     depends_on:

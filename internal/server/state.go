@@ -35,9 +35,11 @@ type RoomSession struct {
 	reactionDeadline   time.Time
 	turnDeadline       time.Time
 	turnDeadlineFor    gameplay.PlayerID
-	postMatchDeadline  time.Time
-	rematchVotes       map[gameplay.PlayerID]bool
-	lastActivity       time.Time
+	// mulliganDeadline is when the server auto-confirms any player who has not locked in (opening only).
+	mulliganDeadline  time.Time
+	postMatchDeadline time.Time
+	rematchVotes      map[gameplay.PlayerID]bool
+	lastActivity      time.Time
 	// displayNameByPlayer holds authenticated usernames per seat for the match HUD (cleared when a seat disconnects).
 	displayNameByPlayer map[gameplay.PlayerID]string
 	// parent is set when the room is registered on a Server (used to resolve saved decks); nil in isolated tests.
@@ -51,6 +53,9 @@ type RoomSession struct {
 }
 
 const defaultRoomName = "Let's Play!"
+
+// mulliganPhaseDuration is the window for both players to confirm opening mulligan; unconfirmed seats auto-keep.
+const mulliganPhaseDuration = 15 * time.Second
 
 // NewRoomSession creates a ready-to-use match engine bound to a room.
 func NewRoomSession(roomID string) (*RoomSession, error) {
@@ -188,27 +193,30 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 		}
 	}
 	payload := StateSnapshotPayload{
-		RoomID:         r.RoomID,
-		RoomName:       r.RoomName,
-		RoomPrivate:    r.RoomPrivate,
-		RoomPassword:   r.RoomPassword,
-		ConnectedA:     cA,
-		ConnectedB:     cB,
-		PlayerAName:    r.displayNameByPlayer[gameplay.PlayerA],
-		PlayerBName:    r.displayNameByPlayer[gameplay.PlayerB],
-		GameStarted:    (cA > 0 && cB > 0) || reconnectGrace,
+		RoomID:              r.RoomID,
+		RoomName:            r.RoomName,
+		RoomPrivate:         r.RoomPrivate,
+		RoomPassword:        r.RoomPassword,
+		ConnectedA:          cA,
+		ConnectedB:          cB,
+		PlayerAName:         r.displayNameByPlayer[gameplay.PlayerA],
+		PlayerBName:         r.displayNameByPlayer[gameplay.PlayerB],
+		GameStarted:         (cA > 0 && cB > 0) || reconnectGrace,
 		MulliganPhaseActive: s.MulliganPhaseActive,
 		MulliganReturned:    mulliganReturned,
-		TurnPlayer:     string(s.CurrentTurn),
-		TurnSeconds:    s.TurnSeconds,
-		TurnNumber:     s.TurnNumber,
-		IgnitionOn:     s.IgnitionSlot.Occupied,
-		ViewerPlayerID: string(viewerPID),
-		Board:          board,
+		TurnPlayer:          string(s.CurrentTurn),
+		TurnSeconds:         s.TurnSeconds,
+		TurnNumber:          s.TurnNumber,
+		IgnitionOn:          s.IgnitionSlot.Occupied,
+		ViewerPlayerID:      string(viewerPID),
+		Board:               board,
 		Players: []PlayerHUDState{
 			playerHUDState(gameplay.PlayerA, s.Players[gameplay.PlayerA], r.sleeveByPlayer[gameplay.PlayerA], viewerPID),
 			playerHUDState(gameplay.PlayerB, s.Players[gameplay.PlayerB], r.sleeveByPlayer[gameplay.PlayerB], viewerPID),
 		},
+	}
+	if s.MulliganPhaseActive && !r.mulliganDeadline.IsZero() {
+		payload.MulliganDeadlineUnixMs = r.mulliganDeadline.UnixMilli()
 	}
 	if s.IgnitionSlot.Occupied {
 		payload.IgnitionCard = string(s.IgnitionSlot.Card.CardID)
@@ -391,6 +399,7 @@ func (r *RoomSession) startPostMatchWindowUnsafe() {
 	}
 	r.postMatchDeadline = time.Now().Add(30 * time.Second)
 	r.rematchVotes = map[gameplay.PlayerID]bool{}
+	r.mulliganDeadline = time.Time{}
 }
 
 // TouchActivity updates the room idle timestamp after gameplay or protocol actions.
@@ -425,6 +434,7 @@ func (r *RoomSession) shutdownTimers() {
 	}
 	r.disconnectTimers = map[gameplay.PlayerID]*time.Timer{}
 	r.disconnectDeadline = map[gameplay.PlayerID]time.Time{}
+	r.mulliganDeadline = time.Time{}
 }
 
 // Persist stores room state using provided storage adapter.
@@ -532,6 +542,44 @@ func (r *RoomSession) handlePlayerLeaveUnsafe(pid gameplay.PlayerID) {
 	}
 }
 
+// startMulliganDeadlineUnsafe sets the wall-clock instant when unconfirmed mulligan seats auto-keep.
+// Caller must hold r.stateM.
+func (r *RoomSession) startMulliganDeadlineUnsafe(now time.Time) {
+	r.mulliganDeadline = now.Add(mulliganPhaseDuration)
+}
+
+// ResolveMulliganTimeoutIfExpired auto-confirms mulligan for any seat that has not locked in after the deadline.
+func (r *RoomSession) ResolveMulliganTimeoutIfExpired(now time.Time) (bool, error) {
+	r.stateM.Lock()
+	defer r.stateM.Unlock()
+	if r.matchEnded || !r.Engine.State.MulliganPhaseActive {
+		r.mulliganDeadline = time.Time{}
+		return false, nil
+	}
+	if r.mulliganDeadline.IsZero() || now.Before(r.mulliganDeadline) {
+		return false, nil
+	}
+	s := r.Engine.State
+	for _, pid := range []gameplay.PlayerID{gameplay.PlayerA, gameplay.PlayerB} {
+		if s.MulliganConfirmed != nil && s.MulliganConfirmed[pid] {
+			continue
+		}
+		done, err := s.ConfirmMulligan(pid, nil)
+		if err != nil {
+			return false, err
+		}
+		if done {
+			if err := r.Engine.StartTurn(gameplay.PlayerA); err != nil {
+				return false, err
+			}
+			break
+		}
+	}
+	r.mulliganDeadline = time.Time{}
+	r.lastActivity = now.UTC()
+	return true, nil
+}
+
 // ResolveTurnTimeoutIfExpired applies strike+turn-pass when current turn timer expires.
 func (r *RoomSession) ResolveTurnTimeoutIfExpired(now time.Time) (bool, error) {
 	r.stateM.Lock()
@@ -568,6 +616,9 @@ func (r *RoomSession) ResolveTurnTimeoutIfExpired(now time.Time) (bool, error) {
 		r.turnDeadline = time.Time{}
 		r.lastActivity = now.UTC()
 		return true, nil
+	}
+	if err := r.Engine.StartTurn(r.Engine.State.CurrentTurn); err != nil {
+		return false, err
 	}
 	r.Engine.Chess.Turn = toChessColor(r.Engine.State.CurrentTurn)
 	r.resetTurnDeadlineUnsafe(now)
@@ -720,6 +771,7 @@ func (r *RoomSession) resetForNewMatchUnsafe() {
 	r.turnDeadline = time.Time{}
 	r.turnDeadlineFor = ""
 	r.reactionDeadline = time.Time{}
+	r.mulliganDeadline = time.Time{}
 }
 
 // ShouldForceClosePostMatch reports if post-match idle deadline elapsed.

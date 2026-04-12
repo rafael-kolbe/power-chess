@@ -30,6 +30,8 @@
   /* Single rhythm for playmat: column grid, zone pairs, hand row, stacks */
   --pm-gutter: 8px;
   --pm-hand-gap: var(--pm-gutter);
+  /* Minimum gap between adjacent cards in hand / cooldown / banish / cemetery piles while they fit; tighter overlap when not. */
+  --pm-card-spread-gap: 5px;
   /* Deck row: third column width (DRAW / invisible placeholder) for space-evenly alignment */
   --pm-deck-draw-slot: clamp(2.75rem, 10vmin, 4.75rem);
   /* Left column: two card-width zones side by side + gap */
@@ -640,6 +642,15 @@ button:disabled {
 
 .sq.piece {
   cursor: grab;
+}
+
+.sq.sq--piece-dragging {
+  cursor: grabbing;
+}
+
+.sq.sq--piece-dragging .piece-img {
+  opacity: 0.35;
+  filter: drop-shadow(0 2px 4px rgb(0 0 0 / 35%));
 }
 
 .sq.selected {
@@ -1463,7 +1474,10 @@ pre {
   position: relative;
   flex: 0 0 auto;
   --gy-piece-w: 48px;
-  --gy-step: calc(var(--gy-piece-w) * 5 / 16);
+  --gy-step: min(
+    calc(var(--gy-piece-w) * 5 / 16),
+    calc(var(--gy-piece-w) + var(--pm-card-spread-gap))
+  );
   height: calc(var(--gy-piece-w) * 18 / 16);
   width: calc((var(--gy-n, 1) - 1) * var(--gy-step) + var(--gy-piece-w));
 }
@@ -1495,7 +1509,10 @@ pre {
       96px
     )
   );
-  --gy-step: calc(var(--gy-piece-w) * 5 / 16);
+  --gy-step: min(
+    calc(var(--gy-piece-w) * 5 / 16),
+    calc(var(--gy-piece-w) + var(--pm-card-spread-gap))
+  );
   gap: var(--gy-gap);
   flex: 0 0 auto;
   align-self: stretch;
@@ -1535,11 +1552,13 @@ pre {
   flex-direction: row-reverse; /* ignition aligns to the right edge, closer to board */
 }
 
-/* Ignition zone — fixed width, height inherited from .pm-zone */
+/* Ignition zone — fixed width; content centered (not edge-aligned like hand/cooldown). */
 .pm-zone--ignition {
   width: calc(var(--pm-card-width) + 16px);
   flex-shrink: 0;
   height: auto; /* stretch with row align-items: stretch */
+  justify-content: center;
+  align-items: center;
 }
 
 /* Highlight the self ignition slot when a card is being dragged */
@@ -1571,6 +1590,33 @@ pre {
   text-shadow: 0 0 6px #000, 0 1px 3px #000;
   pointer-events: none;
   z-index: 2;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Odometer roll for ignition / cooldown turn badges (turn-start sequence). */
+.pm-odometer-highlight {
+  color: #fff !important;
+  text-shadow: 0 0 12px #f0c040, 0 1px 3px #000 !important;
+}
+
+.pm-odometer-viewport {
+  display: inline-block;
+  vertical-align: baseline;
+  overflow: hidden;
+  height: 1.15em;
+  line-height: 1.15;
+}
+
+.pm-odometer-track {
+  display: flex;
+  flex-direction: column;
+  will-change: transform;
+}
+
+.pm-odometer-line {
+  display: block;
+  flex-shrink: 0;
+  line-height: 1.15;
 }
 
 /* Cooldown zone — fills remaining row width; tall stack must not clip (base .pm-zone is overflow:hidden) */
@@ -1613,8 +1659,30 @@ pre {
   min-height: calc(var(--pm-card-height) + 6px);
   pointer-events: auto;
   cursor: default;
-  /* Step between left edges so last card’s right edge meets the stack’s right (Balatro-style fit). */
-  --cd-step: calc((100% - var(--pm-card-width)) / max(1, var(--cd-stack-n) - 1));
+  /*
+   * Step between left edges: at most card + gap while it fits; otherwise compress (Balatro-style overlap).
+   * max(1, n-1) avoids division by zero when n=1.
+   */
+  --cd-step: min(
+    calc((100% - var(--pm-card-width)) / max(1, var(--cd-stack-n) - 1)),
+    calc(var(--pm-card-width) + var(--pm-card-spread-gap))
+  );
+}
+
+/* Right column: stacks grow from the edge toward the board (left). */
+.playmat-col--right .pm-cooldown-stack,
+.playmat-col--right .pm-banish-stack,
+.playmat-col--right .pm-hand-stack {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+/* Left column: stacks grow from the edge toward the board (right). */
+.playmat-col--left .pm-cooldown-stack,
+.playmat-col--left .pm-banish-stack,
+.playmat-col--left .pm-hand-stack {
+  margin-left: auto;
+  margin-right: 0;
 }
 
 .pm-hand-stack {
@@ -1629,6 +1697,7 @@ pre {
   container-type: inline-size;
   position: absolute;
   bottom: 0;
+  /* Default: board-side is left (right playmat column). */
   left: calc(var(--i) * var(--cd-step));
   width: var(--pm-card-width);
   max-width: min(100%, var(--pm-card-width));
@@ -1643,6 +1712,17 @@ pre {
   /* Left index on top; stack tucks under toward the right */
   z-index: calc(10 + var(--cd-stack-n) - var(--i));
   transition: z-index 0s, transform 0.15s ease;
+}
+
+/*
+ * Left playmat column: anchor stacks toward the board (right side of column).
+ * Index 0 stays nearest the center / board; higher indices extend outward (left).
+ */
+.playmat-col--left .pm-cooldown-card-wrap,
+.playmat-col--left .pm-banish-card-wrap,
+.playmat-col--left .pm-hand-stack .pm-hand-card-wrap {
+  left: auto;
+  right: calc(var(--i) * var(--cd-step));
 }
 
 .pm-cooldown-card-wrap--peek,
@@ -1738,6 +1818,15 @@ pre {
   color: rgb(230 220 220 / 92%);
 }
 
+.pm-mulligan-timer {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: rgb(255 210 160 / 95%);
+}
+
 .pm-mulligan-counts {
   margin: 0;
   font-size: 11px;
@@ -1813,7 +1902,7 @@ pre {
   flex: 1;
   width: 100%;
   min-height: var(--pm-card-height);
-  gap: var(--pm-hand-gap);
+  gap: var(--pm-card-spread-gap);
   justify-content: center;
   align-items: center;
   flex-wrap: nowrap;
@@ -1895,6 +1984,14 @@ pre {
   outline: 1px dashed rgba(255 255 255 / 14%);
   border-radius: 4px;
   box-sizing: border-box;
+}
+
+/* Dragged hand card: lifted under pointer (reparented to body so fixed positioning is viewport-stable). */
+.power-card.power-card--hand-dragging {
+  border-radius: 4px;
+  box-shadow:
+    0 18px 36px rgba(0 0 0 / 58%),
+    0 6px 14px rgba(0 0 0 / 35%);
 }
 
 /*

@@ -11,18 +11,19 @@ type MessageType string
 
 const (
 	// Client -> Server
-	MessagePing            MessageType = "ping"
-	MessageJoinMatch       MessageType = "join_match"
-	MessageLeaveMatch      MessageType = "leave_match"
-	MessageSubmitMove      MessageType = "submit_move"
-	MessageActivateCard    MessageType = "activate_card"
-	MessageDrawCard        MessageType = "draw_card"
-	MessageResolvePending  MessageType = "resolve_pending_effect"
-	MessageQueueReaction   MessageType = "queue_reaction"
-	MessageResolveReaction MessageType = "resolve_reactions"
-	MessageStayInRoom      MessageType = "stay_in_room"
-	MessageRequestRematch  MessageType = "request_rematch"
-	MessageConfirmMulligan MessageType = "confirm_mulligan"
+	MessagePing              MessageType = "ping"
+	MessageJoinMatch         MessageType = "join_match"
+	MessageLeaveMatch        MessageType = "leave_match"
+	MessageSubmitMove        MessageType = "submit_move"
+	MessageActivateCard      MessageType = "activate_card"
+	MessageDrawCard          MessageType = "draw_card"
+	MessageResolvePending    MessageType = "resolve_pending_effect"
+	MessageQueueReaction     MessageType = "queue_reaction"
+	MessageResolveReaction   MessageType = "resolve_reactions"
+	MessageStayInRoom        MessageType = "stay_in_room"
+	MessageRequestRematch    MessageType = "request_rematch"
+	MessageConfirmMulligan   MessageType = "confirm_mulligan"
+	MessageDebugMatchFixture MessageType = "debug_match_fixture"
 	// Server -> Client
 	MessageHello         MessageType = "hello"
 	MessageAck           MessageType = "ack"
@@ -40,6 +41,7 @@ const (
 	ErrorActionFailed       ErrorCode = "action_failed"
 	ErrorInvalidPayload     ErrorCode = "invalid_payload"
 	ErrorProtocolViolation  ErrorCode = "protocol_violation"
+	ErrorDebugDisabled      ErrorCode = "debug_disabled"
 )
 
 // Envelope is the shared JSON container for every websocket message.
@@ -79,10 +81,10 @@ func (j *joinRoomID) UnmarshalJSON(b []byte) error {
 type JoinMatchPayload struct {
 	RoomID    joinRoomID `json:"roomId,omitempty"`
 	RoomName  string     `json:"roomName,omitempty"`
-	PlayerID  string `json:"playerId,omitempty"`
-	PieceType string `json:"pieceType,omitempty"`
-	IsPrivate bool   `json:"isPrivate,omitempty"`
-	Password  string `json:"password,omitempty"`
+	PlayerID  string     `json:"playerId,omitempty"`
+	PieceType string     `json:"pieceType,omitempty"`
+	IsPrivate bool       `json:"isPrivate,omitempty"`
+	Password  string     `json:"password,omitempty"`
 }
 
 // SubmitMovePayload sends a chess move from frontend to backend.
@@ -101,6 +103,26 @@ type ActivateCardPayload struct {
 // ConfirmMulliganPayload submits which hand cards (by index) are returned to the deck for the mulligan.
 type ConfirmMulliganPayload struct {
 	HandIndices []int `json:"handIndices"`
+}
+
+// DebugSideFixture lists full deck order (20 legal constructed cards) and hand card IDs to draw from that deck.
+// Keys "white" / "black" map to chess white (player A) and black (player B).
+// Optional mana fields override defaults after the preset hands are dealt; omitted fields keep engine defaults.
+type DebugSideFixture struct {
+	Deck          []string `json:"deck"`
+	Hand          []string `json:"hand"`
+	Mana          *int     `json:"mana,omitempty"`
+	MaxMana       *int     `json:"maxMana,omitempty"`
+	EnergizedMana *int     `json:"energizedMana,omitempty"`
+	MaxEnergized  *int     `json:"maxEnergized,omitempty"`
+}
+
+// DebugMatchFixturePayload replaces opening state when the server runs with ADMIN_DEBUG_MATCH enabled.
+// test_environment must be true (handshake); otherwise the request is rejected even when debugging is on.
+type DebugMatchFixturePayload struct {
+	TestEnvironment bool              `json:"test_environment"`
+	White           *DebugSideFixture `json:"white"`
+	Black           *DebugSideFixture `json:"black"`
 }
 
 // ResolvePendingPayload provides a generic target for pending effects.
@@ -161,13 +183,13 @@ type PlayerHUDState struct {
 	GraveyardCount int    `json:"graveyardCount"`
 	Strikes        int    `json:"strikes"`
 	// Zone data — always public unless noted.
-	DeckCount          int                    `json:"deckCount"`
-	SleeveColor        string                 `json:"sleeveColor"`
-	Hand               []CardSnapshotEntry    `json:"hand,omitempty"`
-	BanishedCards      []CardSnapshotEntry    `json:"banishedCards"`
-	GraveyardPieces    []string               `json:"graveyardPieces"`
-	CooldownPreview    []CooldownPreviewEntry `json:"cooldownPreview"`
-	CooldownHiddenCount int                   `json:"cooldownHiddenCount"`
+	DeckCount           int                    `json:"deckCount"`
+	SleeveColor         string                 `json:"sleeveColor"`
+	Hand                []CardSnapshotEntry    `json:"hand,omitempty"`
+	BanishedCards       []CardSnapshotEntry    `json:"banishedCards"`
+	GraveyardPieces     []string               `json:"graveyardPieces"`
+	CooldownPreview     []CooldownPreviewEntry `json:"cooldownPreview"`
+	CooldownHiddenCount int                    `json:"cooldownHiddenCount"`
 }
 
 // PendingEffectState describes unresolved effects that need player input.
@@ -227,6 +249,8 @@ type StateSnapshotPayload struct {
 	MulliganPhaseActive bool `json:"mulliganPhaseActive,omitempty"`
 	// MulliganReturned maps seat id ("A"/"B") to how many cards that player returned; -1 until they confirm.
 	MulliganReturned map[string]int `json:"mulliganReturned,omitempty"`
+	// MulliganDeadlineUnixMs is when unconfirmed seats auto-keep all cards (0 if not in mulligan).
+	MulliganDeadlineUnixMs int64 `json:"mulliganDeadlineUnixMs,omitempty"`
 	// ReconnectPendingFor is "A" or "B" while that seat's socket is gone but the grace timer has not fired yet.
 	ReconnectPendingFor     string                 `json:"reconnectPendingFor,omitempty"`
 	ReconnectDeadlineUnixMs int64                  `json:"reconnectDeadlineUnixMs,omitempty"`
@@ -241,17 +265,17 @@ type StateSnapshotPayload struct {
 	EnPassant               EnPassantStateSnapshot `json:"enPassant"`
 	CastlingRights          CastlingRightsSnapshot `json:"castlingRights"`
 	// ViewerPlayerID identifies whose perspective this snapshot is for (drives hand visibility).
-	ViewerPlayerID          string                 `json:"viewerPlayerId,omitempty"`
-	Players                 []PlayerHUDState       `json:"players"`
-	PendingEffects          []PendingEffectState   `json:"pendingEffects"`
-	ReactionWindow          ReactionWindowState    `json:"reactionWindow"`
-	PendingCapture          PendingCaptureState    `json:"pendingCapture"`
-	MatchEnded              bool                   `json:"matchEnded"`
-	Winner                  string                 `json:"winner,omitempty"`
-	EndReason               string                 `json:"endReason,omitempty"`
-	RematchA                bool                   `json:"rematchA"`
-	RematchB                bool                   `json:"rematchB"`
-	PostMatchMsLeft         int64                  `json:"postMatchMsLeft,omitempty"`
+	ViewerPlayerID  string               `json:"viewerPlayerId,omitempty"`
+	Players         []PlayerHUDState     `json:"players"`
+	PendingEffects  []PendingEffectState `json:"pendingEffects"`
+	ReactionWindow  ReactionWindowState  `json:"reactionWindow"`
+	PendingCapture  PendingCaptureState  `json:"pendingCapture"`
+	MatchEnded      bool                 `json:"matchEnded"`
+	Winner          string               `json:"winner,omitempty"`
+	EndReason       string               `json:"endReason,omitempty"`
+	RematchA        bool                 `json:"rematchA"`
+	RematchB        bool                 `json:"rematchB"`
+	PostMatchMsLeft int64                `json:"postMatchMsLeft,omitempty"`
 }
 
 // DecodeEnvelope validates and decodes a raw websocket frame into Envelope.

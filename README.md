@@ -59,9 +59,10 @@ docker compose up --build
 ```
 
 - Servidor em `:8080`  
-- Postgres: host `localhost:5433` → container `:5432` (ver `docker-compose.yml`)
+- Postgres: host `localhost:5433` → container `:5432` (ver `docker-compose.yml`)  
+- Copia `.env.example` → `.env` e ajusta. O serviço `server` usa `env_file: .env`; `JWT_SECRET`, `SERVER_ADDR`, `ADMIN_DEBUG_MATCH`, etc. vêm dali. O `DATABASE_URL` **dentro do container** é fixo no `docker-compose.yml` para apontar ao serviço `postgres` (o `.env` continua a poder usar `localhost:5433` para correr o binário Go no host).
 
-Variáveis úteis: `SERVER_ADDR`, `DATABASE_URL` (persistência de sala em Postgres; sem URL, o servidor segue em memória).
+Variáveis úteis: `SERVER_ADDR`, `DATABASE_URL` (persistência de sala em Postgres; sem URL, o servidor segue em memória). Opcional: `ADMIN_DEBUG_MATCH` (`1` / `true` / `yes` / `on`) para aceitar o tipo WebSocket `debug_match_fixture` (fixtures de deck/mão/mana para testes) e **desativar persistência** de salas no Postgres (memória só). Em produção deve ficar desligado — ver [PROTOCOL.md](PROTOCOL.md). O cliente pode usar `web/match-test-config.js` (`MATCH_TEST_AUTO_APPLY` / `MATCH_TEST_AUTO_CONFIRM_MULLIGAN`) para auto-enviar o fixture e o mulligan.
 
 ### Instalar Go
 

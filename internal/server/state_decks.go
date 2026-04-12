@@ -1,6 +1,8 @@
 package server
 
 import (
+	"time"
+
 	"power-chess/internal/chess"
 	"power-chess/internal/gameplay"
 	"power-chess/internal/match"
@@ -85,6 +87,7 @@ func (r *RoomSession) resetMatchEngineFromSavedDecksUnsafe(srv *Server) {
 	r.sleeveByPlayer[gameplay.PlayerB] = sleeveB
 	if r.connectedByPlayer[gameplay.PlayerA] > 0 && r.connectedByPlayer[gameplay.PlayerB] > 0 {
 		_ = gameplay.BeginOpeningPhase(r.Engine.State)
+		r.startMulliganDeadlineUnsafe(time.Now().UTC())
 	}
 }
 
@@ -107,5 +110,9 @@ func (r *RoomSession) beginOpeningPhaseIfNeededUnsafe() error {
 	if len(s.Players[gameplay.PlayerA].Hand) != 0 || len(s.Players[gameplay.PlayerB].Hand) != 0 {
 		return nil
 	}
-	return gameplay.BeginOpeningPhase(s)
+	if err := gameplay.BeginOpeningPhase(s); err != nil {
+		return err
+	}
+	r.startMulliganDeadlineUnsafe(time.Now().UTC())
+	return nil
 }

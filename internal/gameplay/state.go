@@ -134,7 +134,7 @@ func NewMatchState(deckA, deckB []CardInstance) (*MatchState, error) {
 	return s, nil
 }
 
-// StartTurn applies start-of-turn updates for the active player.
+// StartTurn applies start-of-turn updates for the active player (+1 mana, respecting max mana pool).
 func (s *MatchState) StartTurn(pid PlayerID) error {
 	if s.CurrentTurn != pid {
 		return errors.New("cannot start another player's turn")
@@ -200,6 +200,11 @@ func (s *MatchState) GrantCaptureBonusMana(pid PlayerID) {
 		return
 	}
 	p.ExtraManaGainedTurn++
+	s.addMana(pid, 1)
+}
+
+// GrantManaForChessCapture adds one mana for each chess capture (including en passant), respecting max mana.
+func (s *MatchState) GrantManaForChessCapture(pid PlayerID) {
 	s.addMana(pid, 1)
 }
 
@@ -322,6 +327,8 @@ func (s *MatchState) PopResolvedIgnitions() []ResolvedIgnitionEvent {
 	return ev
 }
 
+// tickIgnition decrements the ignition counter only when the player starting the turn
+// is the one who activated the card (ActivationOwner). Opponent turn starts do not tick it.
 func (s *MatchState) tickIgnition(pid PlayerID) {
 	if !s.IgnitionSlot.Occupied {
 		return

@@ -534,3 +534,36 @@ func TestEngineDrawCard(t *testing.T) {
 		t.Error("expected error: hand full")
 	}
 }
+
+// TestChessCaptureGrantsMana ensures capturing a piece awards +1 mana (capped by max mana).
+func TestChessCaptureGrantsMana(t *testing.T) {
+	state, err := gameplay.NewMatchState(
+		testDeckWith(gameplay.CardInstance{InstanceID: "a", CardID: CardDoubleTurn, ManaCost: 1, Ignition: 1, Cooldown: 1}),
+		testDeckWith(gameplay.CardInstance{InstanceID: "b", CardID: CardDoubleTurn, ManaCost: 1, Ignition: 1, Cooldown: 1}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := NewEngine(state, chess.NewGame())
+	markInPlayForTest(state)
+	if err := e.StartTurn(gameplay.PlayerA); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 4}, To: chess.Pos{Row: 4, Col: 4}}); err != nil {
+		t.Fatalf("e4: %v", err)
+	}
+	if err := e.SubmitMove(gameplay.PlayerB, chess.Move{From: chess.Pos{Row: 1, Col: 3}, To: chess.Pos{Row: 3, Col: 3}}); err != nil {
+		t.Fatalf("d5: %v", err)
+	}
+	manaBefore := state.Players[gameplay.PlayerA].Mana
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 4, Col: 4}, To: chess.Pos{Row: 3, Col: 3}}); err != nil {
+		t.Fatalf("exd5: %v", err)
+	}
+	// Captures open a reaction window; the move (and capture mana) apply when the stack resolves.
+	if err := e.ResolveReactionStack(); err != nil {
+		t.Fatalf("resolve capture: %v", err)
+	}
+	if state.Players[gameplay.PlayerA].Mana != manaBefore+1 {
+		t.Fatalf("capture should grant +1 mana: before %d after %d", manaBefore, state.Players[gameplay.PlayerA].Mana)
+	}
+}

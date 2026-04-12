@@ -1,10 +1,11 @@
-(function () {
-    /**
-     * When `true`, the match playmat renders fake data (5 hand cards, 3 banished, 6 cooldown per side)
-     * for layout testing. Does not touch the server. Set to `true` only while tuning CSS.
-     */
-    const PLAYMAT_UI_TEST_OVERLAY = false;
+import { PLAYMAT_UI_TEST_OVERLAY } from "/ui-test-config.js";
+import {
+    matchTestAutoApplyEnabled,
+    matchTestAutoConfirmMulliganEnabled,
+    buildMatchDebugFixturePayload,
+} from "/match-test-config.js";
 
+(function () {
     let ws = null;
     let seq = 1;
     let lastSnapshot = null;
@@ -14,6 +15,10 @@
     let currentTurn = "A";
     let turnSeconds = 30;
     let turnDeadline = Date.now() + turnSeconds * 1000;
+    /** When true, block outgoing game actions and freeze turn clocks during turn-start resource animation. */
+    let turnResourceAnimBlocking = false;
+    /** @type {{ active: string, secLeft: number } | null} */
+    let frozenTurnClockDisplay = null;
     /** @type {boolean} */
     let gameStarted = false;
     let joinedRoom = false;
@@ -27,6 +32,15 @@
     let privateJoinPendingRoomName = "";
     /** @type {Set<number>} Hand indices selected to return to the deck during mulligan (local UI only). */
     let mulliganPick = new Set();
+    /** Updates mulligan countdown text while the opening phase is active. */
+    let mulliganUiTimerId = null;
+
+    /** Set after we send debug_match_fixture (match-test-config); reset on new WebSocket. */
+    let matchTestFixtureSent = false;
+    /** Previous snapshot had both seats connected (for detecting second player join). */
+    let matchTestPrevBothConnected = false;
+    /** After fixture sent with auto-confirm: confirm mulligan on next applicable snapshot. */
+    let matchTestAwaitingMulliganConfirm = false;
 
     const AUTH_TOKEN_KEY = "powerChessAuthToken";
     /** When false, server has no DATABASE_URL auth; lobby works without login. */
@@ -240,6 +254,7 @@
             mulliganWaitingOpp: "Waiting for opponent…",
             mulliganLine: "Mulligan — White: {w} | Black: {b}",
             mulliganPending: "…",
+            mulliganAutoIn: "Auto-confirms in {s}s",
         },
         "pt-BR": {
             title: "POWER CHESS (Alpha)",
@@ -366,6 +381,7 @@
             mulliganWaitingOpp: "Aguardando o oponente…",
             mulliganLine: "Mulligan — Brancas: {w} | Pretas: {b}",
             mulliganPending: "…",
+            mulliganAutoIn: "Confirmação automática em {s}s",
         },
     };
     let locale = "en-US";
@@ -1101,6 +1117,9 @@
         ws = new WebSocket(socketURLWithAuth());
         ws.onopen = () => {
             logEvent({ event: "socket_open" });
+            matchTestFixtureSent = false;
+            matchTestPrevBothConnected = false;
+            matchTestAwaitingMulliganConfirm = false;
             send("join_match", {
                 roomId: roomIdStr,
                 roomName,
@@ -1121,7 +1140,8 @@
             logEvent(msg);
             if (msg.type === "state_snapshot") {
                 pendingJoinAttempt = null;
-                lastSnapshot = msg.payload;
+                const nextSnap = msg.payload;
+                lastSnapshot = nextSnap;
                 selectedFrom = null;
                 highlightedMoves = [];
 
@@ -1143,26 +1163,52 @@
                 }
 
                 const wasStarted = gameStarted;
-                updateLobbyChromeFromSnapshot(msg.payload);
-                if (msg.payload.gameStarted && !wasStarted) {
-                    turnSeconds = turnSecondsFromSnapshot(msg.payload);
-                    currentTurn = msg.payload.turnPlayer || "A";
+                updateLobbyChromeFromSnapshot(nextSnap);
+                if (nextSnap.gameStarted && !wasStarted) {
+                    turnSeconds = turnSecondsFromSnapshot(nextSnap);
+                    currentTurn = nextSnap.turnPlayer || "A";
                     turnDeadline = Date.now() + turnSeconds * 1000;
                 }
-                syncTurnFromSnapshot(msg.payload);
-                updateOpponentDisconnectOverlay(msg.payload);
-                maybeShowMatchEndModal(msg.payload);
+                syncTurnFromSnapshot(nextSnap);
+                updateOpponentDisconnectOverlay(nextSnap);
+                maybeShowMatchEndModal(nextSnap);
 
-                if (snapshotEl) snapshotEl.textContent = JSON.stringify(msg.payload, null, 2);
-                renderBoard(msg.payload.board);
-                renderStatus(msg.payload);
-                renderPlayerHud(msg.payload);
-                runSnapshotAnimations(pmPrevSnapshot, msg.payload);
-                renderPlaymat(msg.payload);
-                pmPrevSnapshot = msg.payload;
-                syncPlayerRoleLabels(msg.payload);
-                handleAutoSkipReaction(msg.payload);
-                renderTurnClocks();
+                if (snapshotEl) snapshotEl.textContent = JSON.stringify(nextSnap, null, 2);
+                renderBoard(nextSnap.board);
+                renderStatus(nextSnap);
+                renderPlayerHud(nextSnap);
+
+                enqueueSnapshotApply(async () => {
+                    const prevSnap = pmPrevSnapshot;
+                    const turnChanged =
+                        prevSnap &&
+                        nextSnap.gameStarted &&
+                        prevSnap.turnPlayer &&
+                        nextSnap.turnPlayer &&
+                        prevSnap.turnPlayer !== nextSnap.turnPlayer;
+
+                    /** True if ignition→cooldown fly already ran after 1t→0t in {@link runTurnStartResourceSequence}. */
+                    let skipIgnitionResolveFly = false;
+                    if (turnChanged) {
+                        turnResourceAnimBlocking = true;
+                        beginTurnResourceAnimFreeze();
+                        renderTurnClocks();
+                        try {
+                            skipIgnitionResolveFly = await runTurnStartResourceSequence(prevSnap, nextSnap);
+                        } finally {
+                            turnResourceAnimBlocking = false;
+                            endTurnResourceAnimFreeze();
+                        }
+                    }
+
+                    runSnapshotAnimations(prevSnap, nextSnap, skipIgnitionResolveFly);
+                    renderPlaymat(nextSnap);
+                    pmPrevSnapshot = nextSnap;
+                    syncPlayerRoleLabels(nextSnap);
+                    handleAutoSkipReaction(nextSnap);
+                    renderTurnClocks();
+                    maybeApplyMatchTestFixture(nextSnap);
+                });
                 return;
             }
             if (
@@ -1518,6 +1564,22 @@
     // ---------------------------------------------------------------------------
     let pmPrevSnapshot = null;
 
+    /** @type {Promise<void>} */
+    let snapshotApplyChain = Promise.resolve();
+
+    /**
+     * Runs snapshot-driven UI updates sequentially so turn-start counter animations cannot
+     * interleave with a later state_snapshot.
+     * @param {() => void | Promise<void>} fn
+     */
+    function enqueueSnapshotApply(fn) {
+        snapshotApplyChain = snapshotApplyChain
+            .then(() => Promise.resolve(fn()))
+            .catch((err) => {
+                console.error("snapshot apply error", err);
+            });
+    }
+
     // ---------------------------------------------------------------------------
     // Playmat zone elements (cached once)
     // ---------------------------------------------------------------------------
@@ -1556,6 +1618,7 @@
         ignitionOpp: document.getElementById("ignitionOpp"),
         mulliganBar: document.getElementById("mulliganBar"),
         mulliganHint: document.getElementById("mulliganHint"),
+        mulliganTimer: document.getElementById("mulliganTimer"),
         mulliganCounts: document.getElementById("mulliganCounts"),
         mulliganConfirmBtn: document.getElementById("mulliganConfirmBtn"),
     };
@@ -1570,33 +1633,23 @@
     const matchHandExampleMode = new Map();
 
     /**
-     * Syncs the floating match preview when the user toggles example/description on a hand card.
+     * Syncs description/example mode for every match playmat card with this catalog id (hand, ignition, cooldown, banish, hover preview).
      * @param {string} cardId
      * @param {boolean} showingExample
      */
-    function syncMatchPreviewExample(cardId, showingExample) {
-        if (pmPreviewCardId !== cardId) return;
-        const article = pmEl.matchCardPreview?.querySelector(".power-card");
-        if (article && typeof globalThis.setPowerCardExampleMode === "function") {
-            globalThis.setPowerCardExampleMode(article, showingExample);
-        }
-    }
-
-    /**
-     * Syncs all in-hand miniatures for a catalog id when the user toggles on the large hover card.
-     * @param {string} cardId
-     * @param {boolean} showingExample
-     */
-    function syncMatchHandExample(cardId, showingExample) {
-        const root = document.getElementById("handSelf");
-        if (!root || !cardId) return;
-        root.querySelectorAll(".pm-hand-card-wrap").forEach((wrap) => {
-            if (wrap.dataset.cardId !== cardId) return;
-            const article = wrap.querySelector(".power-card");
+    function syncAllMatchPowerCardMinis(cardId, showingExample) {
+        if (!cardId) return;
+        function applyHolder(holder) {
+            if (!holder || holder.dataset.cardId !== cardId) return;
+            const article = holder.querySelector(".power-card");
             if (article && typeof globalThis.setPowerCardExampleMode === "function") {
                 globalThis.setPowerCardExampleMode(article, showingExample);
             }
-        });
+        }
+        const root = gameShellEl || document.getElementById("gameShell");
+        if (root) {
+            root.querySelectorAll("[data-card-id]").forEach((holder) => applyHolder(holder));
+        }
     }
 
     function showCardPreview(cardData, anchorEl) {
@@ -1604,6 +1657,11 @@
         pmEl.matchCardPreview.innerHTML = "";
         const cid = cardData.id != null ? String(cardData.id) : "";
         pmPreviewCardId = cid || null;
+        if (cid) {
+            pmEl.matchCardPreview.dataset.cardId = cid;
+        } else {
+            delete pmEl.matchCardPreview.dataset.cardId;
+        }
         const card = createPowerCard({
             type: cardData.type,
             name: cardData.name,
@@ -1616,7 +1674,7 @@
             showExampleInitially: Boolean(cid && matchHandExampleMode.get(cid) === true),
             onExampleToggle: (showing) => {
                 if (cid) matchHandExampleMode.set(cid, showing);
-                syncMatchHandExample(cid, showing);
+                syncAllMatchPowerCardMinis(cid, showing);
             },
         });
         pmEl.matchCardPreview.appendChild(card);
@@ -1653,6 +1711,7 @@
         if (!pmEl.matchCardPreview) return;
         pmEl.matchCardPreview.classList.add("hidden");
         pmEl.matchCardPreview.innerHTML = "";
+        delete pmEl.matchCardPreview.dataset.cardId;
         pmPreviewCard = null;
         pmPreviewCardId = null;
     }
@@ -1785,6 +1844,24 @@
     // ---------------------------------------------------------------------------
 
     /**
+     * Shifts a DOMRect by a screen-space offset (for staggered landings).
+     * @param {DOMRect} r
+     * @param {number} dx
+     * @param {number} dy
+     * @returns {{ left: number, top: number, width: number, height: number }}
+     */
+    function offsetDomRectLike(r, dx, dy) {
+        return {
+            left: r.left + dx,
+            top: r.top + dy,
+            width: r.width,
+            height: r.height,
+            right: r.left + dx + r.width,
+            bottom: r.top + dy + r.height,
+        };
+    }
+
+    /**
      * Flies a visual clone of `cardEl` from `fromRect` to `toRect`, then calls `done`.
      * Used for all "fluid movement" animations between zones.
      * @param {DOMRect} fromRect - source bounding rect
@@ -1793,9 +1870,11 @@
      * @param {string} [sleeve="blue"] - sleeve color when no card face available
      * @param {number} [duration=400]  - animation duration in ms
      * @param {Function} [done]        - called when animation completes
+     * @param {{ fitDestination?: boolean }} [opts] - if `fitDestination` is false, translate only (no stretch to destination size)
      */
-    function flyCard(fromRect, toRect, cardEl, sleeve, duration, done) {
+    function flyCard(fromRect, toRect, cardEl, sleeve, duration, done, opts) {
         duration = duration || 400;
+        const fitDestination = opts?.fitDestination !== false;
         const overlay = document.createElement("div");
         overlay.style.cssText = [
             "position:fixed",
@@ -1822,8 +1901,12 @@
 
         const dx = toRect.left + toRect.width / 2 - (fromRect.left + fromRect.width / 2);
         const dy = toRect.top + toRect.height / 2 - (fromRect.top + fromRect.height / 2);
-        const scaleX = toRect.width / fromRect.width;
-        const scaleY = toRect.height / fromRect.height;
+        let scaleX = toRect.width / fromRect.width;
+        let scaleY = toRect.height / fromRect.height;
+        if (!fitDestination) {
+            scaleX = 1;
+            scaleY = 1;
+        }
 
         const anim = overlay.animate(
             [
@@ -1845,28 +1928,215 @@
     }
 
     /**
-     * Animates counter value change on a given element.
-     * Briefly highlights (pulse) when the number decreases.
+     * @param {number} ms
+     * @returns {Promise<void>}
      */
-    function animateCounter(el, oldVal, newVal) {
-        if (!el || oldVal === newVal) return;
-        el.textContent = String(newVal);
-        if (newVal < oldVal) {
-            el.animate(
-                [
-                    { color: "#fff", textShadow: "0 0 12px #f0c040", transform: "scale(1.4)" },
-                    { color: "#ffdc80", textShadow: "0 0 6px #000", transform: "scale(1)" },
-                ],
-                { duration: 500, easing: "ease-out" },
-            );
+    function sleep(ms) {
+        return new Promise((r) => setTimeout(r, ms));
+    }
+
+    /**
+     * Escapes a card id for use in a CSS attribute selector.
+     * @param {string} id
+     * @returns {string}
+     */
+    function escapeCardIdForSelector(id) {
+        if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+            return CSS.escape(String(id));
         }
+        return String(id).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    }
+
+    /**
+     * Vertical odometer-style roll from fromText to toText; total duration totalMs.
+     * @param {HTMLElement | null} el
+     * @param {string} fromText
+     * @param {string} toText
+     * @param {number} [totalMs]
+     * @returns {Promise<void>}
+     */
+    async function odometerFlip(el, fromText, toText, totalMs = 700) {
+        if (!el || fromText === toText) return;
+        const t0 = totalMs * 0.25;
+        const t1 = totalMs * 0.5;
+        const t2 = totalMs * 0.25;
+
+        el.classList.add("pm-odometer-highlight");
+        await el
+            .animate([{ transform: "scale(1)" }, { transform: "scale(1.25)" }], {
+                duration: t0,
+                easing: "ease-out",
+                fill: "forwards",
+            })
+            .finished;
+
+        const viewport = document.createElement("span");
+        viewport.className = "pm-odometer-viewport";
+        const track = document.createElement("span");
+        track.className = "pm-odometer-track";
+        const line0 = document.createElement("span");
+        line0.className = "pm-odometer-line";
+        line0.textContent = fromText;
+        const line1 = document.createElement("span");
+        line1.className = "pm-odometer-line";
+        line1.textContent = toText;
+        track.appendChild(line0);
+        track.appendChild(line1);
+        viewport.appendChild(track);
+        el.innerHTML = "";
+        el.appendChild(viewport);
+
+        const h = line0.getBoundingClientRect().height;
+        track.style.transform = "translateY(0)";
+        await track
+            .animate([{ transform: "translateY(0)" }, { transform: `translateY(-${h}px)` }], {
+                duration: t1,
+                easing: "cubic-bezier(0.4,0,0.2,1)",
+                fill: "forwards",
+            })
+            .finished;
+
+        el.textContent = toText;
+        el.style.transform = "scale(1.25)";
+        el.classList.remove("pm-odometer-highlight");
+        await el
+            .animate([{ transform: "scale(1.25)" }, { transform: "scale(1)" }], {
+                duration: t2,
+                easing: "ease-out",
+                fill: "forwards",
+            })
+            .finished;
+        el.style.transform = "";
+    }
+
+    /**
+     * Flies the ignition card to the cooldown row after the 1t→0t odometer (uses previous-frame DOM).
+     * @param {object} prevSnap
+     * @returns {Promise<void>}
+     */
+    function flyIgnitionResolvedToCooldown(prevSnap) {
+        return new Promise((resolve) => {
+            const localPID = playerEl.value;
+            const wasOwn = prevSnap.ignitionOwner === localPID;
+            const fromEl = wasOwn ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
+            const toEl = wasOwn ? pmEl.cooldownCardsSelf : pmEl.cooldownCardsOpp;
+            const fr = zoneRect(fromEl);
+            const tr = zoneRect(toEl);
+            if (!fr || !tr) {
+                resolve();
+                return;
+            }
+            const prevSelf = prevSnap.players?.find((p) => p.playerId === localPID);
+            const def = getCardDef(prevSnap.ignitionCard);
+            const face = def
+                ? (() => {
+                      const el = createPowerCard({
+                          type: def.type,
+                          name: def.name,
+                          description: def.description,
+                          example: def.example,
+                          mana: def.mana,
+                          ignition: def.ignition,
+                          cooldown: def.cooldown,
+                          cardWidth: "86px",
+                      });
+                      el.style.cssText = "width:100%;height:100%";
+                      return el;
+                  })()
+                : null;
+            flyCard(fr, tr, face, prevSelf?.sleeveColor || "blue", 450, () => resolve(), { fitDestination: false });
+        });
+    }
+
+    /**
+     * Animates ignition (activator turn only), then on resolve (0t) flies the card to cooldown,
+     * then animates other cooldown turn badges for that player. All before playmat DOM is replaced.
+     * @param {object | null} prevSnap
+     * @param {object} nextSnap
+     * @returns {Promise<boolean>} true if ignition→cooldown fly was performed here (caller must not repeat in runSnapshotAnimations)
+     */
+    async function runTurnStartResourceSequence(prevSnap, nextSnap) {
+        if (!prevSnap || !nextSnap) return false;
+        const localPID = playerEl.value;
+        const turnStarter = nextSnap.turnPlayer;
+        if (!turnStarter || prevSnap.turnPlayer === nextSnap.turnPlayer) return false;
+
+        const delayMs = 200;
+        const animMs = 700;
+        let didIgnitionResolveFly = false;
+
+        /** @type {{ el: HTMLElement, from: string, to: string } | null} */
+        let ignitionOdometer = null;
+        if (prevSnap.ignitionOn && prevSnap.ignitionOwner === turnStarter) {
+            const prevTurns = prevSnap.ignitionTurnsRemaining ?? 0;
+            const stillOn = nextSnap.ignitionOn && nextSnap.ignitionOwner === turnStarter;
+            const nextTurns = stillOn ? (nextSnap.ignitionTurnsRemaining ?? 0) : 0;
+            if (prevTurns > nextTurns) {
+                const counterEl =
+                    turnStarter === localPID ? pmEl.ignitionCounterSelf : pmEl.ignitionCounterOpp;
+                if (counterEl) {
+                    ignitionOdometer = {
+                        el: counterEl,
+                        from: `${prevTurns}t`,
+                        to: `${nextTurns}t`,
+                    };
+                }
+            }
+        }
+
+        /** @type {{ el: HTMLElement, from: string, to: string }[]} */
+        const cooldownTasks = [];
+        const prevStarter = prevSnap.players?.find((p) => p.playerId === turnStarter);
+        const nextStarter = nextSnap.players?.find((p) => p.playerId === turnStarter);
+        if (prevStarter && nextStarter) {
+            const prevCD = sortCooldownEntriesForDisplay(prevStarter.cooldownPreview || []);
+            const nextCD = sortCooldownEntriesForDisplay(nextStarter.cooldownPreview || []);
+            const container =
+                turnStarter === localPID ? pmEl.cooldownCardsSelf : pmEl.cooldownCardsOpp;
+            for (const nEntry of nextCD) {
+                const pEntry = prevCD.find((p) => p.cardId === nEntry.cardId);
+                if (!pEntry || nEntry.turnsRemaining >= pEntry.turnsRemaining) continue;
+                const wrap = container?.querySelector(
+                    `[data-card-id="${escapeCardIdForSelector(String(nEntry.cardId))}"]`,
+                );
+                const turnsEl = wrap?.querySelector(".pm-cooldown-turns");
+                if (turnsEl) {
+                    cooldownTasks.push({
+                        el: turnsEl,
+                        from: `${pEntry.turnsRemaining}t`,
+                        to: `${nEntry.turnsRemaining}t`,
+                    });
+                }
+            }
+        }
+
+        if (ignitionOdometer) {
+            await odometerFlip(ignitionOdometer.el, ignitionOdometer.from, ignitionOdometer.to, animMs);
+            const resolved =
+                prevSnap.ignitionOn &&
+                !nextSnap.ignitionOn &&
+                prevSnap.ignitionOwner === turnStarter;
+            if (resolved && ignitionOdometer.to === "0t") {
+                await flyIgnitionResolvedToCooldown(prevSnap);
+                didIgnitionResolveFly = true;
+            }
+            if (cooldownTasks.length > 0) await sleep(delayMs);
+        }
+
+        for (let i = 0; i < cooldownTasks.length; i++) {
+            await odometerFlip(cooldownTasks[i].el, cooldownTasks[i].from, cooldownTasks[i].to, animMs);
+            if (i < cooldownTasks.length - 1) await sleep(delayMs);
+        }
+
+        return didIgnitionResolveFly;
     }
 
     /**
      * Runs all animations needed when transitioning from prevSnap to nextSnap.
      * Animations are fire-and-forget; the DOM update happens normally after.
+     * @param {boolean} [skipIgnitionResolveFly] when true, ignition→cooldown fly already ran after 1t→0t odômetro
      */
-    function runSnapshotAnimations(prevSnap, nextSnap) {
+    function runSnapshotAnimations(prevSnap, nextSnap, skipIgnitionResolveFly) {
         if (!prevSnap || !nextSnap) return;
         const localPID = playerEl.value;
 
@@ -1877,25 +2147,23 @@
 
         if (!prevSelf || !nextSelf) return;
 
-        // 1. Card draw: self hand count increased → fly from deck to last hand slot.
-        if (nextSelf.handCount > prevSelf.handCount) {
-            animateCardDraw(pmEl.deckSelf, pmEl.handSelf, false, nextSelf.sleeveColor);
+        // 1. Card draw: deck → hand. Opening (mulligan, from empty hand): one fly per card gained
+        //    this snapshot (e.g. 0→3 → 3 staggered flies). Any other draw: at most one fly per snapshot.
+        const selfDrawDelta = nextSelf.handCount - prevSelf.handCount;
+        if (selfDrawDelta > 0) {
+            const openingDeal =
+                nextSnap.mulliganPhaseActive === true && prevSelf.handCount === 0;
+            const selfFlies = openingDeal ? selfDrawDelta : Math.min(selfDrawDelta, 1);
+            scheduleDeckToHandFlies(selfFlies, pmEl.deckSleeveSelf, pmEl.deckSelf, pmEl.handSelf, nextSelf.sleeveColor);
         }
-        // Opponent drew a card (always show sleeve, never reveal face).
         if (nextOpp && prevOpp && nextOpp.handCount > prevOpp.handCount) {
-            animateCardDraw(pmEl.deckOpp, pmEl.handOpp, true, nextOpp.sleeveColor);
+            const oppDrawDelta = nextOpp.handCount - prevOpp.handCount;
+            const openingDealOpp = nextSnap.mulliganPhaseActive === true && prevOpp.handCount === 0;
+            const oppFlies = openingDealOpp ? oppDrawDelta : Math.min(oppDrawDelta, 1);
+            scheduleDeckToHandFlies(oppFlies, pmEl.deckSleeveOpp, pmEl.deckOpp, pmEl.handOpp, nextOpp.sleeveColor);
         }
 
-        // 2. Ignition counter decrease (card was in ignition both before and after, turns went down).
-        if (
-            prevSnap.ignitionOn &&
-            nextSnap.ignitionOn &&
-            prevSnap.ignitionOwner === nextSnap.ignitionOwner &&
-            nextSnap.ignitionTurnsRemaining < prevSnap.ignitionTurnsRemaining
-        ) {
-            const counterEl = nextSnap.ignitionOwner === localPID ? pmEl.ignitionCounterSelf : pmEl.ignitionCounterOpp;
-            animateCounter(counterEl, prevSnap.ignitionTurnsRemaining, nextSnap.ignitionTurnsRemaining);
-        }
+        // 2. Ignition / cooldown turn ticks are animated in runTurnStartResourceSequence (turn change only).
 
         // 3a. Card placed in ignition: was not occupied, now is → brief glow on ignition zone.
         if (!prevSnap.ignitionOn && nextSnap.ignitionOn) {
@@ -1908,33 +2176,14 @@
             }
         }
 
-        // 3b. Ignition resolved (was occupied, now gone) → fly to cooldown pile.
-        if (prevSnap.ignitionOn && !nextSnap.ignitionOn && prevSnap.ignitionOwner) {
-            const wasOwn = prevSnap.ignitionOwner === localPID;
-            const fromEl = wasOwn ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
-            const toEl = wasOwn ? pmEl.cooldownCardsSelf : pmEl.cooldownCardsOpp;
-            const fr = zoneRect(fromEl);
-            const tr = zoneRect(toEl);
-            if (fr && tr) {
-                const def = getCardDef(prevSnap.ignitionCard);
-                const face = def
-                    ? (() => {
-                          const el = createPowerCard({
-                              type: def.type,
-                              name: def.name,
-                              description: def.description,
-                              example: def.example,
-                              mana: def.mana,
-                              ignition: def.ignition,
-                              cooldown: def.cooldown,
-                              cardWidth: "86px",
-                          });
-                          el.style.cssText = "width:100%;height:100%";
-                          return el;
-                      })()
-                    : null;
-                flyCard(fr, tr, face, prevSelf.sleeveColor || "blue", 450);
-            }
+        // 3b. Ignition resolved (was occupied, now gone) → fly to cooldown pile (if not already done after 1t→0t).
+        if (
+            !skipIgnitionResolveFly &&
+            prevSnap.ignitionOn &&
+            !nextSnap.ignitionOn &&
+            prevSnap.ignitionOwner
+        ) {
+            flyIgnitionResolvedToCooldown(prevSnap);
         }
 
         // 4. Card banished: banishedCards length increased → fly from deck or ignition area to banish zone.
@@ -1953,30 +2202,80 @@
             if (fr && tr) flyCard(fr, tr, null, nextOpp?.sleeveColor || "blue", 500);
         }
 
-        // 5. Card returned to deck: deckCount increased while hand/cooldown decreased → fly from source to deck.
+        // 5. Card returned from cooldown to deck (same idea as deck → hand).
         if (nextSelf.deckCount > prevSelf.deckCount && nextSelf.cooldownCount < prevSelf.cooldownCount) {
-            const fromEl = pmEl.cooldownCardsSelf;
-            const toEl = pmEl.deckSelf;
-            const fr = zoneRect(fromEl);
-            const tr = zoneRect(toEl);
-            if (fr && tr) flyCard(fr, tr, null, nextSelf.sleeveColor || "blue", 500);
+            const removedId = findRemovedCooldownCardId(prevSelf.cooldownPreview, nextSelf.cooldownPreview);
+            const fromWrap =
+                removedId && pmEl.cooldownCardsSelf
+                    ? pmEl.cooldownCardsSelf.querySelector(`[data-card-id="${escapeCardIdForSelector(String(removedId))}"]`)
+                    : null;
+            const fr = zoneRect(fromWrap) || zoneRect(pmEl.cooldownCardsSelf);
+            const tr = zoneRect(pmEl.deckSleeveSelf) || zoneRect(pmEl.deckSelf);
+            if (fr && tr) {
+                flyCard(fr, tr, null, nextSelf.sleeveColor || "blue", 500, null, { fitDestination: false });
+            }
+        }
+        if (nextOpp && prevOpp && nextOpp.deckCount > prevOpp.deckCount && nextOpp.cooldownCount < prevOpp.cooldownCount) {
+            const removedId = findRemovedCooldownCardId(prevOpp.cooldownPreview, nextOpp.cooldownPreview);
+            const fromWrap =
+                removedId && pmEl.cooldownCardsOpp
+                    ? pmEl.cooldownCardsOpp.querySelector(`[data-card-id="${escapeCardIdForSelector(String(removedId))}"]`)
+                    : null;
+            const fr = zoneRect(fromWrap) || zoneRect(pmEl.cooldownCardsOpp);
+            const tr = zoneRect(pmEl.deckSleeveOpp) || zoneRect(pmEl.deckOpp);
+            if (fr && tr) {
+                flyCard(fr, tr, null, nextOpp.sleeveColor || "blue", 500, null, { fitDestination: false });
+            }
         }
 
-        // 6. Cooldown counters decreased: animate each stacked card badge.
-        animateCooldownCounters(prevSelf.cooldownPreview, nextSelf.cooldownPreview, pmEl.cooldownCardsSelf);
-        if (prevOpp && nextOpp) {
-            animateCooldownCounters(prevOpp.cooldownPreview, nextOpp.cooldownPreview, pmEl.cooldownCardsOpp);
-        }
     }
 
-    function animateCardDraw(fromZoneEl, toHandRowEl, isFaceDown, sleeve) {
-        const fr = zoneRect(fromZoneEl);
-        if (!fr || !toHandRowEl) return;
-        const wraps = toHandRowEl.querySelectorAll(".pm-hand-card-wrap");
-        const lastSlot = wraps[wraps.length - 1] || toHandRowEl;
-        const tr = zoneRect(lastSlot);
-        if (!tr) return;
-        flyCard(fr, tr, null, sleeve || "blue", 380);
+    /** Stagger between multiple opening-draw flies (deck → hand). */
+    const OPENING_DRAW_STAGGER_MS = 130;
+
+    /**
+     * Returns the card id that left cooldown between two preview snapshots, if any.
+     * @param {Array<{ cardId: string }>|undefined} prevList
+     * @param {Array<{ cardId: string }>|undefined} nextList
+     * @returns {string | null}
+     */
+    function findRemovedCooldownCardId(prevList, nextList) {
+        const nextIds = new Set((nextList || []).map((e) => e.cardId));
+        for (const e of prevList || []) {
+            if (!nextIds.has(e.cardId)) return e.cardId;
+        }
+        return null;
+    }
+
+    /**
+     * Flies one or more cards from the deck sleeve to hand slots (staggered). Call only while
+     * the previous playmat DOM still matches prevSnap; {@link renderPlaymat} runs right after,
+     * so timeouts see the updated hand for slot rects.
+     * @param {number} count
+     * @param {HTMLElement | null} deckSleeveEl
+     * @param {HTMLElement | null} deckZoneEl
+     * @param {HTMLElement | null} handAreaEl
+     * @param {string} [sleeve]
+     */
+    function scheduleDeckToHandFlies(count, deckSleeveEl, deckZoneEl, handAreaEl, sleeve) {
+        if (count <= 0 || !handAreaEl) return;
+        const fr = zoneRect(deckSleeveEl || deckZoneEl);
+        if (!fr) return;
+        for (let i = 0; i < count; i++) {
+            setTimeout(() => {
+                const wraps = handAreaEl.querySelectorAll(".pm-hand-card-wrap");
+                let tr = null;
+                if (wraps.length > 0) {
+                    const idx = Math.max(0, wraps.length - count + i);
+                    tr = zoneRect(wraps[idx]);
+                } else {
+                    const cardsRoot = handAreaEl.querySelector(".pm-hand-cards");
+                    const base = cardsRoot ? zoneRect(cardsRoot) : zoneRect(handAreaEl);
+                    if (base) tr = offsetDomRectLike(base, i * 14, 0);
+                }
+                if (tr) flyCard(fr, tr, null, sleeve || "blue", 380, null, { fitDestination: true });
+            }, i * OPENING_DRAW_STAGGER_MS);
+        }
     }
 
     /**
@@ -1992,29 +2291,6 @@
             if (ta !== tb) return ta - tb;
             return String(a.cardId).localeCompare(String(b.cardId));
         });
-    }
-
-    /**
-     * Animates cooldown turn badges after sort order (matches DOM data-cooldown-index).
-     * @param {unknown[]} prevList
-     * @param {unknown[]} nextList
-     * @param {HTMLElement | null} container
-     */
-    function animateCooldownCounters(prevList, nextList, container) {
-        if (!container || !nextList) return;
-        const nextSorted = sortCooldownEntriesForDisplay(nextList);
-        const prevSorted = sortCooldownEntriesForDisplay(prevList || []);
-        for (let i = 0; i < nextSorted.length; i++) {
-            const nextEntry = nextSorted[i];
-            const prevEntry = prevSorted.find((p) => p.cardId === nextEntry.cardId);
-            if (!prevEntry) continue;
-            if (nextEntry.turnsRemaining >= prevEntry.turnsRemaining) continue;
-            const wrap = container.querySelector(`[data-cooldown-index="${i}"]`);
-            const turnsEl = wrap?.querySelector(".pm-cooldown-turns");
-            if (turnsEl) {
-                animateCounter(turnsEl, prevEntry.turnsRemaining, nextEntry.turnsRemaining);
-            }
-        }
     }
 
     /**
@@ -2061,9 +2337,17 @@
      * Shows mulligan instructions, public return counts, and confirm for the local player when the opening phase is active.
      * @param {object} snapshot
      */
+    function clearMulliganCountdownTimer() {
+        if (mulliganUiTimerId) {
+            clearInterval(mulliganUiTimerId);
+            mulliganUiTimerId = null;
+        }
+    }
+
     function renderMulliganBar(snapshot) {
         const bar = pmEl.mulliganBar;
         const hint = pmEl.mulliganHint;
+        const timerEl = pmEl.mulliganTimer;
         const countsEl = pmEl.mulliganCounts;
         const btn = pmEl.mulliganConfirmBtn;
         if (!bar || !hint || !countsEl || !btn) return;
@@ -2071,11 +2355,33 @@
         const active = !!snapshot.mulliganPhaseActive;
         bar.classList.toggle("hidden", !active);
         if (!active) {
+            clearMulliganCountdownTimer();
+            if (timerEl) timerEl.textContent = "";
             mulliganPick.clear();
             return;
         }
 
         hint.textContent = t("mulliganHint");
+        if (timerEl) {
+            clearMulliganCountdownTimer();
+            const deadline = snapshot.mulliganDeadlineUnixMs;
+            if (deadline) {
+                const tick = () => {
+                    const snap = lastSnapshot;
+                    if (!snap?.mulliganPhaseActive || !snap.mulliganDeadlineUnixMs) {
+                        clearMulliganCountdownTimer();
+                        timerEl.textContent = "";
+                        return;
+                    }
+                    const left = Math.max(0, Math.ceil((snap.mulliganDeadlineUnixMs - Date.now()) / 1000));
+                    timerEl.textContent = t("mulliganAutoIn", { s: left });
+                };
+                tick();
+                mulliganUiTimerId = setInterval(tick, 250);
+            } else {
+                timerEl.textContent = "";
+            }
+        }
         const mr = snapshot.mulliganReturned || {};
         const fmt = (v) => (v === undefined || v < 0 ? t("mulliganPending") : String(v));
         countsEl.textContent = t("mulliganLine", { w: fmt(mr.A), b: fmt(mr.B) });
@@ -2222,6 +2528,8 @@
             wrap.style.setProperty("--i", String(i));
             const def = getCardDef(entry.cardId);
             if (def) {
+                const cid = String(entry.cardId);
+                wrap.dataset.cardId = cid;
                 const card = createPowerCard({
                     type: def.type,
                     name: def.name,
@@ -2231,8 +2539,12 @@
                     ignition: def.ignition,
                     cooldown: def.cooldown,
                     cardWidth: "220px",
+                    showExampleInitially: matchHandExampleMode.get(cid) === true,
+                    onExampleToggle: (showing) => {
+                        matchHandExampleMode.set(cid, showing);
+                        syncAllMatchPowerCardMinis(cid, showing);
+                    },
                 });
-                card.dataset.cardId = entry.cardId;
                 wrap.appendChild(card);
             } else {
                 const fb = document.createElement("div");
@@ -2252,32 +2564,50 @@
 
     function renderIgnitionZone(snapshot) {
         const localPID = playerEl.value;
-        // Global ignition slot — show on the owner's side.
         const occupied = snapshot.ignitionOn;
         const owner = snapshot.ignitionOwner;
         const turns = snapshot.ignitionTurnsRemaining ?? 0;
         const cardId = snapshot.ignitionCard;
 
+        if (!occupied) {
+            if (pmEl.ignitionCardSelf) {
+                pmEl.ignitionCardSelf.innerHTML = "";
+                delete pmEl.ignitionCardSelf.dataset.cardId;
+            }
+            if (pmEl.ignitionCardOpp) {
+                pmEl.ignitionCardOpp.innerHTML = "";
+                delete pmEl.ignitionCardOpp.dataset.cardId;
+            }
+            if (pmEl.ignitionCounterSelf) pmEl.ignitionCounterSelf.classList.add("hidden");
+            if (pmEl.ignitionCounterOpp) pmEl.ignitionCounterOpp.classList.add("hidden");
+            return;
+        }
+
+        // Global ignition slot — show on the owner's side only; both DOM slots must not retain stale art.
         const isSelf = owner === localPID;
         const cardEl = isSelf ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
         const counterEl = isSelf ? pmEl.ignitionCounterSelf : pmEl.ignitionCounterOpp;
         const emptyCardEl = isSelf ? pmEl.ignitionCardOpp : pmEl.ignitionCardSelf;
         const emptyCounterEl = isSelf ? pmEl.ignitionCounterOpp : pmEl.ignitionCounterSelf;
 
-        // Clear the other side's ignition.
-        if (emptyCardEl) emptyCardEl.innerHTML = "";
+        if (emptyCardEl) {
+            emptyCardEl.innerHTML = "";
+            delete emptyCardEl.dataset.cardId;
+        }
         if (emptyCounterEl) emptyCounterEl.classList.add("hidden");
 
-        if (!occupied || !cardEl) return;
+        if (!cardEl) return;
 
         cardEl.innerHTML = "";
+        cardEl.dataset.cardId = String(cardId || "");
         if (counterEl) {
-            counterEl.textContent = String(turns);
+            counterEl.textContent = `${turns}t`;
             counterEl.classList.toggle("hidden", false);
         }
 
         const def = getCardDef(cardId);
         if (def) {
+            const cid = String(cardId);
             const card = createPowerCard({
                 type: def.type,
                 name: def.name,
@@ -2287,10 +2617,14 @@
                 ignition: def.ignition,
                 cooldown: def.cooldown,
                 cardWidth: "220px",
+                showExampleInitially: matchHandExampleMode.get(cid) === true,
+                onExampleToggle: (showing) => {
+                    matchHandExampleMode.set(cid, showing);
+                    syncAllMatchPowerCardMinis(cid, showing);
+                },
             });
             cardEl.appendChild(card);
-            // Hover on container: card has pointer-events:none due to CSS scale transform.
-            attachCardHover(cardEl, { ...def, manaCost: def.mana });
+            attachCardHover(cardEl, { ...def, id: cid, manaCost: def.mana });
         }
     }
 
@@ -2328,6 +2662,7 @@
             wrap.style.setProperty("--i", String(i));
 
             if (def) {
+                const cid = String(entry.cardId);
                 const card = createPowerCard({
                     type: def.type,
                     name: def.name,
@@ -2337,6 +2672,11 @@
                     ignition: def.ignition,
                     cooldown: def.cooldown,
                     cardWidth: "220px",
+                    showExampleInitially: matchHandExampleMode.get(cid) === true,
+                    onExampleToggle: (showing) => {
+                        matchHandExampleMode.set(cid, showing);
+                        syncAllMatchPowerCardMinis(cid, showing);
+                    },
                 });
                 wrap.appendChild(card);
             } else {
@@ -2441,7 +2781,7 @@
                     showExampleInitially: matchHandExampleMode.get(cid) === true,
                     onExampleToggle: (showing) => {
                         matchHandExampleMode.set(cid, showing);
-                        syncMatchPreviewExample(cid, showing);
+                        syncAllMatchPowerCardMinis(cid, showing);
                     },
                 });
                 wrap.appendChild(card);
@@ -2516,7 +2856,8 @@
         const hasSpace = (self.handCount || 0) < 5;
         const gameOn = snapshot.gameStarted && !snapshot.matchEnded;
         const mulliganOn = !!snapshot.mulliganPhaseActive;
-        btn.disabled = mulliganOn || !(isMyTurn && hasMana && hasSpace && gameOn);
+        btn.disabled =
+            mulliganOn || !(isMyTurn && hasMana && hasSpace && gameOn) || turnResourceAnimBlocking;
     }
 
     // ---------------------------------------------------------------------------
@@ -2605,7 +2946,10 @@
                 hideCardPreview();
                 return;
             }
-            showCardPreview({ ...def, manaCost: def.mana }, wraps[idx]);
+            showCardPreview(
+                { ...def, id: def.id != null ? def.id : entry.cardId, manaCost: def.mana },
+                wraps[idx],
+            );
         }
 
         function onLeave() {
@@ -2638,7 +2982,7 @@
      */
     function wireHandStackPointerDrag(stack) {
         const dragThresholdPx = 10;
-        /** @type {{ idx: number, entry: object, startX: number, startY: number, pointerId: number, armed: boolean, cardEl?: HTMLElement, wrapEl?: HTMLElement, grabOffsetX?: number, grabOffsetY?: number } | null} */
+        /** @type {{ idx: number, entry: object, startX: number, startY: number, pointerId: number, armed: boolean, cardEl?: HTMLElement, wrapEl?: HTMLElement, grabOffsetX?: number, grabOffsetY?: number, dragScaleLifted?: number } | null} */
         let pending = null;
 
         /**
@@ -2649,6 +2993,11 @@
             if (!p?.cardEl || !p.wrapEl) return;
             const card = p.cardEl;
             const wrap = p.wrapEl;
+            card.classList.remove("power-card--hand-dragging");
+            wrap.classList.remove("pm-hand-card-wrap--dragging");
+            if (card.parentNode !== wrap) {
+                wrap.appendChild(card);
+            }
             card.style.position = "";
             card.style.left = "";
             card.style.top = "";
@@ -2658,7 +3007,7 @@
             card.style.pointerEvents = "";
             card.style.transform = "";
             card.style.transformOrigin = "";
-            wrap.classList.remove("pm-hand-card-wrap--dragging");
+            card.style.boxShadow = "";
             wrap.style.minHeight = "";
             stack.style.cursor = "";
         }
@@ -2674,6 +3023,7 @@
 
         stack.addEventListener("pointerdown", (ev) => {
             if (ev.button !== 0) return;
+            if (turnResourceAnimBlocking) return;
             // Let the description/example toggle receive a normal click cycle; pointer capture
             // on the stack would steal pointerup/click from the button.
             const t = ev.target;
@@ -2734,6 +3084,8 @@
                     pending.wrapEl = wrapEl;
                     wrapEl.style.minHeight = `${rect.height}px`;
                     wrapEl.classList.add("pm-hand-card-wrap--dragging");
+                    document.body.appendChild(cardEl);
+                    cardEl.classList.add("power-card--hand-dragging");
                     cardEl.style.position = "fixed";
                     cardEl.style.left = `${rect.left}px`;
                     cardEl.style.top = `${rect.top}px`;
@@ -2741,13 +3093,17 @@
                     cardEl.style.zIndex = "3000";
                     cardEl.style.margin = "0";
                     cardEl.style.pointerEvents = "none";
-                    cardEl.style.transform = `scale(${scale})`;
+                    const lift = 1.08;
+                    pending.dragScaleLifted = scale * lift;
+                    cardEl.style.transform = `scale(${pending.dragScaleLifted})`;
                     cardEl.style.transformOrigin = "top left";
                     stack.style.cursor = "grabbing";
                 }
             } else if (pending.cardEl) {
+                const s = pending.dragScaleLifted ?? 1;
                 pending.cardEl.style.left = `${ev.clientX - (pending.grabOffsetX ?? 0)}px`;
                 pending.cardEl.style.top = `${ev.clientY - (pending.grabOffsetY ?? 0)}px`;
+                pending.cardEl.style.transform = `scale(${s})`;
             }
             const r = pmEl.ignitionSelf?.getBoundingClientRect();
             if (r && pending.armed && pmEl.ignitionSelf) {
@@ -2778,7 +3134,7 @@
                     droppedOnIgnition = true;
                 }
             }
-            if (droppedOnIgnition) {
+            if (droppedOnIgnition && !turnResourceAnimBlocking) {
                 send("activate_card", { handIndex: pending.idx });
             }
             // Always restore the hand card DOM (clear position:fixed). If we skipped this on
@@ -2803,7 +3159,7 @@
 
         slot.addEventListener("dragover", (ev) => {
             // Only allow drop when a hand card is being dragged.
-            if (draggingHandIndex === null) return;
+            if (draggingHandIndex === null || turnResourceAnimBlocking) return;
             ev.preventDefault();
             ev.dataTransfer.dropEffect = "move";
         });
@@ -2815,13 +3171,14 @@
         });
 
         slot.addEventListener("dragenter", (ev) => {
-            if (draggingHandIndex === null) return;
+            if (draggingHandIndex === null || turnResourceAnimBlocking) return;
             ev.preventDefault();
             slot.classList.add("pm-drop-hover");
         });
 
         slot.addEventListener("drop", (ev) => {
             ev.preventDefault();
+            if (turnResourceAnimBlocking) return;
             slot.classList.remove("pm-drop-hover");
             slot.classList.remove("pm-drop-active");
             const idx = draggingHandIndex;
@@ -2962,12 +3319,39 @@
         return snapshot && snapshot.gameStarted === true && !snapshot.matchEnded;
     }
 
+    /**
+     * Captures turn clock display so it stays fixed during turn-start resource animations.
+     */
+    function beginTurnResourceAnimFreeze() {
+        if (!clockAEl || !clockBEl) return;
+        const snap = lastSnapshot;
+        if (!clocksActive(snap)) return;
+        const secLeft = Math.max(0, Math.ceil((turnDeadline - Date.now()) / 1000));
+        frozenTurnClockDisplay = { active: currentTurn, secLeft };
+    }
+
+    function endTurnResourceAnimFreeze() {
+        frozenTurnClockDisplay = null;
+    }
+
     function renderTurnClocks() {
         if (!clockAEl || !clockBEl) return;
         const snap = lastSnapshot;
         if (!clocksActive(snap)) {
             clockAEl.textContent = "--";
             clockBEl.textContent = "--";
+            return;
+        }
+        if (turnResourceAnimBlocking && frozenTurnClockDisplay) {
+            const t = frozenTurnClockDisplay;
+            const secLeft = t.secLeft;
+            if (t.active === "A") {
+                clockAEl.textContent = String(secLeft);
+                clockBEl.textContent = String(turnSeconds);
+            } else {
+                clockAEl.textContent = String(turnSeconds);
+                clockBEl.textContent = String(secLeft);
+            }
             return;
         }
         const secLeft = Math.max(0, Math.ceil((turnDeadline - Date.now()) / 1000));
@@ -3013,6 +3397,7 @@
 
     function send(type, payload) {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (turnResourceAnimBlocking) return;
         ws.send(JSON.stringify({ id: `req-${seq++}`, type, payload }));
     }
 
@@ -3023,12 +3408,42 @@
         return el;
     }
 
+    /** @returns {Set<string>} Keys for currently highlighted destination squares. */
+    function boardMoveKeySet() {
+        return new Set(highlightedMoves.map((m) => posKey(m.row, m.col)));
+    }
+
+    /**
+     * Updates .selected / .move classes without rebuilding the board (keeps HTML5 drag alive).
+     */
+    function refreshBoardHighlights() {
+        if (!boardFrameEl) return;
+        const moveSet = boardMoveKeySet();
+        const selectedKey = selectedFrom ? posKey(selectedFrom.row, selectedFrom.col) : null;
+        for (const sq of boardFrameEl.querySelectorAll(".sq[data-row]")) {
+            const r = +sq.dataset.row;
+            const c = +sq.dataset.col;
+            sq.classList.toggle("selected", selectedKey === posKey(r, c));
+            sq.classList.toggle("move", moveSet.has(posKey(r, c)));
+        }
+    }
+
+    /** Whether the local player may select or drag pieces on the chess board. */
+    function canInteractChessPieces() {
+        const s = lastSnapshot;
+        if (!s?.board || !gameStarted || s.matchEnded) return false;
+        if (s.mulliganPhaseActive) return false;
+        if (turnResourceAnimBlocking) return false;
+        if (s.turnPlayer !== playerEl.value) return false;
+        return true;
+    }
+
     function renderBoard(board) {
         if (!boardFrameEl) return;
         syncBoardPerspectiveClass();
         boardFrameEl.innerHTML = "";
         boardFrameEl.classList.toggle("show-inner-coords", coordsInSquaresEl && coordsInSquaresEl.checked);
-        const moveSet = new Set(highlightedMoves.map((m) => posKey(m.row, m.col)));
+        const moveSet = boardMoveKeySet();
         const selectedKey = selectedFrom ? posKey(selectedFrom.row, selectedFrom.col) : null;
         const ep = lastSnapshot?.enPassant;
 
@@ -3090,12 +3505,12 @@
                 sq.dataset.row = String(r);
                 sq.dataset.col = String(c);
                 sq.dataset.code = code;
-                sq.draggable = !!code;
+                sq.draggable = !!(code && isOwnPiece(code) && canInteractChessPieces());
 
                 sq.addEventListener("click", () => {
                     if (!lastSnapshot?.board || !gameStarted) return;
                     const clickedCode = sq.dataset.code || "";
-                    if (clickedCode && isOwnPiece(clickedCode)) {
+                    if (clickedCode && isOwnPiece(clickedCode) && canInteractChessPieces()) {
                         selectedFrom = logical;
                         highlightedMoves = computeMoves(
                             lastSnapshot.board,
@@ -3106,7 +3521,8 @@
                         renderBoard(lastSnapshot.board);
                         return;
                     }
-                    if (selectedFrom && moveSet.has(posKey(r, c))) {
+                    const destSet = boardMoveKeySet();
+                    if (selectedFrom && destSet.has(posKey(r, c))) {
                         sendMove(selectedFrom, logical);
                         selectedFrom = null;
                         highlightedMoves = [];
@@ -3116,7 +3532,12 @@
 
                 sq.addEventListener("dragstart", (ev) => {
                     const dragCode = sq.dataset.code || "";
-                    if (!gameStarted || !dragCode || !isOwnPiece(dragCode)) {
+                    if (!canInteractChessPieces() || !dragCode || !isOwnPiece(dragCode)) {
+                        ev.preventDefault();
+                        return;
+                    }
+                    const dt = ev.dataTransfer;
+                    if (!dt) {
                         ev.preventDefault();
                         return;
                     }
@@ -3128,17 +3549,30 @@
                         lastSnapshot?.enPassant,
                         lastSnapshot?.castlingRights,
                     );
-                    renderBoard(lastSnapshot?.board || []);
-                    ev.dataTransfer?.setData("text/plain", posKey(r, c));
-                    ev.dataTransfer.effectAllowed = "move";
+                    refreshBoardHighlights();
+                    sq.classList.add("sq--piece-dragging");
+                    const pImg = sq.querySelector(".piece-img");
+                    if (pImg instanceof HTMLImageElement) {
+                        const w = pImg.offsetWidth || 48;
+                        const h = pImg.offsetHeight || 48;
+                        dt.setDragImage(pImg, w / 2, h / 2);
+                    }
+                    dt.setData("text/plain", posKey(r, c));
+                    dt.effectAllowed = "move";
                 });
 
                 sq.addEventListener("dragover", (ev) => {
                     if (!draggingFrom) return;
-                    if (!moveSet.has(posKey(r, c))) return;
+                    if (!boardMoveKeySet().has(posKey(r, c))) return;
                     ev.preventDefault();
                     sq.classList.add("drop-target");
                     ev.dataTransfer.dropEffect = "move";
+                });
+
+                sq.addEventListener("dragenter", (ev) => {
+                    if (!draggingFrom) return;
+                    if (!boardMoveKeySet().has(posKey(r, c))) return;
+                    ev.preventDefault();
                 });
 
                 sq.addEventListener("dragleave", () => {
@@ -3147,7 +3581,7 @@
 
                 sq.addEventListener("drop", (ev) => {
                     sq.classList.remove("drop-target");
-                    if (!draggingFrom || !moveSet.has(posKey(r, c))) return;
+                    if (!draggingFrom || !boardMoveKeySet().has(posKey(r, c))) return;
                     ev.preventDefault();
                     const from = draggingFrom;
                     const to = logical;
@@ -3155,9 +3589,13 @@
                     selectedFrom = null;
                     highlightedMoves = [];
                     sendMove(from, to);
+                    if (lastSnapshot?.board) renderBoard(lastSnapshot.board);
                 });
 
                 sq.addEventListener("dragend", () => {
+                    boardFrameEl?.querySelectorAll(".sq--piece-dragging").forEach((el) => {
+                        el.classList.remove("sq--piece-dragging");
+                    });
                     draggingFrom = null;
                     selectedFrom = null;
                     highlightedMoves = [];
@@ -3427,11 +3865,56 @@
         }
     }
 
+    /**
+     * Sends one `debug_match_fixture` on the snapshot where the second player has just joined
+     * (transition to both connected). Optionally queues mulligan confirm for a later snapshot.
+     * Enable via `match-test-config.js` or console: `__powerChessMatchTest.autoApply = true` (this tab).
+     * @param {object} payload state_snapshot
+     */
+    function maybeApplyMatchTestFixture(payload) {
+        if (!payload || payload.matchEnded) return;
+        const both =
+            Number(payload.connectedA) > 0 &&
+            Number(payload.connectedB) > 0;
+
+        if (
+            matchTestAutoConfirmMulliganEnabled() &&
+            matchTestAwaitingMulliganConfirm &&
+            payload.mulliganPhaseActive
+        ) {
+            const mr = payload.mulliganReturned || {};
+            const my = playerEl.value;
+            if (mr[my] === undefined || mr[my] < 0) {
+                matchTestAwaitingMulliganConfirm = false;
+                send("confirm_mulligan", { handIndices: [] });
+            }
+        }
+
+        if (
+            matchTestAutoApplyEnabled() &&
+            !matchTestFixtureSent &&
+            both &&
+            !matchTestPrevBothConnected
+        ) {
+            matchTestFixtureSent = true;
+            send("debug_match_fixture", buildMatchDebugFixturePayload());
+            if (matchTestAutoConfirmMulliganEnabled()) {
+                matchTestAwaitingMulliganConfirm = true;
+            }
+        }
+
+        matchTestPrevBothConnected = both;
+    }
+
     function resetToLobbyUi() {
         joinedRoom = false;
         gameStarted = false;
+        matchTestFixtureSent = false;
+        matchTestPrevBothConnected = false;
+        matchTestAwaitingMulliganConfirm = false;
         lastSnapshot = null;
         pmPrevSnapshot = null;
+        snapshotApplyChain = Promise.resolve();
         setLobbyFooterVisible(true);
         if (lobbyScreenEl) lobbyScreenEl.classList.remove("hidden");
         if (gameShellEl) gameShellEl.classList.add("hidden");

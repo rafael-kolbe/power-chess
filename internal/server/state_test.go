@@ -273,6 +273,43 @@ func TestResolveTurnTimeoutIfExpiredLosesOnThirdStrike(t *testing.T) {
 	}
 }
 
+// TestResolveMulliganTimeoutIfExpiredAutoKeeps ensures the mulligan window auto-confirms empty returns and starts the match.
+func TestResolveMulliganTimeoutIfExpiredAutoKeeps(t *testing.T) {
+	room, err := NewRoomSession("room-mulligan-timeout")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	room.stateM.Lock()
+	room.Engine.State.MulliganPhaseActive = true
+	room.Engine.State.MulliganConfirmed = map[gameplay.PlayerID]bool{
+		gameplay.PlayerA: false,
+		gameplay.PlayerB: false,
+	}
+	room.Engine.State.MulliganReturnedCount = map[gameplay.PlayerID]int{
+		gameplay.PlayerA: -1,
+		gameplay.PlayerB: -1,
+	}
+	room.Engine.State.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{}
+	room.Engine.State.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{}
+	room.mulliganDeadline = time.Now().Add(-time.Second)
+	room.stateM.Unlock()
+
+	resolved, err := room.ResolveMulliganTimeoutIfExpired(time.Now())
+	if err != nil {
+		t.Fatalf("mulligan timeout: %v", err)
+	}
+	if !resolved {
+		t.Fatalf("expected mulligan auto resolution")
+	}
+	s := room.SnapshotSafe()
+	if s.MulliganPhaseActive {
+		t.Fatalf("expected mulligan phase ended")
+	}
+	if s.TurnPlayer != string(gameplay.PlayerA) {
+		t.Fatalf("expected first chess turn for white (A), got %s", s.TurnPlayer)
+	}
+}
+
 // TestRequestRematchSwapsSides ensures accepted rematch swaps player colors.
 func TestRequestRematchSwapsSides(t *testing.T) {
 	room, err := NewRoomSession("room-rematch-swap")

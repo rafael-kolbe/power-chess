@@ -45,7 +45,8 @@
 ## Mana e mana energizada
 
 - No início da partida (antes do primeiro **início de turno** aplicado pelo servidor), o pool de mana de cada jogador está em **0**; o primeiro ganho de mana no turno vem do passo “início do turno” (+1 mana ao jogador ativo), conforme `state_snapshot`.
-- Ganho de mana por turno e por captura conforme regras do servidor (valores no `state_snapshot`).
+- A cada **início de turno** do jogador da vez, o servidor concede **+1 mana** (respeitando o máximo do pool; se já estiver no teto, não aumenta).
+- Cada **captura de peça no xadrez** (incluindo en passant) concede **+1 mana** ao jogador que capturou (também respeitando o máximo). Valores finais vêm do `state_snapshot`.
 - Pools com **máximo** (ex.: mana 10, energizada 20 — conforme implementação atual).
 - Mana gasta em **poderes de carta** gera **mana energizada** (regra geral; exceções no texto das cartas).
 - Mana gasta só para **comprar carta** não gera mana energizada (conforme regras do jogo).
@@ -69,6 +70,8 @@ Fluxo típico de ativação:
 3. O oponente pode reagir em janelas permitidas.  
 4. Sucesso ou falha → carta vai para **recarga**; ao terminar, volta ao **deck** (exceto banimento e efeitos específicos).
 
+**Ticks no início de turno (servidor):** +1 mana do jogador da vez (até o máximo); **−1** no contador de **ignição** da carta no slot de ignição (compartilhado, uma vez por início de turno de qualquer lado); **−1** em cada entrada de **cooldown** do jogador que está começando o turno (entradas que chegam a 0 voltam ao deck).
+
 ### Janelas de reação e Counter
 
 - **Power** e **Continuous**: no turno do jogador.  
@@ -85,7 +88,7 @@ Fluxo típico de ativação:
 
 - Deck por jogador (tamanho conforme regras atuais no código).
 - **Compra inicial**: só depois que **os dois** jogadores estão na sala o servidor embaralha cada deck (RNG criptográfico) e cada um compra 3 cartas. Quem entra primeiro **não** compra antes do oponente.
-- **Mulligan** (estilo Shadowverse): cada jogador escolhe qualquer subconjunto da mão inicial para devolver ao deck; o deck é embaralhado de novo e o jogador compra a mesma quantidade de cartas. Ambos veem **quantas** cartas cada um devolveu (não vêem quais cartas). Após os dois confirmarem, a partida de xadrez prossegue.
+- **Mulligan** (estilo Shadowverse): cada jogador escolhe qualquer subconjunto da mão inicial para devolver ao deck; o deck é embaralhado de novo e o jogador compra a mesma quantidade de cartas. Ambos veem **quantas** cartas cada um devolveu (não vêem quais cartas). Há **15 s** a partir do início da fase de mulligan; ao expirar, o servidor confirma automaticamente quem ainda não confirmou como se não devolvesse cartas. Após os dois confirmarem (ou após esse auto-confirm), a partida de xadrez prossegue.
 - Compra pagando mana conforme implementação (fora da abertura).
 - Limite de mão e cópias por carta conforme regras do jogo.
 - Cartas **banidas** não voltam ao deck salvo efeito específico.

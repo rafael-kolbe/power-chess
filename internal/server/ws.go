@@ -29,6 +29,8 @@ type Server struct {
 	decks      *DeckService
 	telemetry  *Telemetry
 	nextRoomID int
+	// adminDebugMatch is true when ADMIN_DEBUG_MATCH is set (e.g. "1", "true"); enables debug_match_fixture handling.
+	adminDebugMatch bool
 	// userRoom maps authenticated user ID -> room ID they are currently joined to (at most one room).
 	userRoom   map[uint64]string
 	userRoomMu sync.Mutex
@@ -58,6 +60,17 @@ var errClientLeaveMatch = errors.New("client requested leave_match close")
 
 const duplicateRequestMessage = "request already processed"
 
+// adminDebugMatchFromEnv reports whether ADMIN_DEBUG_MATCH is enabled (e.g. "1", "true", "yes", "on").
+func adminDebugMatchFromEnv() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("ADMIN_DEBUG_MATCH")))
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 // NewServer creates a websocket-capable HTTP server instance.
 // When DATABASE_URL is set, PostgreSQL must connect and JWT_SECRET (min 16 chars) must be set for auth.
 func NewServer() *Server {
@@ -78,6 +91,9 @@ func NewServer() *Server {
 	}
 	s := NewServerWithStore(store)
 	s.auth = auth
+	if s.adminDebugMatch {
+		log.Printf("ADMIN_DEBUG_MATCH enabled: WebSocket type %s is accepted", MessageDebugMatchFixture)
+	}
 	if s.auth != nil && store != nil {
 		if pg, ok := store.(*PostgresRoomStore); ok {
 			s.decks = NewDeckService(pg.DB(), s.userInActiveRoom)
@@ -105,11 +121,12 @@ func NewServerWithStore(store RoomStore) *Server {
 				return true
 			},
 		},
-		rooms:      map[string]*RoomSession{},
-		store:      store,
-		telemetry:  NewTelemetry(),
-		nextRoomID: nextID,
-		userRoom:   map[uint64]string{},
+		rooms:           map[string]*RoomSession{},
+		store:           store,
+		telemetry:       NewTelemetry(),
+		nextRoomID:      nextID,
+		userRoom:        map[uint64]string{},
+		adminDebugMatch: adminDebugMatchFromEnv(),
 	}
 	go s.runReactionTimeoutLoop()
 	go s.runTurnTimeoutLoop()
@@ -190,7 +207,7 @@ func (c *Client) readLoop() {
 				} else {
 					c.room.HandlePlayerDisconnect(c.playerID)
 				}
-				_ = c.room.Persist(context.Background(), c.server.store)
+				_ = c.server.persistRoom(context.Background(), c.room)
 				c.room.BroadcastSnapshot()
 			}
 		}
@@ -254,6 +271,8 @@ func (c *Client) handle(env Envelope) error {
 		return c.handleStayInRoom(env)
 	case MessageRequestRematch:
 		return c.handleRequestRematch(env)
+	case MessageDebugMatchFixture:
+		return c.handleDebugMatchFixture(env)
 	default:
 		return protocolError{code: ErrorUnknownMessageType, message: "unknown message type"}
 	}
@@ -267,7 +286,7 @@ func (c *Client) handleStayInRoom(env Envelope) error {
 		return protocolError{code: ErrorActionFailed, message: err.Error()}
 	}
 	_ = c.sendAck(env, "ok", "", "")
-	_ = c.room.Persist(context.Background(), c.server.store)
+	_ = c.server.persistRoom(context.Background(), c.room)
 	c.room.TouchActivity()
 	c.room.BroadcastSnapshot()
 	return nil
@@ -281,7 +300,7 @@ func (c *Client) handleRequestRematch(env Envelope) error {
 		return protocolError{code: ErrorActionFailed, message: err.Error()}
 	}
 	_ = c.sendAck(env, "ok", "", "")
-	_ = c.room.Persist(context.Background(), c.server.store)
+	_ = c.server.persistRoom(context.Background(), c.room)
 	c.room.TouchActivity()
 	c.room.BroadcastSnapshot()
 	return nil
@@ -306,7 +325,7 @@ func (c *Client) handleLeaveMatch(env Envelope) error {
 		return err
 	}
 	_ = c.sendAck(env, "ok", "", "")
-	_ = c.room.Persist(context.Background(), c.server.store)
+	_ = c.server.persistRoom(context.Background(), c.room)
 	c.room.TouchActivity()
 	c.room.BroadcastSnapshot()
 	return errClientLeaveMatch
@@ -427,7 +446,7 @@ func (c *Client) handleJoinMatch(env Envelope) error {
 		return protocolError{code: ErrorActionFailed, message: err.Error()}
 	}
 	room.EvaluateMatchOutcome()
-	_ = room.Persist(context.Background(), c.server.store)
+	_ = c.server.persistRoom(context.Background(), room)
 	_ = c.sendAck(env, "ok", "", "")
 	room.BroadcastSnapshot()
 	return nil
@@ -463,7 +482,7 @@ func (c *Client) handleSubmitMove(env Envelope) error {
 	}
 	_ = c.sendAck(env, "ok", "", "")
 	c.room.EvaluateMatchOutcome()
-	_ = c.room.Persist(context.Background(), c.server.store)
+	_ = c.server.persistRoom(context.Background(), c.room)
 	c.room.TouchActivity()
 	c.room.BroadcastSnapshot()
 	return nil
@@ -495,7 +514,7 @@ func (c *Client) handleActivateCard(env Envelope) error {
 	}
 	_ = c.sendAck(env, "ok", "", "")
 	c.room.EvaluateMatchOutcome()
-	_ = c.room.Persist(context.Background(), c.server.store)
+	_ = c.server.persistRoom(context.Background(), c.room)
 	c.room.TouchActivity()
 	c.room.BroadcastSnapshot()
 	return nil
@@ -522,7 +541,7 @@ func (c *Client) handleDrawCard(env Envelope) error {
 		return protocolError{code: ErrorActionFailed, message: err.Error()}
 	}
 	_ = c.sendAck(env, "ok", "", "")
-	_ = c.room.Persist(context.Background(), c.server.store)
+	_ = c.server.persistRoom(context.Background(), c.room)
 	c.room.TouchActivity()
 	c.room.BroadcastSnapshot()
 	return nil
@@ -559,7 +578,7 @@ func (c *Client) handleResolvePending(env Envelope) error {
 	}
 	_ = c.sendAck(env, "ok", "", "")
 	c.room.EvaluateMatchOutcome()
-	_ = c.room.Persist(context.Background(), c.server.store)
+	_ = c.server.persistRoom(context.Background(), c.room)
 	c.room.TouchActivity()
 	c.room.BroadcastSnapshot()
 	return nil
@@ -595,7 +614,7 @@ func (c *Client) handleQueueReaction(env Envelope) error {
 		return err
 	}
 	c.room.EvaluateMatchOutcome()
-	_ = c.room.Persist(context.Background(), c.server.store)
+	_ = c.server.persistRoom(context.Background(), c.room)
 	c.room.TouchActivity()
 	return c.sendAck(env, "queued", "", "reaction card queued")
 }
@@ -622,7 +641,48 @@ func (c *Client) handleResolveReactions(env Envelope) error {
 	}
 	_ = c.sendAck(env, "ok", "", "")
 	c.room.EvaluateMatchOutcome()
-	_ = c.room.Persist(context.Background(), c.server.store)
+	_ = c.server.persistRoom(context.Background(), c.room)
+	c.room.TouchActivity()
+	c.room.BroadcastSnapshot()
+	return nil
+}
+
+// handleDebugMatchFixture applies preset decks and hands when ADMIN_DEBUG_MATCH is enabled on the server.
+func (c *Client) handleDebugMatchFixture(env Envelope) error {
+	if !c.server.adminDebugMatch {
+		return protocolError{code: ErrorDebugDisabled, message: "admin_debug_match_disabled"}
+	}
+	var p DebugMatchFixturePayload
+	if err := json.Unmarshal(env.Payload, &p); err != nil {
+		return err
+	}
+	if !p.TestEnvironment {
+		return protocolError{code: ErrorInvalidPayload, message: "test_environment must be true"}
+	}
+	if c.room == nil {
+		return protocolError{code: ErrorJoinRequired, message: "join_match is required before debug_match_fixture"}
+	}
+	if p.White == nil || p.Black == nil {
+		return protocolError{code: ErrorInvalidPayload, message: "white and black fixtures are required"}
+	}
+	if !c.room.BothPlayersConnected() {
+		return protocolError{code: ErrorActionFailed, message: "waiting_for_opponent"}
+	}
+	if err := c.room.Execute(func() error {
+		requestKey := fmt.Sprintf("%s|debug_match_fixture|%s", c.room.RoomID, env.ID)
+		if env.ID != "" && !c.room.MarkRequestOnce(requestKey) {
+			return errDuplicateRequest
+		}
+		return c.room.ApplyDebugMatchFixture(p.White, p.Black, c.server)
+	}); err != nil {
+		if errors.Is(err, errDuplicateRequest) {
+			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
+		}
+		return protocolError{code: ErrorActionFailed, message: err.Error()}
+	}
+	_ = c.sendAck(env, "ok", "", "")
+	c.room.EvaluateMatchOutcome()
+	_ = c.server.persistRoom(context.Background(), c.room)
 	c.room.TouchActivity()
 	c.room.BroadcastSnapshot()
 	return nil
@@ -650,6 +710,7 @@ func (c *Client) handleConfirmMulligan(env Envelope) error {
 			return err
 		}
 		if done {
+			c.room.mulliganDeadline = time.Time{}
 			return c.room.Engine.StartTurn(gameplay.PlayerA)
 		}
 		return nil
@@ -660,7 +721,7 @@ func (c *Client) handleConfirmMulligan(env Envelope) error {
 		return protocolError{code: ErrorActionFailed, message: err.Error()}
 	}
 	_ = c.sendAck(env, "ok", "", "")
-	_ = c.room.Persist(context.Background(), c.server.store)
+	_ = c.server.persistRoom(context.Background(), c.room)
 	c.room.TouchActivity()
 	c.room.BroadcastSnapshot()
 	return nil
@@ -771,7 +832,7 @@ func (s *Server) runReactionTimeoutLoop() {
 				continue
 			}
 			if resolved {
-				_ = room.Persist(context.Background(), s.store)
+				_ = s.persistRoom(context.Background(), room)
 				room.TouchActivity()
 				room.BroadcastSnapshot()
 			}
@@ -790,13 +851,24 @@ func (s *Server) runTurnTimeoutLoop() {
 		}
 		s.roomsM.RUnlock()
 		for _, room := range rooms {
+			resolvedM, err := room.ResolveMulliganTimeoutIfExpired(now)
+			if err != nil {
+				s.telemetry.ObserveError(ErrorActionFailed)
+				continue
+			}
+			if resolvedM {
+				_ = s.persistRoom(context.Background(), room)
+				room.TouchActivity()
+				room.BroadcastSnapshot()
+				continue
+			}
 			resolved, err := room.ResolveTurnTimeoutIfExpired(now)
 			if err != nil {
 				s.telemetry.ObserveError(ErrorActionFailed)
 				continue
 			}
 			if resolved {
-				_ = room.Persist(context.Background(), s.store)
+				_ = s.persistRoom(context.Background(), room)
 				room.TouchActivity()
 				room.BroadcastSnapshot()
 			}

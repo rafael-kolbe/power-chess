@@ -23,14 +23,14 @@ func (e *Engine) errIfOpeningBlocksGameplay() error {
 }
 
 const (
-	CardKnightTouch gameplay.CardID = "knight-touch"
-	CardRookTouch   gameplay.CardID = "rook-touch"
-	CardBishopTouch gameplay.CardID = "bishop-touch"
-	CardDoubleTurn  gameplay.CardID = "double-turn"
+	CardKnightTouch    gameplay.CardID = "knight-touch"
+	CardRookTouch      gameplay.CardID = "rook-touch"
+	CardBishopTouch    gameplay.CardID = "bishop-touch"
+	CardDoubleTurn     gameplay.CardID = "double-turn"
 	CardStopRightThere gameplay.CardID = "stop-right-there"
-	CardExtinguish gameplay.CardID = "extinguish"
-	CardCounterattack gameplay.CardID = "counterattack"
-	CardBlockade gameplay.CardID = "blockade"
+	CardExtinguish     gameplay.CardID = "extinguish"
+	CardCounterattack  gameplay.CardID = "counterattack"
+	CardBlockade       gameplay.CardID = "blockade"
 )
 
 type Engine struct {
@@ -39,28 +39,28 @@ type Engine struct {
 
 	moveBuffTarget map[gameplay.PlayerID]*chess.Pos
 	moveBuffKind   map[gameplay.PlayerID]MoveBuffKind
-	extraMoveLeft    map[gameplay.PlayerID]int
-	movesThisTurn    map[gameplay.PlayerID]int
-	pendingEffects   map[gameplay.PlayerID][]PendingEffect
-	resolvers        map[gameplay.CardID]EffectResolver
-	ReactionWindow   *ReactionWindow
-	reactionStack    []ReactionAction
-	pendingMove      *PendingMoveAction
+	extraMoveLeft  map[gameplay.PlayerID]int
+	movesThisTurn  map[gameplay.PlayerID]int
+	pendingEffects map[gameplay.PlayerID][]PendingEffect
+	resolvers      map[gameplay.CardID]EffectResolver
+	ReactionWindow *ReactionWindow
+	reactionStack  []ReactionAction
+	pendingMove    *PendingMoveAction
 }
 
 // NewEngine wires chess state, gameplay state and card resolvers into a single match runtime.
 func NewEngine(state *gameplay.MatchState, board *chess.Game) *Engine {
 	return &Engine{
-		State:            state,
-		Chess:            board,
-		moveBuffTarget:   map[gameplay.PlayerID]*chess.Pos{},
-		moveBuffKind:     map[gameplay.PlayerID]MoveBuffKind{},
-		extraMoveLeft:    map[gameplay.PlayerID]int{},
-		movesThisTurn:    map[gameplay.PlayerID]int{},
-		pendingEffects:   map[gameplay.PlayerID][]PendingEffect{},
-		resolvers:        DefaultResolvers(),
-		reactionStack:    []ReactionAction{},
-		pendingMove:      nil,
+		State:          state,
+		Chess:          board,
+		moveBuffTarget: map[gameplay.PlayerID]*chess.Pos{},
+		moveBuffKind:   map[gameplay.PlayerID]MoveBuffKind{},
+		extraMoveLeft:  map[gameplay.PlayerID]int{},
+		movesThisTurn:  map[gameplay.PlayerID]int{},
+		pendingEffects: map[gameplay.PlayerID][]PendingEffect{},
+		resolvers:      DefaultResolvers(),
+		reactionStack:  []ReactionAction{},
+		pendingMove:    nil,
 	}
 }
 
@@ -262,7 +262,7 @@ func (e *Engine) ActivatePlayerSkill(pid gameplay.PlayerID) error {
 		return err
 	}
 	e.Chess.Turn = color.Opponent()
-	return nil
+	return e.StartTurn(e.State.CurrentTurn)
 }
 
 // applyMoveCore applies a validated move without opening capture trigger windows.
@@ -270,8 +270,12 @@ func (e *Engine) ActivatePlayerSkill(pid gameplay.PlayerID) error {
 func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 	color := toColor(pid)
 	isPowerSecondMove := e.movesThisTurn[pid] >= 1 && e.extraMoveLeft[pid] > 0
+	captureForMana := e.isCaptureAttempt(pid, m)
 	if err := e.applyMoveWithBuffIfAny(e.Chess, pid, m); err != nil {
 		return err
+	}
+	if captureForMana {
+		e.State.GrantManaForChessCapture(pid)
 	}
 	e.movesThisTurn[pid]++
 	keepTurn := false
@@ -283,6 +287,9 @@ func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 	}
 	if !keepTurn {
 		if err := e.State.EndTurn(pid); err != nil {
+			return err
+		}
+		if err := e.StartTurn(e.State.CurrentTurn); err != nil {
 			return err
 		}
 	}

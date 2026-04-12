@@ -102,7 +102,7 @@ Pedidos duplicados (mesmo `requestId` + tipo + jogador + sala) retornam `status:
 }
 ```
 
-**Códigos usados:** `bad_request`, `unknown_message_type`, `join_required`, `action_failed`, `invalid_payload`, `protocol_violation`.
+**Códigos usados:** `bad_request`, `unknown_message_type`, `join_required`, `action_failed`, `invalid_payload`, `protocol_violation`, `debug_disabled` (pedido `debug_match_fixture` quando `ADMIN_DEBUG_MATCH` não está ativo no servidor).
 
 ### `state_snapshot`
 
@@ -112,7 +112,7 @@ Broadcast do estado da sala. Campos principais:
 |------|-----------|
 | Sala | `roomId`, `roomName`, `roomPrivate`, `roomPassword`, `connectedA/B`, `gameStarted` |
 | Turno | `turnPlayer`, `turnSeconds`, `turnNumber`, `ignitionOn`, `ignitionCard`, `ignitionOwner`, `ignitionTurnsRemaining` |
-| Abertura | `mulliganPhaseActive` — `true` enquanto os dois jogadores podem confirmar mulligan; `mulliganReturned` — mapa `{"A": n, "B": n}` com quantas cartas cada um já devolveu (`-1` até confirmar) |
+| Abertura | `mulliganPhaseActive` — `true` enquanto os dois jogadores podem confirmar mulligan; `mulliganReturned` — mapa `{"A": n, "B": n}` com quantas cartas cada um já devolveu (`-1` até confirmar); `mulliganDeadlineUnixMs` — instante (epoch ms) em que o servidor confirma automaticamente quem ainda não confirmou (devolução vazia, “keep”). Janela de 15 s a partir do início da fase de mulligan |
 | Perspectiva | `viewerPlayerId` — identifica o destinatário deste snapshot (determina visibilidade da mão) |
 | Tabuleiro | `board` 8×8 (códigos `wK`, `bP`, `""` vazio), `enPassant`, `castlingRights` |
 | Jogadores | `players[]`: `mana`, `maxMana`, `energizedMana`, `maxEnergized`, `handCount`, `cooldownCount`, `graveyardCount`, `strikes`, `deckCount`, `sleeveColor`, `hand` (privado — só no snapshot do próprio jogador), `banishedCards[]`, `graveyardPieces[]` (ordenado Q>R>B>N>P), `cooldownPreview[]` (até 4), `cooldownHiddenCount` |
@@ -344,6 +344,48 @@ Usado após fim de partida quando um jogador permanece só na sala para voltar a
 
 Com ambos conectados após o fim; quando ambos votam, a partida reinicia com **lados invertidos** (`A` ↔ `B`).
 
+### `debug_match_fixture` (apenas desenvolvimento / staging)
+
+Disponível **somente** se o processo do servidor tiver a variável de ambiente `ADMIN_DEBUG_MATCH` ativa (`1`, `true`, `yes` ou `on`). Caso contrário, qualquer mensagem deste tipo é recusada com `error` código `debug_disabled` — mesmo que o cliente envie `test_environment: true`.
+
+Handshake obrigatório: `test_environment` deve ser `true`. Se for `false` ou omitido com valor falso, o servidor responde com `invalid_payload` (`test_environment must be true`).
+
+Requer `join_match` com ambos os jogadores conectados na mesma sala, e só é aplicável **antes** da partida ter iniciado o primeiro turno (`match already started` caso contrário).
+
+Com `ADMIN_DEBUG_MATCH` ativo, o servidor **não persiste** salas no armazenamento configurado (`SaveRoom` é ignorado): o estado da partida existe só em memória.
+
+Payload: `white` e `black` são obrigatórios. Cada lado tem:
+
+- `deck`: exatamente **20** IDs de cartas num baralho legal de construído (mesmas regras que `POST /api/decks`).
+- `hand`: lista de IDs retirados **desse** baralho (cópias suficientes no `deck`); tamanho máximo 5.
+- Opcional: `mana`, `maxMana`, `energizedMana`, `maxEnergized` — números inteiros; omitidos mantêm os valores padrão do motor após o preset de mãos.
+
+`white` ↔ jogador `A` (brancas); `black` ↔ jogador `B` (pretas). O estado do tabuleiro é reposto para a posição inicial de xadrez; a fase de mulligan fica ativa com as mãos indicadas (sem novo shuffle). Em seguida cada cliente envia `confirm_mulligan` para fechar a abertura e iniciar o primeiro turno.
+
+```json
+{
+  "id": "dbg-1",
+  "type": "debug_match_fixture",
+  "payload": {
+    "test_environment": true,
+    "white": {
+      "deck": ["energy-gain", "knight-touch", "..."],
+      "hand": ["knight-touch", "energy-gain", "bishop-touch"],
+      "mana": 5,
+      "maxMana": 10,
+      "energizedMana": 0,
+      "maxEnergized": 20
+    },
+    "black": {
+      "deck": ["energy-gain", "knight-touch", "..."],
+      "hand": ["retaliate", "backstab", "clairvoyance"],
+      "mana": 4,
+      "maxMana": 10
+    }
+  }
+}
+```
+
 ---
 
 ## Janela de captura e cadeia Counter
@@ -382,6 +424,7 @@ Testes de integração WebSocket cobrem, entre outros:
 - `join_match` multi-cliente e broadcast de `state_snapshot`  
 - Contrato de `ack` e pedidos duplicados  
 - Idempotência por `requestId`  
+- `debug_match_fixture` com `ADMIN_DEBUG_MATCH` ligado/desligado  
 - Timeout de desconexão e cancelamento  
 - Hooks de persistência (save/load)  
 - Contadores em `/metrics`  
