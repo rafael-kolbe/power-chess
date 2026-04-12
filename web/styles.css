@@ -321,7 +321,9 @@ button:disabled {
    Game shell HUD
    ============================================================================= */
 
-.game-shell-hud h3 {
+/* Exclude power-card titles (h3.power-card__title): they need card.css only — this rule
+   otherwise wins margin/font/color and breaks the parchment banner layout on the match UI. */
+.game-shell-hud h3:not(.power-card__title) {
   margin: 16px 0 8px;
   font-size: 14px;
   color: var(--color-text-dim);
@@ -1799,6 +1801,13 @@ pre {
   filter: brightness(0.75) saturate(0.6);
 }
 
+/* Hand drag: slot keeps height while the real card is position:fixed and follows the pointer */
+.pm-hand-card-wrap--dragging {
+  outline: 1px dashed rgba(255 255 255 / 14%);
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
 /*
  * Miniature card rendering: card.js uses cardWidth "220px"; CSS scale shrinks to slot size.
  */
@@ -1809,6 +1818,16 @@ pre {
   transform-origin: top left;
   transform: scale(calc(100cqw / 220px));
   pointer-events: none;
+}
+
+/* Scaled cards disable hit-testing on the shell so drag/hover use the wrapper; re-enable
+   the description/example toggle so it stays clickable (pointer-events do not inherit). */
+.pm-hand-card-wrap > .power-card .power-card__toggle,
+.pm-cooldown-card-wrap > .power-card .power-card__toggle,
+.pm-banish-card-wrap > .power-card .power-card__toggle,
+.pm-ignition-card > .power-card .power-card__toggle,
+.pm-stack-top > .power-card .power-card__toggle {
+  pointer-events: auto;
 }
 
 .pm-ignition-card > .power-card,
@@ -1838,13 +1857,25 @@ pre {
   box-shadow: 0 4px 12px rgba(0 0 0 / 55%);
 }
 
-/* Card hover preview (fixed overlay for match screen) */
+/* Card hover preview (fixed overlay for match screen).
+   The shell must stay pointer-events:none on the card art so clicks/hover pass through to
+   the hand stack below when the preview overlaps the miniatures; only the Example/Description
+   button opts in (auto) so it stays clickable and gets :hover. A full-card auto layer would
+   steal every click from the hand and break the toggle under the overlay. No filter here —
+   it skewed hit-testing; the card already has box-shadow in card.css. */
 .pm-card-preview {
   position: fixed;
   z-index: 2500;
   pointer-events: none;
-  filter: drop-shadow(0 10px 28px rgba(0 0 0 / 70%));
   max-width: min(92vw, 340px);
+}
+
+.pm-card-preview .power-card {
+  pointer-events: none;
+}
+
+.pm-card-preview .power-card .power-card__toggle {
+  pointer-events: auto;
 }
 
 .pm-card-preview.hidden {

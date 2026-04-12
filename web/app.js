@@ -1555,10 +1555,46 @@
     // Playmat: card preview hover (hover shows full card at cursor)
     // ---------------------------------------------------------------------------
     let pmPreviewCard = null;
+    /** @type {string | null} Catalog id for the card currently shown in the match hover preview. */
+    let pmPreviewCardId = null;
+    /** Remember description vs example per catalog id while on the match screen (same idea as deck builder). */
+    const matchHandExampleMode = new Map();
+
+    /**
+     * Syncs the floating match preview when the user toggles example/description on a hand card.
+     * @param {string} cardId
+     * @param {boolean} showingExample
+     */
+    function syncMatchPreviewExample(cardId, showingExample) {
+        if (pmPreviewCardId !== cardId) return;
+        const article = pmEl.matchCardPreview?.querySelector(".power-card");
+        if (article && typeof globalThis.setPowerCardExampleMode === "function") {
+            globalThis.setPowerCardExampleMode(article, showingExample);
+        }
+    }
+
+    /**
+     * Syncs all in-hand miniatures for a catalog id when the user toggles on the large hover card.
+     * @param {string} cardId
+     * @param {boolean} showingExample
+     */
+    function syncMatchHandExample(cardId, showingExample) {
+        const root = document.getElementById("handSelf");
+        if (!root || !cardId) return;
+        root.querySelectorAll(".pm-hand-card-wrap").forEach((wrap) => {
+            if (wrap.dataset.cardId !== cardId) return;
+            const article = wrap.querySelector(".power-card");
+            if (article && typeof globalThis.setPowerCardExampleMode === "function") {
+                globalThis.setPowerCardExampleMode(article, showingExample);
+            }
+        });
+    }
 
     function showCardPreview(cardData, anchorEl) {
         if (!pmEl.matchCardPreview || !cardData) return;
         pmEl.matchCardPreview.innerHTML = "";
+        const cid = cardData.id != null ? String(cardData.id) : "";
+        pmPreviewCardId = cid || null;
         const card = createPowerCard({
             type: cardData.type,
             name: cardData.name,
@@ -1568,6 +1604,11 @@
             ignition: cardData.ignition,
             cooldown: cardData.cooldown,
             cardWidth: "260px",
+            showExampleInitially: Boolean(cid && matchHandExampleMode.get(cid) === true),
+            onExampleToggle: (showing) => {
+                if (cid) matchHandExampleMode.set(cid, showing);
+                syncMatchHandExample(cid, showing);
+            },
         });
         pmEl.matchCardPreview.appendChild(card);
         pmEl.matchCardPreview.classList.remove("hidden");
@@ -1604,6 +1645,7 @@
         pmEl.matchCardPreview.classList.add("hidden");
         pmEl.matchCardPreview.innerHTML = "";
         pmPreviewCard = null;
+        pmPreviewCardId = null;
     }
 
     function getCardDef(cardId) {
@@ -2294,9 +2336,11 @@
             const wrap = document.createElement("div");
             wrap.className = "pm-hand-card-wrap";
             wrap.dataset.handIndex = String(i);
+            wrap.dataset.cardId = entry.cardId;
 
             const def = getCardDef(entry.cardId);
             if (def) {
+                const cid = entry.cardId;
                 const card = createPowerCard({
                     type: def.type,
                     name: def.name,
@@ -2306,6 +2350,11 @@
                     ignition: def.ignition,
                     cooldown: def.cooldown,
                     cardWidth: "220px",
+                    showExampleInitially: matchHandExampleMode.get(cid) === true,
+                    onExampleToggle: (showing) => {
+                        matchHandExampleMode.set(cid, showing);
+                        syncMatchPreviewExample(cid, showing);
+                    },
                 });
                 wrap.appendChild(card);
             }
@@ -2480,14 +2529,39 @@
 
     /**
      * Pointer-based drag from hand stack to ignition (overlapping hand has pointer-events none on wraps).
+     * Hides the large hover preview when a drag starts; lifts the real card (no ghost clone);
+     * restores the card to its slot if not dropped on ignition.
      * @param {HTMLElement} stack
      */
     function wireHandStackPointerDrag(stack) {
         const dragThresholdPx = 10;
-        /** @type {{ idx: number, entry: object, startX: number, startY: number, pointerId: number, armed: boolean } | null} */
+        /** @type {{ idx: number, entry: object, startX: number, startY: number, pointerId: number, armed: boolean, cardEl?: HTMLElement, wrapEl?: HTMLElement, grabOffsetX?: number, grabOffsetY?: number } | null} */
         let pending = null;
 
+        /**
+         * Clears fixed-position drag styling on a hand card and restores the slot placeholder.
+         * @param {{ cardEl?: HTMLElement, wrapEl?: HTMLElement } | null} p
+         */
+        function resetHandDragVisual(p) {
+            if (!p?.cardEl || !p.wrapEl) return;
+            const card = p.cardEl;
+            const wrap = p.wrapEl;
+            card.style.position = "";
+            card.style.left = "";
+            card.style.top = "";
+            card.style.width = "";
+            card.style.zIndex = "";
+            card.style.margin = "";
+            card.style.pointerEvents = "";
+            card.style.transform = "";
+            card.style.transformOrigin = "";
+            wrap.classList.remove("pm-hand-card-wrap--dragging");
+            wrap.style.minHeight = "";
+            stack.style.cursor = "";
+        }
+
         function clearDragChrome() {
+            stack.style.cursor = "";
             if (pmEl.ignitionSelf) {
                 pmEl.ignitionSelf.classList.remove("pm-drop-active", "pm-drop-hover");
             }
@@ -2497,6 +2571,12 @@
 
         stack.addEventListener("pointerdown", (ev) => {
             if (ev.button !== 0) return;
+            // Let the description/example toggle receive a normal click cycle; pointer capture
+            // on the stack would steal pointerup/click from the button.
+            const t = ev.target;
+            if (t instanceof Element && t.closest(".power-card__toggle")) {
+                return;
+            }
             const snap = lastSnapshot;
             const localPID = playerEl.value;
             const self = snap?.players?.find((p) => p.playerId === localPID);
@@ -2538,6 +2618,33 @@
                 draggingHandIndex = pending.idx;
                 draggingHandEntry = pending.entry;
                 pmEl.ignitionSelf?.classList.add("pm-drop-active");
+                hideCardPreview();
+                const wraps = [...stack.querySelectorAll(".pm-hand-card-wrap")];
+                const wrapEl = wraps[pending.idx];
+                const cardEl = wrapEl?.querySelector(".power-card");
+                if (wrapEl && cardEl) {
+                    const rect = cardEl.getBoundingClientRect();
+                    const scale = rect.width / 220;
+                    pending.grabOffsetX = pending.startX - rect.left;
+                    pending.grabOffsetY = pending.startY - rect.top;
+                    pending.cardEl = cardEl;
+                    pending.wrapEl = wrapEl;
+                    wrapEl.style.minHeight = `${rect.height}px`;
+                    wrapEl.classList.add("pm-hand-card-wrap--dragging");
+                    cardEl.style.position = "fixed";
+                    cardEl.style.left = `${rect.left}px`;
+                    cardEl.style.top = `${rect.top}px`;
+                    cardEl.style.width = "220px";
+                    cardEl.style.zIndex = "3000";
+                    cardEl.style.margin = "0";
+                    cardEl.style.pointerEvents = "none";
+                    cardEl.style.transform = `scale(${scale})`;
+                    cardEl.style.transformOrigin = "top left";
+                    stack.style.cursor = "grabbing";
+                }
+            } else if (pending.cardEl) {
+                pending.cardEl.style.left = `${ev.clientX - (pending.grabOffsetX ?? 0)}px`;
+                pending.cardEl.style.top = `${ev.clientY - (pending.grabOffsetY ?? 0)}px`;
             }
             const r = pmEl.ignitionSelf?.getBoundingClientRect();
             if (r && pending.armed && pmEl.ignitionSelf) {
@@ -2555,6 +2662,7 @@
             } catch (_) {
                 /* ignore */
             }
+            let droppedOnIgnition = false;
             if (pending.armed) {
                 const r = pmEl.ignitionSelf?.getBoundingClientRect();
                 let over = false;
@@ -2564,9 +2672,15 @@
                     over = x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
                 }
                 if (over) {
-                    send("activate_card", { handIndex: pending.idx });
+                    droppedOnIgnition = true;
                 }
             }
+            if (droppedOnIgnition) {
+                send("activate_card", { handIndex: pending.idx });
+            }
+            // Always restore the hand card DOM (clear position:fixed). If we skipped this on
+            // ignition drop, a rejected/late snapshot left the card floating forever.
+            resetHandDragVisual(pending);
             clearDragChrome();
             pending = null;
         }
