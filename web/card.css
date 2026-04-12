@@ -83,6 +83,8 @@
   color: var(--card-color-title);
   line-height: 1;
   overflow: hidden;
+  /* Paint above the parchment body when subpixel/layout rounding causes overlap */
+  z-index: 3;
 }
 
 /* Clip box: hides overflow; inner scales down without clipping mid-glyph */
@@ -131,6 +133,7 @@
   left: 9.5%;
   top: 16.2%;
   width: 81%;
+  z-index: 1;
   /*
    * Extend below old 14.5% inset so the flex text area regains height taken by body gap + footer
    * padding (~30px). Clamp so the box does not run into the printed orbs on narrow layouts.

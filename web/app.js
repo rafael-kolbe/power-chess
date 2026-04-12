@@ -1,4 +1,8 @@
 (function () {
+  const PAGE = document.body.dataset.page || "lobby";
+  const isLobbyPage = PAGE === "lobby";
+  const isMatchPage = PAGE === "match";
+
   let ws = null;
   let seq = 1;
   let lastSnapshot = null;
@@ -52,6 +56,7 @@
   const reactionToggleEl = document.getElementById("reactionToggle");
   const reactionToggleLabelEl = document.getElementById("reactionToggleLabel");
   const coordsInSquaresEl = document.getElementById("coordsInSquares");
+  const coordsInSquaresTextEl = document.getElementById("coordsInSquaresText");
   const clockAEl = document.getElementById("clockA");
   const clockBEl = document.getElementById("clockB");
   const manaFillA = document.getElementById("manaFillA");
@@ -152,6 +157,7 @@
       reactions: "Reactions",
       toggleOn: "On",
       toggleOff: "Off",
+      coordsLabel: "Coords",
       coordsInSquares: "Coords in squares",
       submitMove: "Submit move",
       activateCard: "Activate card",
@@ -219,7 +225,10 @@
       lobbyDeckView: "View",
       lobbyDeckBuilder: "Deck builder",
       deckViewClose: "Close",
-      debugLogsTitle: "Debug logs"
+      debugLogsTitle: "Debug logs",
+      zoneHand: "Hand",
+      zoneDeck: "Deck",
+      drawFromDeck: "DRAW"
     },
     "pt-BR": {
       title: "POWER CHESS (Alpha)",
@@ -267,6 +276,7 @@
       reactions: "Reações",
       toggleOn: "Ligado",
       toggleOff: "Desligado",
+      coordsLabel: "Coords",
       coordsInSquares: "Coordenadas nas casas",
       submitMove: "Enviar jogada",
       activateCard: "Ativar carta",
@@ -334,7 +344,10 @@
       lobbyDeckView: "Visualizar",
       lobbyDeckBuilder: "Deck builder",
       deckViewClose: "Fechar",
-      debugLogsTitle: "Logs de debug"
+      debugLogsTitle: "Logs de debug",
+      zoneHand: "Mão",
+      zoneDeck: "Deck",
+      drawFromDeck: "Comprar"
     }
   };
   let locale = "en-US";
@@ -372,6 +385,7 @@
   }
 
   function setAuthErrorVisible(msg) {
+    if (!authErrorEl) return;
     if (!msg) {
       authErrorEl.classList.add("hidden");
       authErrorEl.textContent = "";
@@ -382,6 +396,7 @@
   }
 
   function refreshLobbyUserLabel() {
+    if (!lobbyUserLabelEl) return;
     if (!authBackendAvailable) {
       lobbyUserLabelEl.textContent = t("lobbyGuest");
       logoutBtnEl.classList.add("hidden");
@@ -398,12 +413,13 @@
   }
 
   function showAuthOverlay() {
-    if (!authBackendAvailable) return;
+    if (!authBackendAvailable || !authOverlayEl) return;
     authOverlayEl.classList.remove("hidden");
     authOverlayEl.setAttribute("aria-hidden", "false");
   }
 
   function hideAuthOverlay() {
+    if (!authOverlayEl) return;
     authOverlayEl.classList.add("hidden");
     authOverlayEl.setAttribute("aria-hidden", "true");
     setAuthErrorVisible("");
@@ -425,7 +441,7 @@
       authUser = null;
       writeStoredToken("");
       hideAuthOverlay();
-      authUnavailableHintEl.classList.add("hidden");
+      if (authUnavailableHintEl) authUnavailableHintEl.classList.add("hidden");
       refreshLobbyUserLabel();
       return;
     }
@@ -433,7 +449,7 @@
     if (r.ok) {
       authUser = await r.json();
       hideAuthOverlay();
-      authUnavailableHintEl.classList.add("hidden");
+      if (authUnavailableHintEl) authUnavailableHintEl.classList.add("hidden");
       refreshLobbyUserLabel();
       await refreshLobbyDecks();
       return;
@@ -551,12 +567,13 @@
     authUser = null;
     if (authBackendAvailable) showAuthOverlay();
     refreshLobbyUserLabel();
-    authLoginEmailEl.value = "";
-    authLoginPasswordEl.value = "";
+    if (authLoginEmailEl) authLoginEmailEl.value = "";
+    if (authLoginPasswordEl) authLoginPasswordEl.value = "";
     void refreshLobbyDecks();
   }
 
   async function refreshLobbyDecks() {
+    if (!lobbyDeckRowEl) return;
     lobbyDeckRowEl.classList.add("hidden");
     lobbyDeckAlertEl.classList.add("hidden");
     lobbyDeckHintEl.textContent = "";
@@ -664,76 +681,80 @@
   }
 
   function applyTranslations() {
-    document.getElementById("titleLabel").textContent = t("title");
-    document.getElementById("languageLabel").textContent = t("language");
-    document.getElementById("roomNameLabel").textContent = t("roomName");
-    document.getElementById("pieceTypeLabel").textContent = t("pieceType");
-    document.getElementById("privateRoomLabel").textContent = t("privateRoom");
-    document.getElementById("passwordLabel").textContent = t("password");
-    document.getElementById("lobbyHint").textContent = t("hint");
-    document.getElementById("roomListTitle").textContent = t("openRooms");
-    document.getElementById("roomSearchLabel").textContent = t("searchLabel");
-    roomSearchEl.placeholder = t("searchPlaceholder");
-    roomPasswordEl.placeholder = t("passwordPlaceholder");
-    roomListEmptyEl.textContent = t("noRooms");
-    waitingBannerEl.textContent = t("waiting");
-    document.getElementById("matchEndTitle").textContent = t("matchFinished");
-    matchEndRematchEl.textContent = t("playAgain");
-    matchEndStayEl.textContent = t("stayInRoom");
-    matchEndToLobbyEl.textContent = t("backLobby");
-    document.getElementById("disconnectBtn").textContent = t("leaveRoom");
-    document.getElementById("authTitle").textContent = t("authCreateTitle");
-    document.getElementById("authUsernameLabel").textContent = t("authUsername");
-    document.getElementById("authEmailLabel").textContent = t("authEmail");
-    document.getElementById("authPasswordLabel").textContent = t("authPassword");
-    document.getElementById("authConfirmPasswordLabel").textContent = t("authConfirmPassword");
-    document.getElementById("authDividerLabel").textContent = t("authAlreadyHave");
-    document.getElementById("authLoginEmailLabel").textContent = t("authEmail");
-    document.getElementById("authLoginPasswordLabel").textContent = t("authPassword");
-    authRegisterBtnEl.textContent = t("authRegister");
-    authLoginBtnEl.textContent = t("authLogin");
-    logoutBtnEl.textContent = t("authLogout");
-    document.getElementById("reactionPendingTitle").textContent = t("reactionPendingTitle");
-    document.getElementById("snapshotTitle").textContent = t("snapshotTitle");
-    document.getElementById("eventsTitle").textContent = t("eventsTitle");
-    const dbg = document.getElementById("debugLogsTitle");
-    if (dbg) dbg.textContent = t("debugLogsTitle");
-    document.getElementById("coordsInSquaresText").textContent = t("coordsInSquares");
+    const s = (id, key) => { const el = document.getElementById(id); if (el) el.textContent = t(key); };
+
+    s("titleLabel", "title");
+    s("languageLabel", "language");
+    s("roomNameLabel", "roomName");
+    s("pieceTypeLabel", "pieceType");
+    s("privateRoomLabel", "privateRoom");
+    s("passwordLabel", "password");
+    s("lobbyHint", "hint");
+    s("roomListTitle", "openRooms");
+    s("roomSearchLabel", "searchLabel");
+    if (roomSearchEl) roomSearchEl.placeholder = t("searchPlaceholder");
+    if (roomPasswordEl) roomPasswordEl.placeholder = t("passwordPlaceholder");
+    if (roomListEmptyEl) roomListEmptyEl.textContent = t("noRooms");
+    if (waitingBannerEl) waitingBannerEl.textContent = t("waiting");
+    s("matchEndTitle", "matchFinished");
+    if (matchEndRematchEl) matchEndRematchEl.textContent = t("playAgain");
+    if (matchEndStayEl) matchEndStayEl.textContent = t("stayInRoom");
+    if (matchEndToLobbyEl) matchEndToLobbyEl.textContent = t("backLobby");
+    s("disconnectBtn", "leaveRoom");
+    s("authTitle", "authCreateTitle");
+    s("authUsernameLabel", "authUsername");
+    s("authEmailLabel", "authEmail");
+    s("authPasswordLabel", "authPassword");
+    s("authConfirmPasswordLabel", "authConfirmPassword");
+    s("authDividerLabel", "authAlreadyHave");
+    s("authLoginEmailLabel", "authEmail");
+    s("authLoginPasswordLabel", "authPassword");
+    if (authRegisterBtnEl) authRegisterBtnEl.textContent = t("authRegister");
+    if (authLoginBtnEl) authLoginBtnEl.textContent = t("authLogin");
+    if (logoutBtnEl) logoutBtnEl.textContent = t("authLogout");
+    s("reactionPendingTitle", "reactionPendingTitle");
+    s("snapshotTitle", "snapshotTitle");
+    s("eventsTitle", "eventsTitle");
+    s("debugLogsTitle", "debugLogsTitle");
+    s("handLabelSelf", "zoneHand");
+    s("handLabelOpp", "zoneHand");
+    s("deckLabelSelf", "zoneDeck");
+    s("deckLabelOpp", "zoneDeck");
+    if (pmEl.drawBtn) pmEl.drawBtn.textContent = t("drawFromDeck");
+    updateCoordsToggleLabel();
     updateReactionToggleLabel();
-    document.getElementById("clockLabelA").textContent = t("clock");
-    document.getElementById("clockLabelB").textContent = t("clock");
-    document.getElementById("strikesLabelA").textContent = t("strikes");
-    document.getElementById("strikesLabelB").textContent = t("strikes");
-    const optRandom = pieceTypeEl.querySelector('option[value="random"]');
-    const optWhite = pieceTypeEl.querySelector('option[value="white"]');
-    const optBlack = pieceTypeEl.querySelector('option[value="black"]');
-    if (optRandom) optRandom.textContent = t("pieceTypeRandom");
-    if (optWhite) optWhite.textContent = t("pieceTypeWhite");
-    if (optBlack) optBlack.textContent = t("pieceTypeBlack");
-    const connectBtn = document.getElementById("connectBtn");
-    connectBtn.textContent = t("create");
+    s("clockLabelA", "clock");
+    s("clockLabelB", "clock");
+    s("strikesLabelA", "strikes");
+    s("strikesLabelB", "strikes");
+    if (pieceTypeEl) {
+      const optRandom = pieceTypeEl.querySelector('option[value="random"]');
+      const optWhite = pieceTypeEl.querySelector('option[value="white"]');
+      const optBlack = pieceTypeEl.querySelector('option[value="black"]');
+      if (optRandom) optRandom.textContent = t("pieceTypeRandom");
+      if (optWhite) optWhite.textContent = t("pieceTypeWhite");
+      if (optBlack) optBlack.textContent = t("pieceTypeBlack");
+    }
+    s("connectBtn", "create");
     syncPlayerRoleLabels();
-    refreshLobbyUserLabel();
-    renderRoomList(lobbyRooms);
-    if (lastSnapshot) {
-      renderInRoomLabel(lastSnapshot);
+
+    if (isLobbyPage) {
+      refreshLobbyUserLabel();
+      renderRoomList(lobbyRooms);
+      if (lastSnapshot) renderInRoomLabel(lastSnapshot);
+      if (joinedRoom && lastSnapshot) updateOpponentDisconnectOverlay(lastSnapshot);
+      updatePasswordToggleVisual();
+      refreshPrivateJoinModalTexts();
+      if (lobbyPrivatePasswordErrorEl && !lobbyPrivatePasswordErrorEl.classList.contains("hidden")) {
+        lobbyPrivatePasswordErrorEl.textContent = t("privateNeedsPassword");
+      }
+      if (cardMarqueeLabelEl) cardMarqueeLabelEl.textContent = t("cardMarqueeTitle");
+      s("lobbyDeckLabel", "lobbyDeckLabel");
+      if (lobbyDeckViewBtnEl) lobbyDeckViewBtnEl.textContent = t("lobbyDeckView");
+      if (lobbyDeckBuilderLinkEl) lobbyDeckBuilderLinkEl.textContent = t("lobbyDeckBuilder");
+      if (deckViewCloseBtnEl) deckViewCloseBtnEl.textContent = t("deckViewClose");
+      if (lobbyDeckHintEl) lobbyDeckHintEl.textContent = lobbyDeckRowEl?.classList?.contains("hidden") ? "" : t("lobbyDeckHint");
     }
-    if (joinedRoom && lastSnapshot) {
-      updateOpponentDisconnectOverlay(lastSnapshot);
-    }
-    updatePasswordToggleVisual();
-    refreshPrivateJoinModalTexts();
-    if (!lobbyPrivatePasswordErrorEl.classList.contains("hidden")) {
-      lobbyPrivatePasswordErrorEl.textContent = t("privateNeedsPassword");
-    }
-    if (cardMarqueeLabelEl) {
-      cardMarqueeLabelEl.textContent = t("cardMarqueeTitle");
-    }
-    document.getElementById("lobbyDeckLabel").textContent = t("lobbyDeckLabel");
-    lobbyDeckViewBtnEl.textContent = t("lobbyDeckView");
-    lobbyDeckBuilderLinkEl.textContent = t("lobbyDeckBuilder");
-    deckViewCloseBtnEl.textContent = t("deckViewClose");
-    lobbyDeckHintEl.textContent = lobbyDeckRowEl.classList.contains("hidden") ? "" : t("lobbyDeckHint");
   }
 
   /**
@@ -867,6 +888,11 @@
     reactionToggleLabelEl.textContent = `${t("reactions")}: ${reactionToggleEl.checked ? t("toggleOn") : t("toggleOff")}`;
   }
 
+  function updateCoordsToggleLabel() {
+    if (!coordsInSquaresEl || !coordsInSquaresTextEl) return;
+    coordsInSquaresTextEl.textContent = `${t("coordsLabel")}: ${coordsInSquaresEl.checked ? t("toggleOn") : t("toggleOff")}`;
+  }
+
   /**
    * @param {string} roleKey i18n key: youLabel or opponentLabel
    * @param {string} [name] server snapshot display name for that seat
@@ -883,9 +909,11 @@
    */
   function syncPlayerRoleLabels(snapshot) {
     const snap = snapshot !== undefined ? snapshot : lastSnapshot;
+    if (!playerEl) return;
     const isA = playerEl.value === "A";
     const top = document.getElementById("playerBLabel");
     const bottom = document.getElementById("playerALabel");
+    if (!top || !bottom) return;
     const nameA = snap?.playerAName ?? "";
     const nameB = snap?.playerBName ?? "";
     if (isA) {
@@ -909,7 +937,7 @@
 
   function setLocale(nextLocale) {
     locale = i18n[nextLocale] ? nextLocale : "en-US";
-    localeSelectEl.value = locale;
+    if (localeSelectEl) localeSelectEl.value = locale;
     try {
       localStorage.setItem("powerChessLocale", locale);
     } catch (_) {
@@ -920,16 +948,19 @@
   }
 
   function hideLobbyPrivatePasswordError() {
+    if (!lobbyPrivatePasswordErrorEl) return;
     lobbyPrivatePasswordErrorEl.textContent = "";
     lobbyPrivatePasswordErrorEl.classList.add("hidden");
   }
 
   function showLobbyPrivatePasswordError() {
+    if (!lobbyPrivatePasswordErrorEl) return;
     lobbyPrivatePasswordErrorEl.textContent = t("privateNeedsPassword");
     lobbyPrivatePasswordErrorEl.classList.remove("hidden");
   }
 
   function updatePrivatePasswordVisibility() {
+    if (!roomPasswordFieldEl || !privateRoomEl) return;
     roomPasswordFieldEl.classList.toggle("hidden", !privateRoomEl.checked);
     if (!privateRoomEl.checked) {
       hideLobbyPrivatePasswordError();
@@ -937,6 +968,7 @@
   }
 
   function updatePasswordToggleVisual() {
+    if (!roomPasswordEl || !roomPasswordToggleEl) return;
     const showing = roomPasswordEl.type === "text";
     roomPasswordToggleEl.textContent = showing ? "🙈" : "👁";
     roomPasswordToggleEl.setAttribute("aria-label", showing ? t("hide") : t("show"));
@@ -984,9 +1016,34 @@
   }
 
   async function connectToRoom(roomId, pieceTypeOverride, roomNameOverride, privateOverride, passwordOverride) {
-    if (readStoredToken() && authBackendAvailable) {
+    if (isLobbyPage && readStoredToken() && authBackendAvailable) {
       if (!(await ensureHasDeckForMatch())) return;
     }
+    const pieceType = pieceTypeOverride || (pieceTypeEl ? pieceTypeEl.value : "random") || "random";
+    const roomName = (roomNameOverride || (roomNameEl ? roomNameEl.value : "Let's Play!") || "Let's Play!").trim() || "Let's Play!";
+    const creatingNewRoom = !String(roomId || "").trim();
+    const isPrivate = typeof privateOverride === "boolean" ? privateOverride : (creatingNewRoom ? (privateRoomEl ? privateRoomEl.checked : false) : false);
+    let password = "";
+    if (typeof passwordOverride === "string") {
+      password = passwordOverride;
+    } else if (creatingNewRoom && roomPasswordEl) {
+      password = roomPasswordEl.value;
+    }
+    if (isLobbyPage && isPrivate && !String(password || "").trim()) {
+      showLobbyPrivatePasswordError();
+      if (roomPasswordEl) roomPasswordEl.focus();
+      return;
+    }
+    const playerId = desiredPlayerForPieceType(pieceType);
+
+    if (isLobbyPage) {
+      sessionStorage.setItem("matchParams", JSON.stringify({
+        roomId: roomId || "", roomName, pieceType, playerId, isPrivate, password
+      }));
+      location.href = "/match.html";
+      return;
+    }
+
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.close();
     }
@@ -994,23 +1051,7 @@
     gameStarted = false;
     prevMatchEnded = false;
     hideMatchEndOverlay();
-    hideLobbyPrivatePasswordError();
-    const pieceType = pieceTypeOverride || pieceTypeEl.value || "random";
-    const roomName = (roomNameOverride || roomNameEl.value || "Let's Play!").trim() || "Let's Play!";
-    const creatingNewRoom = !String(roomId || "").trim();
-    const isPrivate = typeof privateOverride === "boolean" ? privateOverride : (creatingNewRoom ? privateRoomEl.checked : false);
-    let password = "";
-    if (typeof passwordOverride === "string") {
-      password = passwordOverride;
-    } else if (creatingNewRoom) {
-      password = roomPasswordEl.value;
-    }
-    if (isPrivate && !String(password || "").trim()) {
-      showLobbyPrivatePasswordError();
-      roomPasswordEl.focus();
-      return;
-    }
-    playerEl.value = desiredPlayerForPieceType(pieceType);
+    playerEl.value = playerId;
     pendingJoinAttempt = {
       roomId: roomId || "",
       roomName,
@@ -1049,15 +1090,14 @@
 
         if (!joinedRoom) {
           joinedRoom = true;
-          setLobbyFooterVisible(false);
-          lobbyScreenEl.classList.add("hidden");
-          gameShellEl.classList.remove("hidden");
-          playerEl.disabled = true;
-          roomNameEl.disabled = true;
-          roomSearchEl.disabled = true;
-          privateRoomEl.disabled = true;
-          roomPasswordEl.disabled = true;
-          pieceTypeEl.disabled = true;
+          if (lobbyScreenEl) { setLobbyFooterVisible(false); lobbyScreenEl.classList.add("hidden"); }
+          if (gameShellEl) gameShellEl.classList.remove("hidden");
+          if (playerEl) playerEl.disabled = true;
+          if (roomNameEl) roomNameEl.disabled = true;
+          if (roomSearchEl) roomSearchEl.disabled = true;
+          if (privateRoomEl) privateRoomEl.disabled = true;
+          if (roomPasswordEl) roomPasswordEl.disabled = true;
+          if (pieceTypeEl) pieceTypeEl.disabled = true;
           stopRoomListPolling();
           syncBoardPerspectiveClass();
         }
@@ -1073,7 +1113,7 @@
         updateOpponentDisconnectOverlay(msg.payload);
         maybeShowMatchEndModal(msg.payload);
 
-        snapshotEl.textContent = JSON.stringify(msg.payload, null, 2);
+        if (snapshotEl) snapshotEl.textContent = JSON.stringify(msg.payload, null, 2);
         renderBoard(msg.payload.board);
         renderStatus(msg.payload);
         renderPlayerHud(msg.payload);
@@ -1358,6 +1398,7 @@
   }
 
   function setBar(fillEl, labelEl, cur, max) {
+    if (!fillEl || !labelEl) return;
     const m = Math.max(1, max || 1);
     const pct = Math.min(100, Math.round((100 * (cur || 0)) / m));
     fillEl.style.width = `${pct}%`;
@@ -1397,10 +1438,10 @@
     pileViewGrid:      document.getElementById("pileViewGrid"),
     pileViewTitle:     document.getElementById("pileViewTitle"),
     pileViewCloseBtn:  document.getElementById("pileViewCloseBtn"),
-    viewBanishSelf:    document.getElementById("viewBanishSelf"),
-    viewBanishOpp:     document.getElementById("viewBanishOpp"),
-    viewCooldownSelf:  document.getElementById("viewCooldownSelf"),
-    viewCooldownOpp:   document.getElementById("viewCooldownOpp"),
+    banishSelf:        document.getElementById("banishSelf"),
+    banishOpp:         document.getElementById("banishOpp"),
+    cooldownSelf:      document.getElementById("cooldownSelf"),
+    cooldownOpp:       document.getElementById("cooldownOpp"),
     ignitionSelf:      document.getElementById("ignitionSelf"),
     ignitionOpp:       document.getElementById("ignitionOpp"),
   };
@@ -1421,25 +1462,36 @@
       mana: cardData.manaCost ?? cardData.mana,
       ignition: cardData.ignition,
       cooldown: cardData.cooldown,
-      cardWidth: "220px"
+      cardWidth: "260px"
     });
     pmEl.matchCardPreview.appendChild(card);
     pmEl.matchCardPreview.classList.remove("hidden");
     pmPreviewCard = anchorEl;
-    positionCardPreview(anchorEl);
+    // Double rAF so the card renders and offsetWidth/offsetHeight are available.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => positionCardPreview(anchorEl));
+    });
   }
 
   function positionCardPreview(anchorEl) {
     if (!pmEl.matchCardPreview || !anchorEl) return;
+    const wrap = pmEl.matchCardPreview;
+    const pad = 10;
+    const w = wrap.offsetWidth;
+    const h = wrap.offsetHeight;
     const rect = anchorEl.getBoundingClientRect();
-    const pw = 220;
-    const ph = pw * 965 / 639;
-    let left = rect.right + 10;
-    if (left + pw > window.innerWidth - 8) left = rect.left - pw - 10;
-    let top = rect.top;
-    if (top + ph > window.innerHeight - 8) top = window.innerHeight - ph - 8;
-    pmEl.matchCardPreview.style.left = `${left}px`;
-    pmEl.matchCardPreview.style.top = `${top}px`;
+    // Center horizontally over the anchor; prefer above, fall back to below.
+    let left = rect.left + rect.width / 2 - w / 2;
+    let top = rect.top - h - 12;
+    left = Math.max(pad, Math.min(left, window.innerWidth - w - pad));
+    if (top < pad) {
+      top = rect.bottom + 10;
+    }
+    if (top + h > window.innerHeight - pad) {
+      top = Math.max(pad, window.innerHeight - h - pad);
+    }
+    wrap.style.left = `${Math.round(left)}px`;
+    wrap.style.top = `${Math.round(top)}px`;
   }
 
   function hideCardPreview() {
@@ -1642,8 +1694,8 @@
   function animateCardDraw(fromZoneEl, toHandRowEl, isFaceDown, sleeve) {
     const fr = zoneRect(fromZoneEl);
     if (!fr || !toHandRowEl) return;
-    const slots = toHandRowEl.querySelectorAll(".pm-hand-slot:not(.pm-hand-slot--empty)");
-    const lastSlot = slots[slots.length - 1] || toHandRowEl;
+    const wraps = toHandRowEl.querySelectorAll(".pm-hand-card-wrap");
+    const lastSlot = wraps[wraps.length - 1] || toHandRowEl;
     const tr = zoneRect(lastSlot);
     if (!tr) return;
     flyCard(fr, tr, null, sleeve || "blue", 380);
@@ -1734,11 +1786,12 @@
       const card = createPowerCard({
         type: def.type, name: def.name, description: def.description,
         example: def.example, mana: def.manaCost ?? top.manaCost,
-        ignition: def.ignition, cooldown: def.cooldown, cardWidth: "86px"
+        ignition: def.ignition, cooldown: def.cooldown, cardWidth: "220px"
       });
       card.dataset.cardId = top.cardId;
-      attachCardHover(card, { ...def, manaCost: def.mana });
       container.appendChild(card);
+      // Hover on container: card has pointer-events:none due to CSS scale transform.
+      attachCardHover(container, { ...def, manaCost: def.mana });
     } else {
       const fb = document.createElement("div");
       fb.className = "pm-sleeve-card";
@@ -1778,10 +1831,11 @@
       const card = createPowerCard({
         type: def.type, name: def.name, description: def.description,
         example: def.example, mana: def.mana,
-        ignition: def.ignition, cooldown: def.cooldown, cardWidth: "86px"
+        ignition: def.ignition, cooldown: def.cooldown, cardWidth: "220px"
       });
-      attachCardHover(card, { ...def, manaCost: def.mana });
       cardEl.appendChild(card);
+      // Hover on container: card has pointer-events:none due to CSS scale transform.
+      attachCardHover(cardEl, { ...def, manaCost: def.mana });
     }
   }
 
@@ -1827,60 +1881,72 @@
     renderOppHand(pmEl.handOpp, opp);
   }
 
+  /**
+   * Returns the inner node where hand cards are mounted (preserves the Hand label).
+   * @param {HTMLElement} container
+   * @returns {HTMLElement | null}
+   */
+  function getHandCardsRoot(container) {
+    if (!container) return null;
+    let root = container.querySelector(".pm-hand-cards");
+    if (!root) {
+      root = document.createElement("div");
+      root.className = "pm-hand-cards";
+      container.appendChild(root);
+    }
+    return root;
+  }
+
   function renderOwnHand(container, self) {
     if (!container) return;
-    container.innerHTML = "";
-    const slots = 5;
+    const cardsRoot = getHandCardsRoot(container);
+    if (!cardsRoot) return;
+    cardsRoot.innerHTML = "";
     const hand = self.hand || [];
     const snap = lastSnapshot;
     const isMyTurn = snap && snap.turnPlayer === playerEl.value;
     const ignitionOccupied = snap && snap.ignitionOn;
-    for (let i = 0; i < slots; i++) {
-      const slot = document.createElement("div");
-      const hasCard = i < hand.length;
-      slot.className = "pm-hand-slot" + (hasCard ? "" : " pm-hand-slot--empty");
-      slot.dataset.handIndex = i;
-      if (hasCard) {
-        const entry = hand[i];
-        const def = getCardDef(entry.cardId);
-        const inner = document.createElement("div");
-        inner.className = "pm-hand-slot__card";
-        if (def) {
-          const card = createPowerCard({
-            type: def.type, name: def.name, description: def.description,
-            example: def.example, mana: def.mana,
-            ignition: def.ignition, cooldown: def.cooldown, cardWidth: "86px"
-          });
-          inner.appendChild(card);
-          attachCardHover(slot, { ...def, manaCost: def.mana });
-        }
-        slot.appendChild(inner);
-        // Only mark as draggable when it could be activated.
-        const canActivate = isMyTurn && (!ignitionOccupied || entry.cardId === "save-it-for-later");
-        slot.setAttribute("draggable", canActivate ? "true" : "false");
-        slot.classList.toggle("pm-hand-slot--inactive", !canActivate);
-        slot.addEventListener("dragstart", (ev) => onHandCardDragStart(ev, i, entry));
+    for (let i = 0; i < hand.length; i++) {
+      const entry = hand[i];
+      const wrap = document.createElement("div");
+      wrap.className = "pm-hand-card-wrap";
+      wrap.dataset.handIndex = String(i);
+
+      const def = getCardDef(entry.cardId);
+      if (def) {
+        const card = createPowerCard({
+          type: def.type, name: def.name, description: def.description,
+          example: def.example, mana: def.mana,
+          ignition: def.ignition, cooldown: def.cooldown, cardWidth: "220px"
+        });
+        wrap.appendChild(card);
+        attachCardHover(wrap, { ...def, manaCost: def.mana });
       }
-      container.appendChild(slot);
+      const canActivate = isMyTurn && (!ignitionOccupied || entry.cardId === "save-it-for-later");
+      wrap.setAttribute("draggable", canActivate ? "true" : "false");
+      wrap.classList.toggle("pm-hand-card-wrap--inactive", !canActivate);
+      wrap.addEventListener("dragstart", (ev) => onHandCardDragStart(ev, i, entry));
+      cardsRoot.appendChild(wrap);
     }
   }
 
   function renderOppHand(container, opp) {
     if (!container) return;
-    container.innerHTML = "";
+    const cardsRoot = getHandCardsRoot(container);
+    if (!cardsRoot) return;
+    cardsRoot.innerHTML = "";
     const count = opp.handCount || 0;
     const sleeve = opp.sleeveColor || "blue";
     for (let i = 0; i < count; i++) {
-      const slot = document.createElement("div");
-      slot.className = "pm-hand-slot";
-      const inner = document.createElement("div");
-      inner.className = "pm-hand-slot__card";
+      const wrap = document.createElement("div");
+      wrap.className = "pm-hand-card-wrap";
+
       const face = document.createElement("div");
       face.className = "pm-sleeve-card";
       face.style.backgroundImage = `url('${sleeveUrl(sleeve)}')`;
-      inner.appendChild(face);
-      slot.appendChild(inner);
-      container.appendChild(slot);
+      wrap.appendChild(face);
+
+      cardsRoot.appendChild(wrap);
     }
   }
 
@@ -1977,7 +2043,7 @@
 
   // Prevent cards from being dropped anywhere outside the game shell.
   document.addEventListener("dragover", (ev) => {
-    if (!gameShellEl.contains(ev.target) && draggingHandIndex !== null) {
+    if (gameShellEl && !gameShellEl.contains(ev.target) && draggingHandIndex !== null) {
       ev.dataTransfer.dropEffect = "none";
     }
   });
@@ -2036,30 +2102,30 @@
     });
   }
 
-  // VIEW buttons
-  if (pmEl.viewBanishSelf) {
-    pmEl.viewBanishSelf.addEventListener("click", () => {
+  // Zone click → open pile modal
+  if (pmEl.banishSelf) {
+    pmEl.banishSelf.addEventListener("click", () => {
       const snap = lastSnapshot;
       const self = snap?.players?.find((p) => p.playerId === playerEl.value);
       openPileView("Banished — Your pile", self?.banishedCards || []);
     });
   }
-  if (pmEl.viewBanishOpp) {
-    pmEl.viewBanishOpp.addEventListener("click", () => {
+  if (pmEl.banishOpp) {
+    pmEl.banishOpp.addEventListener("click", () => {
       const snap = lastSnapshot;
       const opp = snap?.players?.find((p) => p.playerId !== playerEl.value);
       openPileView("Banished — Opponent", opp?.banishedCards || []);
     });
   }
-  if (pmEl.viewCooldownSelf) {
-    pmEl.viewCooldownSelf.addEventListener("click", () => {
+  if (pmEl.cooldownSelf) {
+    pmEl.cooldownSelf.addEventListener("click", () => {
       const snap = lastSnapshot;
       const self = snap?.players?.find((p) => p.playerId === playerEl.value);
       openPileView("Cooldown — Your pile", self?.cooldownPreview || [], null, true);
     });
   }
-  if (pmEl.viewCooldownOpp) {
-    pmEl.viewCooldownOpp.addEventListener("click", () => {
+  if (pmEl.cooldownOpp) {
+    pmEl.cooldownOpp.addEventListener("click", () => {
       const snap = lastSnapshot;
       const opp = snap?.players?.find((p) => p.playerId !== playerEl.value);
       openPileView("Cooldown — Opponent", opp?.cooldownPreview || [], null, true);
@@ -2083,11 +2149,11 @@
     const players = snapshot?.players || [];
     for (const p of players) {
       if (p.playerId === "A") {
-        strikesAEl.textContent = String(p.strikes ?? 0);
+        if (strikesAEl) strikesAEl.textContent = String(p.strikes ?? 0);
         setBar(manaFillA, manaLabelA, p.mana, p.maxMana);
         setBar(energizedFillA, energizedLabelA, p.energizedMana, p.maxEnergized);
       } else if (p.playerId === "B") {
-        strikesBEl.textContent = String(p.strikes ?? 0);
+        if (strikesBEl) strikesBEl.textContent = String(p.strikes ?? 0);
         setBar(manaFillB, manaLabelB, p.mana, p.maxMana);
         setBar(energizedFillB, energizedLabelB, p.energizedMana, p.maxEnergized);
       }
@@ -2099,6 +2165,7 @@
   }
 
   function renderTurnClocks() {
+    if (!clockAEl || !clockBEl) return;
     const snap = lastSnapshot;
     if (!clocksActive(snap)) {
       clockAEl.textContent = "--";
@@ -2122,7 +2189,7 @@
   }
 
   function handleAutoSkipReaction(snapshot) {
-    if (reactionToggleEl.checked) return;
+    if (!reactionToggleEl || reactionToggleEl.checked) return;
     const rw = snapshot?.reactionWindow;
     if (!rw?.open) return;
     const localPlayer = playerEl.value;
@@ -2139,6 +2206,7 @@
   }
 
   function logEvent(obj) {
+    if (!eventsEl) return;
     const line = JSON.stringify(obj);
     eventsEl.textContent = `${line}\n${eventsEl.textContent}`.slice(0, 8000);
   }
@@ -2156,6 +2224,7 @@
   }
 
   function renderBoard(board) {
+    if (!boardFrameEl) return;
     syncBoardPerspectiveClass();
     boardFrameEl.innerHTML = "";
     boardFrameEl.classList.toggle("show-inner-coords", coordsInSquaresEl && coordsInSquaresEl.checked);
@@ -2292,6 +2361,7 @@
   }
 
   function renderStatus(snapshot) {
+    if (!statusEl) return;
     const rw = snapshot?.reactionWindow || {};
     const pc = snapshot?.pendingCapture || {};
     statusEl.textContent = JSON.stringify(
@@ -2359,13 +2429,12 @@
   }
 
   function hideMatchEndOverlay() {
+    if (!matchEndOverlayEl) return;
     matchEndOverlayEl.classList.add("hidden");
     matchEndOverlayEl.setAttribute("aria-hidden", "true");
-    matchEndRematchEl.classList.add("hidden");
-    matchEndRematchEl.disabled = false;
-    matchEndStayEl.classList.add("hidden");
-    matchEndCountdownEl.classList.add("hidden");
-    matchEndCountdownEl.textContent = "";
+    if (matchEndRematchEl) { matchEndRematchEl.classList.add("hidden"); matchEndRematchEl.disabled = false; }
+    if (matchEndStayEl) matchEndStayEl.classList.add("hidden");
+    if (matchEndCountdownEl) { matchEndCountdownEl.classList.add("hidden"); matchEndCountdownEl.textContent = ""; }
     if (matchCountdownTimer) {
       clearInterval(matchCountdownTimer);
       matchCountdownTimer = null;
@@ -2373,8 +2442,10 @@
   }
 
   function showMatchEndOverlay(title, bodyText) {
-    document.getElementById("matchEndTitle").textContent = title;
-    matchEndBodyEl.textContent = bodyText;
+    if (!matchEndOverlayEl) return;
+    const titleEl = document.getElementById("matchEndTitle");
+    if (titleEl) titleEl.textContent = title;
+    if (matchEndBodyEl) matchEndBodyEl.textContent = bodyText;
     matchEndOverlayEl.classList.remove("hidden");
     matchEndOverlayEl.setAttribute("aria-hidden", "false");
   }
@@ -2446,13 +2517,14 @@
     if (!prevMatchEnded) {
       hideOpponentDisconnectOverlay();
       showMatchEndOverlay(t("matchFinished"), buildPostMatchModalMessage(payload));
-    } else if (!matchEndOverlayEl.classList.contains("hidden")) {
-      matchEndBodyEl.textContent = buildPostMatchModalMessage(payload);
+    } else if (matchEndOverlayEl && !matchEndOverlayEl.classList.contains("hidden")) {
+      if (matchEndBodyEl) matchEndBodyEl.textContent = buildPostMatchModalMessage(payload);
     }
     prevMatchEnded = true;
   }
 
   function updatePostMatchActionControls(payload) {
+    if (!matchEndRematchEl || !matchEndStayEl) return;
     const connected = (payload.connectedA || 0) + (payload.connectedB || 0);
     const ended = payload.matchEnded === true;
     const localVotedRematch = localRematchVote(payload);
@@ -2467,6 +2539,7 @@
       clearInterval(matchCountdownTimer);
       matchCountdownTimer = null;
     }
+    if (!matchEndCountdownEl) return;
     function tick() {
       if (!payload?.matchEnded) {
         matchEndCountdownEl.classList.add("hidden");
@@ -2499,12 +2572,13 @@
     const started = payload.gameStarted === true;
     const ended = payload.matchEnded === true;
     gameStarted = started;
-    waitingBannerEl.classList.toggle("hidden", started || ended);
-    boardAreaEl.classList.remove("hidden");
+    if (waitingBannerEl) waitingBannerEl.classList.toggle("hidden", started || ended);
+    if (boardAreaEl) boardAreaEl.classList.remove("hidden");
     renderInRoomLabel(payload);
   }
 
   function renderInRoomLabel(payload) {
+    if (!inRoomLabelEl) return;
     const roomName = payload.roomName || "Let's Play!";
     const roomId = payload.roomId || "";
     const privacy = payload.roomPrivate ? t("private") : t("public");
@@ -2543,25 +2617,29 @@
   }
 
   function resetToLobbyUi() {
+    if (isMatchPage) {
+      location.href = "/";
+      return;
+    }
     joinedRoom = false;
     gameStarted = false;
     lastSnapshot = null;
     pmPrevSnapshot = null;
     setLobbyFooterVisible(true);
-    lobbyScreenEl.classList.remove("hidden");
-    gameShellEl.classList.add("hidden");
-    playerEl.disabled = false;
-    roomNameEl.disabled = false;
-    roomSearchEl.disabled = false;
-    privateRoomEl.disabled = false;
-    roomPasswordEl.disabled = false;
-    pieceTypeEl.disabled = false;
-    waitingBannerEl.classList.add("hidden");
-    boardAreaEl.classList.remove("hidden");
+    if (lobbyScreenEl) lobbyScreenEl.classList.remove("hidden");
+    if (gameShellEl) gameShellEl.classList.add("hidden");
+    if (playerEl) playerEl.disabled = false;
+    if (roomNameEl) roomNameEl.disabled = false;
+    if (roomSearchEl) roomSearchEl.disabled = false;
+    if (privateRoomEl) privateRoomEl.disabled = false;
+    if (roomPasswordEl) roomPasswordEl.disabled = false;
+    if (pieceTypeEl) pieceTypeEl.disabled = false;
+    if (waitingBannerEl) waitingBannerEl.classList.add("hidden");
+    if (boardAreaEl) boardAreaEl.classList.remove("hidden");
     renderBoard([]);
     renderStatus({});
-    snapshotEl.textContent = "";
-    inRoomLabelEl.textContent = "";
+    if (snapshotEl) snapshotEl.textContent = "";
+    if (inRoomLabelEl) inRoomLabelEl.textContent = "";
     currentTurn = "A";
     turnSeconds = 30;
     turnDeadline = Date.now() + turnSeconds * 1000;
@@ -2655,108 +2733,106 @@
     }
   }
 
-  document.getElementById("connectBtn").addEventListener("click", () => {
-    void connectToRoom("", pieceTypeEl.value, roomNameEl.value);
-  });
-
-  lobbyDeckSelectEl.addEventListener("change", async () => {
-    const id = Number(lobbyDeckSelectEl.value, 10);
-    if (!id || !readStoredToken()) return;
-    try {
-      await fetch("/api/me/lobby-deck", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", ...authFetchHeaders() },
-        body: JSON.stringify({ deckId: id })
-      });
-    } catch (_) {
-      /* ignore */
-    }
-  });
-
-  lobbyDeckViewBtnEl.addEventListener("click", () => {
-    void openDeckViewModal();
-  });
-  deckViewCloseBtnEl.addEventListener("click", () => closeDeckViewModal());
-  deckViewModalEl.addEventListener("click", (ev) => {
-    if (ev.target === deckViewModalEl) closeDeckViewModal();
-  });
+  // -----------------------------------------------------------------------
+  // Lobby-only event listeners
+  // -----------------------------------------------------------------------
+  if (isLobbyPage) {
+    document.getElementById("connectBtn").addEventListener("click", () => {
+      void connectToRoom("", pieceTypeEl.value, roomNameEl.value);
+    });
+    lobbyDeckSelectEl.addEventListener("change", async () => {
+      const id = Number(lobbyDeckSelectEl.value, 10);
+      if (!id || !readStoredToken()) return;
+      try {
+        await fetch("/api/me/lobby-deck", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", ...authFetchHeaders() },
+          body: JSON.stringify({ deckId: id })
+        });
+      } catch (_) { /* ignore */ }
+    });
+    lobbyDeckViewBtnEl.addEventListener("click", () => void openDeckViewModal());
+    deckViewCloseBtnEl.addEventListener("click", () => closeDeckViewModal());
+    deckViewModalEl.addEventListener("click", (ev) => { if (ev.target === deckViewModalEl) closeDeckViewModal(); });
+    authRegisterBtnEl.addEventListener("click", () => void submitRegister());
+    authLoginBtnEl.addEventListener("click", () => void submitLogin());
+    logoutBtnEl.addEventListener("click", () => logoutSession());
+    localeSelectEl.addEventListener("change", () => setLocale(localeSelectEl.value));
+    privateRoomEl.addEventListener("change", updatePrivatePasswordVisibility);
+    roomPasswordEl.addEventListener("input", () => hideLobbyPrivatePasswordError());
+    roomPasswordToggleEl.addEventListener("click", () => {
+      roomPasswordEl.type = roomPasswordEl.type === "password" ? "text" : "password";
+      updatePasswordToggleVisual();
+    });
+    roomNameEl.addEventListener("focus", () => roomNameEl.select());
+    roomNameEl.addEventListener("pointerdown", () => {
+      if (document.activeElement !== roomNameEl) setTimeout(() => roomNameEl.select(), 0);
+    });
+    roomSearchEl.addEventListener("input", () => applyRoomSearch());
+  }
 
   function returnToLobbyAfterMatch() {
     hideMatchEndOverlay();
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.close();
     }
+    if (isMatchPage) {
+      location.href = "/";
+    }
   }
 
-  matchEndStayEl.addEventListener("click", () => {
-    send("stay_in_room", {});
-    hideMatchEndOverlay();
-  });
-  matchEndRematchEl.addEventListener("click", () => {
-    send("request_rematch", {});
-    matchEndRematchEl.disabled = true;
-  });
-  matchEndToLobbyEl.addEventListener("click", () => returnToLobbyAfterMatch());
-  matchEndOverlayEl.addEventListener("click", (ev) => {
-    if (ev.target === matchEndOverlayEl) hideMatchEndOverlay();
-  });
+  // -----------------------------------------------------------------------
+  // Match-only event listeners
+  // -----------------------------------------------------------------------
+  if (isMatchPage) {
+    matchEndStayEl.addEventListener("click", () => { send("stay_in_room", {}); hideMatchEndOverlay(); });
+    matchEndRematchEl.addEventListener("click", () => { send("request_rematch", {}); matchEndRematchEl.disabled = true; });
+    matchEndToLobbyEl.addEventListener("click", () => returnToLobbyAfterMatch());
+    matchEndOverlayEl.addEventListener("click", (ev) => { if (ev.target === matchEndOverlayEl) hideMatchEndOverlay(); });
+    document.getElementById("disconnectBtn").addEventListener("click", () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        send("leave_match", {});
+        setTimeout(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.close(); }, 250);
+      }
+    });
+    reactionToggleEl.addEventListener("change", updateReactionToggleLabel);
+    coordsInSquaresEl.addEventListener("change", () => { updateCoordsToggleLabel(); if (lastSnapshot?.board) renderBoard(lastSnapshot.board); });
+    playerEl.addEventListener("change", () => { syncPlayerRoleLabels(); if (lastSnapshot?.board) renderBoard(lastSnapshot.board); });
+  }
 
-  document.getElementById("disconnectBtn").addEventListener("click", () => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      send("leave_match", {});
-      setTimeout(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.close();
-        }
-      }, 250);
-    }
-  });
-
-  authRegisterBtnEl.addEventListener("click", () => {
-    void submitRegister();
-  });
-  authLoginBtnEl.addEventListener("click", () => {
-    void submitLogin();
-  });
-  logoutBtnEl.addEventListener("click", () => logoutSession());
-
-  localeSelectEl.addEventListener("change", () => setLocale(localeSelectEl.value));
-  privateRoomEl.addEventListener("change", updatePrivatePasswordVisibility);
-  roomPasswordEl.addEventListener("input", () => {
-    hideLobbyPrivatePasswordError();
-  });
-  roomPasswordToggleEl.addEventListener("click", () => {
-    roomPasswordEl.type = roomPasswordEl.type === "password" ? "text" : "password";
-    updatePasswordToggleVisual();
-  });
-  roomNameEl.addEventListener("focus", () => roomNameEl.select());
-  roomNameEl.addEventListener("pointerdown", () => {
-    if (document.activeElement !== roomNameEl) {
-      setTimeout(() => roomNameEl.select(), 0);
-    }
-  });
-  roomSearchEl.addEventListener("input", () => applyRoomSearch());
-  reactionToggleEl.addEventListener("change", updateReactionToggleLabel);
-  coordsInSquaresEl.addEventListener("change", () => {
-    if (lastSnapshot?.board) renderBoard(lastSnapshot.board);
-  });
-  playerEl.addEventListener("change", () => {
-    syncPlayerRoleLabels();
-    if (lastSnapshot?.board) renderBoard(lastSnapshot.board);
-  });
-  globalThis.setInterval(renderTurnClocks, 250);
-  renderTurnClocks();
-  renderBoard([]);
-  renderStatus({});
-  updatePrivatePasswordVisibility();
-  updatePasswordToggleVisual();
+  // -----------------------------------------------------------------------
+  // Initialization (page-specific)
+  // -----------------------------------------------------------------------
   let savedLocale = "en-US";
-  try {
-    savedLocale = localStorage.getItem("powerChessLocale") || "en-US";
-  } catch (_) {
-    savedLocale = "en-US";
-  }
+  try { savedLocale = localStorage.getItem("powerChessLocale") || "en-US"; } catch (_) { savedLocale = "en-US"; }
   setLocale(savedLocale);
-  void bootstrapAuthSession();
-  startRoomListPolling();
+
+  if (isLobbyPage) {
+    updatePrivatePasswordVisibility();
+    updatePasswordToggleVisual();
+    renderBoard([]);
+    renderStatus({});
+    void bootstrapAuthSession();
+    startRoomListPolling();
+  }
+
+  if (isMatchPage) {
+    globalThis.setInterval(renderTurnClocks, 250);
+    renderTurnClocks();
+    renderBoard([]);
+    renderStatus({});
+    // Hide card hover preview on scroll or resize (same as deck builder).
+    document.addEventListener("scroll", () => hideCardPreview(), true);
+    window.addEventListener("resize", () => hideCardPreview());
+    const raw = sessionStorage.getItem("matchParams");
+    if (raw) {
+      const p = JSON.parse(raw);
+      sessionStorage.removeItem("matchParams");
+      playerEl.value = p.playerId || "A";
+      syncBoardPerspectiveClass();
+      void connectToRoom(p.roomId, p.pieceType, p.roomName, p.isPrivate, p.password);
+    } else {
+      location.href = "/";
+    }
+  }
 })();
