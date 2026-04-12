@@ -1,5 +1,16 @@
 const { test, expect } = require("@playwright/test");
 
+/**
+ * Helper: join pageB to an existing room by clicking its entry in the room list.
+ * Uses a longer timeout than the default since room list polling fires every 4 s.
+ */
+async function joinViaRoomList(pageB, roomName) {
+  const roomEntry = pageB.locator("#roomList .room-list-item", { hasText: roomName }).first();
+  await expect(roomEntry).toBeVisible({ timeout: 15000 });
+  await roomEntry.click();
+  await expect(pageB.locator("#gameShell")).toBeVisible({ timeout: 10000 });
+}
+
 test("playmat zones are present in the DOM when entering a room", async ({ browser }) => {
   const pageA = await browser.newPage();
   const pageB = await browser.newPage();
@@ -12,10 +23,7 @@ test("playmat zones are present in the DOM when entering a room", async ({ brows
   await pageA.click("#connectBtn");
   await expect(pageA.locator("#gameShell")).toBeVisible();
 
-  const roomEntry = pageB.locator("#roomList .room-list-item", { hasText: roomName }).first();
-  await expect(roomEntry).toBeVisible({ timeout: 15000 });
-  await roomEntry.click();
-  await expect(pageB.locator("#gameShell")).toBeVisible();
+  await joinViaRoomList(pageB, roomName);
 
   // Both players should see the playmat zone elements.
   for (const page of [pageA, pageB]) {
@@ -50,10 +58,7 @@ test("DRAW button is disabled when it is not the player's turn", async ({ browse
   await pageA.click("#connectBtn");
   await expect(pageA.locator("#gameShell")).toBeVisible();
 
-  const roomEntry = pageB.locator("#roomList .room-list-item", { hasText: roomName }).first();
-  await expect(roomEntry).toBeVisible({ timeout: 15000 });
-  await roomEntry.click();
-  await expect(pageB.locator("#gameShell")).toBeVisible();
+  await joinViaRoomList(pageB, roomName);
 
   // Page B joined as the second player. Turn starts at player A.
   // Page B should have the draw button disabled (not their turn).
@@ -75,13 +80,10 @@ test("pile view modal opens when VIEW button is clicked", async ({ browser }) =>
   await pageA.click("#connectBtn");
   await expect(pageA.locator("#gameShell")).toBeVisible();
 
-  const roomEntry = pageB.locator("#roomList .room-list-item", { hasText: roomName }).first();
-  await expect(roomEntry).toBeVisible({ timeout: 15000 });
-  await roomEntry.click();
-  await expect(pageB.locator("#gameShell")).toBeVisible();
+  await joinViaRoomList(pageB, roomName);
 
-  // Click VIEW on banish pile — modal should open (even when empty).
-  await pageA.click("#viewBanishSelf");
+  // Click the banish zone — modal should open (even when empty).
+  await pageA.click("#banishSelf");
   await expect(pageA.locator("#pileViewModal")).toBeVisible();
   await pageA.click("#pileViewCloseBtn");
   await expect(pageA.locator("#pileViewModal")).toBeHidden();

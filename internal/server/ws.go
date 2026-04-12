@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"strconv"
@@ -44,6 +45,8 @@ type Client struct {
 	playerID gameplay.PlayerID
 	// authUserID is set when the server runs with auth and the connection presented a valid JWT (same token as /api/auth/login).
 	authUserID  uint64
+	// connID is a unique identifier for this connection, used to scope request deduplication.
+	connID      string
 	writeM      sync.Mutex
 	closeReason error
 }
@@ -190,6 +193,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		conn:       conn,
 		server:     s,
 		authUserID: authUID,
+		connID:     fmt.Sprintf("%016x", rand.Uint64()),
 	}
 	c.send(Envelope{Type: MessageHello})
 	c.readLoop()
@@ -411,7 +415,9 @@ func (c *Client) handleJoinMatch(env Envelope) error {
 		return protocolError{code: ErrorActionFailed, message: err.Error()}
 	}
 	if err := room.Execute(func() error {
-		requestKey := fmt.Sprintf("%s|join_match|%s", room.RoomID, env.ID)
+		// Include the connection ID so two different clients with the same
+		// envelope ID cannot collide on the room-scoped dedup map.
+		requestKey := fmt.Sprintf("%s|join_match|%s|%s", room.RoomID, c.connID, env.ID)
 		if env.ID != "" && !room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}

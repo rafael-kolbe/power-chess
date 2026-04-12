@@ -152,6 +152,9 @@ test.beforeEach(async ({ page }) => {
   await page.selectOption("#localeSelect", "pt-BR");
   await page.selectOption("#pieceType", "white");
   await page.click("#connectBtn");
+  // Wait for the mock WS handshake to complete so the initial state_snapshot
+  // has been processed before individual tests inject their own snapshots.
+  await expect(page.locator("#gameShell")).toBeVisible({ timeout: 5000 });
 });
 
 test("shows proposed rematch notification for opponent", async ({ page }) => {
