@@ -40,6 +40,9 @@ func (e *Engine) CloseReactionWindow() {
 
 // QueueReactionCard consumes a card from hand and pushes it to the reaction stack.
 func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, target EffectTarget) error {
+	if err := e.errIfOpeningBlocksGameplay(); err != nil {
+		return err
+	}
 	if e.ReactionWindow == nil || !e.ReactionWindow.Open {
 		return errors.New("reaction window is not open")
 	}
@@ -107,6 +110,9 @@ func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, target 
 
 // ResolveReactionStack applies queued reactions in LIFO order and sends them to cooldown.
 func (e *Engine) ResolveReactionStack() error {
+	if err := e.errIfOpeningBlocksGameplay(); err != nil {
+		return err
+	}
 	for i := len(e.reactionStack) - 1; i >= 0; i-- {
 		a := e.reactionStack[i]
 		if a.Card.CardID == CardBlockade {

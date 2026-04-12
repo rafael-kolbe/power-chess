@@ -88,6 +88,13 @@ type MatchState struct {
 	IgnitionSlot  IgnitionSlot
 	ResolvedQueue []ResolvedIgnitionEvent
 	Started       bool
+
+	// MulliganPhaseActive is true while players may return cards and redraw (opening only).
+	MulliganPhaseActive bool `json:"mulliganPhaseActive,omitempty"`
+	// MulliganConfirmed records whether each player locked in their mulligan choice.
+	MulliganConfirmed map[PlayerID]bool `json:"mulliganConfirmed,omitempty"`
+	// MulliganReturnedCount stores how many cards each player returned (-1 until they confirm).
+	MulliganReturnedCount map[PlayerID]int `json:"mulliganReturnedCount,omitempty"`
 }
 
 // ResolvedIgnitionEvent reports the latest ignition completion result.
@@ -97,7 +104,8 @@ type ResolvedIgnitionEvent struct {
 	Success bool
 }
 
-// NewMatchState creates an initialized match with default rules and initial draws.
+// NewMatchState creates an initialized match with default rules and full decks (no opening draw).
+// Call BeginOpeningPhase once both players are present to shuffle, draw opening hands, and start mulligan.
 func NewMatchState(deckA, deckB []CardInstance) (*MatchState, error) {
 	if len(deckA) != DefaultDeckSize || len(deckB) != DefaultDeckSize {
 		return nil, fmt.Errorf("deck size must be %d", DefaultDeckSize)
@@ -123,13 +131,6 @@ func NewMatchState(deckA, deckB []CardInstance) (*MatchState, error) {
 		TurnNumber:  1,
 		TurnSeconds: DefaultTurnSeconds,
 	}
-	for _, pid := range []PlayerID{PlayerA, PlayerB} {
-		for range DefaultInitialDraw {
-			if err := s.drawCardNoCost(pid); err != nil {
-				return nil, err
-			}
-		}
-	}
 	return s, nil
 }
 
@@ -149,6 +150,9 @@ func (s *MatchState) StartTurn(pid PlayerID) error {
 
 // SelectPlayerSkill sets a player's permanent skill before the match starts.
 func (s *MatchState) SelectPlayerSkill(pid PlayerID, skillID PlayerSkillID) error {
+	if s.MulliganPhaseActive {
+		return errors.New("cannot select player skill during mulligan")
+	}
 	if s.Started {
 		return errors.New("cannot select player skill after match start")
 	}

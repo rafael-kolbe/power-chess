@@ -242,6 +242,8 @@ func (c *Client) handle(env Envelope) error {
 		return c.handleActivateCard(env)
 	case MessageDrawCard:
 		return c.handleDrawCard(env)
+	case MessageConfirmMulligan:
+		return c.handleConfirmMulligan(env)
 	case MessageResolvePending:
 		return c.handleResolvePending(env)
 	case MessageQueueReaction:
@@ -363,7 +365,7 @@ func (c *Client) handleJoinMatch(env Envelope) error {
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		return err
 	}
-	roomID := strings.TrimSpace(p.RoomID)
+	roomID := strings.TrimSpace(string(p.RoomID))
 	if roomID == "" {
 		roomID = c.server.allocateRoomID()
 	} else {
@@ -620,6 +622,44 @@ func (c *Client) handleResolveReactions(env Envelope) error {
 	}
 	_ = c.sendAck(env, "ok", "", "")
 	c.room.EvaluateMatchOutcome()
+	_ = c.room.Persist(context.Background(), c.server.store)
+	c.room.TouchActivity()
+	c.room.BroadcastSnapshot()
+	return nil
+}
+
+// handleConfirmMulligan applies the Shadowverse-style mulligan for the requesting player.
+func (c *Client) handleConfirmMulligan(env Envelope) error {
+	if c.room == nil {
+		return protocolError{code: ErrorJoinRequired, message: "join_match is required before confirm_mulligan"}
+	}
+	if !c.room.BothPlayersConnected() {
+		return protocolError{code: ErrorActionFailed, message: "waiting_for_opponent"}
+	}
+	var p ConfirmMulliganPayload
+	if err := json.Unmarshal(env.Payload, &p); err != nil {
+		return err
+	}
+	if err := c.room.Execute(func() error {
+		requestKey := c.requestKey(env)
+		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
+			return errDuplicateRequest
+		}
+		done, err := c.room.Engine.State.ConfirmMulligan(c.playerID, p.HandIndices)
+		if err != nil {
+			return err
+		}
+		if done {
+			return c.room.Engine.StartTurn(gameplay.PlayerA)
+		}
+		return nil
+	}); err != nil {
+		if errors.Is(err, errDuplicateRequest) {
+			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
+		}
+		return protocolError{code: ErrorActionFailed, message: err.Error()}
+	}
+	_ = c.sendAck(env, "ok", "", "")
 	_ = c.room.Persist(context.Background(), c.server.store)
 	c.room.TouchActivity()
 	c.room.BroadcastSnapshot()

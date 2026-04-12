@@ -17,9 +17,10 @@ func TestSnapshotHandIsPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setup room: %v", err)
 	}
-	// Both players draw from their starter decks (no mana cost for initial draw in tests).
 	s := room.Engine.State
-	// Give both players a non-empty hand (already from initial draw in NewMatchState).
+	if err := gameplay.BeginOpeningPhase(s); err != nil {
+		t.Fatalf("BeginOpeningPhase: %v", err)
+	}
 	if len(s.Players[gameplay.PlayerA].Hand) == 0 {
 		t.Fatal("player A should have initial hand cards")
 	}
@@ -102,8 +103,19 @@ func TestSnapshotIgnitionOwnerAndTurns(t *testing.T) {
 		t.Fatalf("setup room: %v", err)
 	}
 	s := room.Engine.State
+	if err := gameplay.BeginOpeningPhase(s); err != nil {
+		t.Fatalf("BeginOpeningPhase: %v", err)
+	}
+	if _, err := s.ConfirmMulligan(gameplay.PlayerA, nil); err != nil {
+		t.Fatalf("ConfirmMulligan A: %v", err)
+	}
+	if _, err := s.ConfirmMulligan(gameplay.PlayerB, nil); err != nil {
+		t.Fatalf("ConfirmMulligan B: %v", err)
+	}
+	if err := room.Engine.StartTurn(gameplay.PlayerA); err != nil {
+		t.Fatalf("StartTurn: %v", err)
+	}
 	// Activate a card from player A's hand (ignition > 0).
-	_ = s.StartTurn(gameplay.PlayerA)
 	s.Players[gameplay.PlayerA].Mana = 10
 	// Find a card with ignition > 0.
 	hand := s.Players[gameplay.PlayerA].Hand
@@ -198,7 +210,7 @@ func TestDrawCardWebSocket(t *testing.T) {
 		}
 	}
 	readSnap := func(c *websocket.Conn) StateSnapshotPayload {
-		for i := 0; i < 5; i++ {
+		for i := 0; i < 30; i++ {
 			_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 			_, raw, err := c.ReadMessage()
 			if err != nil {
@@ -223,11 +235,10 @@ func TestDrawCardWebSocket(t *testing.T) {
 		return readSnap(c)
 	}
 
-	send(cA, Envelope{ID: "j1", Type: MessageJoinMatch, Payload: MustPayload(JoinMatchPayload{RoomID: "50", PieceType: "white"})})
-	send(cB, Envelope{ID: "j2", Type: MessageJoinMatch, Payload: MustPayload(JoinMatchPayload{RoomID: "50", PieceType: "black"})})
-
-	// drain ack+snapshot for cA
+	send(cA, Envelope{ID: "j1", Type: MessageJoinMatch, Payload: MustPayload(JoinMatchPayload{RoomID: joinRoomID("50"), PieceType: "white"})})
 	_ = drainUntilSnap(cA)
+	send(cB, Envelope{ID: "j2", Type: MessageJoinMatch, Payload: MustPayload(JoinMatchPayload{RoomID: joinRoomID("50"), PieceType: "black"})})
+	_ = drainUntilSnap(cB)
 	snapBefore := drainUntilSnap(cA)
 
 	var pABefore PlayerHUDState
@@ -236,11 +247,21 @@ func TestDrawCardWebSocket(t *testing.T) {
 			pABefore = p
 		}
 	}
-	// Give player A enough mana and start their turn (room starts with 0 mana — add mana via state).
+	// Finish mulligan and start the match so draw_card is allowed.
 	srv.roomsM.RLock()
 	room := srv.rooms["50"]
 	srv.roomsM.RUnlock()
 	room.stateM.Lock()
+	st := room.Engine.State
+	if _, err := st.ConfirmMulligan(gameplay.PlayerA, nil); err != nil {
+		t.Fatalf("ConfirmMulligan A: %v", err)
+	}
+	if _, err := st.ConfirmMulligan(gameplay.PlayerB, nil); err != nil {
+		t.Fatalf("ConfirmMulligan B: %v", err)
+	}
+	if err := room.Engine.StartTurn(gameplay.PlayerA); err != nil {
+		t.Fatalf("StartTurn: %v", err)
+	}
 	room.Engine.State.Players[gameplay.PlayerA].Mana = 10
 	room.stateM.Unlock()
 
@@ -270,6 +291,18 @@ func TestDrawCardViewerHandPrivacy(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 	s := room.Engine.State
+	if err := gameplay.BeginOpeningPhase(s); err != nil {
+		t.Fatalf("BeginOpeningPhase: %v", err)
+	}
+	if _, err := s.ConfirmMulligan(gameplay.PlayerA, nil); err != nil {
+		t.Fatalf("ConfirmMulligan A: %v", err)
+	}
+	if _, err := s.ConfirmMulligan(gameplay.PlayerB, nil); err != nil {
+		t.Fatalf("ConfirmMulligan B: %v", err)
+	}
+	if err := room.Engine.StartTurn(gameplay.PlayerA); err != nil {
+		t.Fatalf("StartTurn: %v", err)
+	}
 	s.Players[gameplay.PlayerA].Mana = 10
 	_ = s.DrawCard(gameplay.PlayerA)
 
@@ -288,6 +321,8 @@ func TestDrawCardEngineValidation(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 	s := room.Engine.State
+	s.MulliganPhaseActive = false
+	s.Started = true
 
 	// Wrong turn: A tries to draw on B's turn.
 	_ = s.EndTurn(gameplay.PlayerA)

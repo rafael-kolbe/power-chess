@@ -21,6 +21,12 @@ func testDeckWith(card gameplay.CardInstance) []gameplay.CardInstance {
 	return d
 }
 
+// markInPlayForTest sets match flags so engine actions apply without running opening mulligan (tests only).
+func markInPlayForTest(s *gameplay.MatchState) {
+	s.MulliganPhaseActive = false
+	s.Started = true
+}
+
 func TestKnightBuffAllowsKnightMoveForOwnedPiece(t *testing.T) {
 	card := gameplay.CardInstance{InstanceID: "k1", CardID: CardKnightTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
 	state, err := gameplay.NewMatchState(testDeckWith(card), testDeckWith(card))
@@ -72,6 +78,7 @@ func TestDoubleTurnPowerMoveCanCheckmate(t *testing.T) {
 	board.SetPiece(chess.Pos{Row: 0, Col: 7}, chess.Piece{Type: chess.Bishop, Color: chess.Black}) // h8
 
 	e := NewEngine(state, board)
+	markInPlayForTest(state)
 	e.extraMoveLeft[gameplay.PlayerB] = 1
 	e.movesThisTurn[gameplay.PlayerB] = 1
 
@@ -173,6 +180,7 @@ func TestSubmitMoveAdvancesTurnToOpponent(t *testing.T) {
 	)
 	board := chess.NewGame()
 	e := NewEngine(state, board)
+	markInPlayForTest(state)
 
 	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{
 		From: chess.Pos{Row: 6, Col: 4},
@@ -192,6 +200,7 @@ func TestSubmitMoveReconcilesPersistedTurnMismatch(t *testing.T) {
 	)
 	board := chess.NewGame()
 	e := NewEngine(state, board)
+	markInPlayForTest(state)
 
 	// Simulate stale persisted mismatch: gameplay says A, chess turn says Black.
 	e.State.CurrentTurn = gameplay.PlayerA
@@ -233,6 +242,7 @@ func TestReactionWindowRestrictsCardTypeActivation(t *testing.T) {
 	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{powerCard, counterCard}
 	state.Players[gameplay.PlayerA].Mana = 10
 	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	markInPlayForTest(state)
 
 	e.OpenReactionWindow("test", gameplay.PlayerA, []gameplay.CardType{gameplay.CardTypeCounter})
 	if err := e.ActivateCard(gameplay.PlayerA, 0); err == nil {
@@ -254,6 +264,7 @@ func TestExtinguishNegatesOpponentIgnition(t *testing.T) {
 	state.Players[gameplay.PlayerA].Mana = 10
 	state.Players[gameplay.PlayerB].Mana = 10
 	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	markInPlayForTest(state)
 
 	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
 		t.Fatalf("activate double-turn failed: %v", err)
@@ -288,6 +299,7 @@ func TestIgnitionZeroAllowsMultipleActivationsSameTurnWhenSlotFree(t *testing.T)
 	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
 	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
 	e := NewEngine(state, board)
+	markInPlayForTest(state)
 
 	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
 		t.Fatalf("first ignition-0 activate failed: %v", err)
@@ -306,6 +318,7 @@ func TestRetributionCannotActivateInNormalTurnFlow(t *testing.T) {
 	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{r}
 	state.Players[gameplay.PlayerA].Mana = 10
 	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	markInPlayForTest(state)
 
 	if err := e.ActivateCard(gameplay.PlayerA, 0); err == nil {
 		t.Fatalf("retribution should not be activatable in normal turn flow")
@@ -321,6 +334,7 @@ func TestCaptureTriggerWindowOpensAutomaticallyAndDefersMove(t *testing.T) {
 	board.SetPiece(chess.Pos{Row: 5, Col: 5}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
 
 	e := NewEngine(state, board)
+	markInPlayForTest(state)
 	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 4}, To: chess.Pos{5, 5}}); err != nil {
 		t.Fatalf("submit capture move should open reaction window: %v", err)
 	}
@@ -350,6 +364,7 @@ func TestEnPassantCaptureOpensCaptureTriggerWindow(t *testing.T) {
 	board.SetPiece(chess.Pos{Row: 3, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
 	board.SetPiece(chess.Pos{Row: 1, Col: 5}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
 	e := NewEngine(state, board)
+	markInPlayForTest(state)
 	state.CurrentTurn = gameplay.PlayerB
 
 	// Black sets en passant.
@@ -383,6 +398,7 @@ func TestCounterattackCancelsPendingCaptureWhenAttackerIsBuffed(t *testing.T) {
 	board.SetPiece(chess.Pos{Row: 6, Col: 0}, chess.Piece{Type: chess.Pawn, Color: chess.White})
 	board.SetPiece(chess.Pos{Row: 4, Col: 1}, chess.Piece{Type: chess.Rook, Color: chess.Black})
 	e := NewEngine(state, board)
+	markInPlayForTest(state)
 
 	// Apply knight-touch to white pawn.
 	_ = e.ActivateCard(gameplay.PlayerA, 0)
@@ -420,6 +436,7 @@ func TestCounterattackRejectedWhenAttackerNotBuffed(t *testing.T) {
 	board.SetPiece(chess.Pos{Row: 6, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
 	board.SetPiece(chess.Pos{Row: 5, Col: 5}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
 	e := NewEngine(state, board)
+	markInPlayForTest(state)
 
 	_ = e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 4}, To: chess.Pos{5, 5}})
 	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
@@ -445,6 +462,7 @@ func TestBlockadeNegatesCounterattackAndCancelsPendingCapture(t *testing.T) {
 	board.SetPiece(chess.Pos{Row: 6, Col: 0}, chess.Piece{Type: chess.Pawn, Color: chess.White})
 	board.SetPiece(chess.Pos{Row: 4, Col: 1}, chess.Piece{Type: chess.Rook, Color: chess.Black})
 	e := NewEngine(state, board)
+	markInPlayForTest(state)
 
 	_ = e.ActivateCard(gameplay.PlayerA, 0)
 	target := chess.Pos{Row: 6, Col: 0}
@@ -476,6 +494,7 @@ func TestEngineDrawCard(t *testing.T) {
 		t.Fatalf("state: %v", err)
 	}
 	e := NewEngine(state, chess.NewGame())
+	markInPlayForTest(state)
 
 	// Drawing on wrong turn (B's turn by default? No — A starts).
 	_ = e.State.EndTurn(gameplay.PlayerA)

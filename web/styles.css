@@ -37,19 +37,14 @@
 }
 
 /*
- * Match screen: larger card slots (+40px height vs base) while keeping 639:965 proportion.
- * Column grid fractions (playmat-area) stay unchanged — only slot and dependent tokens grow.
+ * Match playmat visible: larger card slots (+40px height vs base) while keeping 639:965 proportion.
  */
-body[data-page="match"] {
+/* Match screen: charcoal canvas + crisp chrome (reference tabletop mockup) */
+body:has(#gameShell:not(.hidden)) {
   --pm-card-width: calc(clamp(56px, 11vmin, 110px) + 40px * 639 / 965);
   --pm-card-height: calc(var(--pm-card-width) * 965 / 639);
   --pm-col-width: calc(var(--pm-card-width) * 2 + var(--pm-hand-gap));
-  /* Match UI: keep gutter token available for overrides */
   --pm-gutter: 8px;
-}
-
-/* Match screen: charcoal canvas + crisp chrome (reference tabletop mockup) */
-body:has(#gameShell:not(.hidden)) {
   --color-bg-page: #161618;
   --color-bg-panel: #141416;
   --color-border: rgba(255 255 255 / 18%);
@@ -57,6 +52,11 @@ body:has(#gameShell:not(.hidden)) {
   --color-border-soft: rgba(0 0 0 / 28%);
   background: var(--color-bg-page);
   padding: 8px;
+}
+
+/* Lobby title hidden during match so the playmat fits without extra scroll. */
+body:has(#gameShell:not(.hidden)) #titleLabel {
+  display: none;
 }
 
 body:has(#gameShell:not(.hidden)) .match-header-row {
@@ -384,6 +384,17 @@ button:disabled {
   font-size: 13px;
   line-height: 1.4;
   color: #a9b6c4;
+}
+
+.match-error-banner {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #ffb4b4;
+  background: rgba(80, 24, 24, 0.55);
+  border: 1px solid rgba(255, 120, 120, 0.35);
 }
 
 /* Top half of board-wrap = opponent band (cemetery + HUD); stays above all with z-index */
@@ -1689,13 +1700,91 @@ pre {
   text-shadow: 0 0 6px #000;
 }
 
-/* Hand: outer row + single area that spans the column foot */
+/* Hand: outer row + single area that spans the column foot; mulligan bar sits beside (match page). */
 .pm-hand-row {
   display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
   width: 100%;
   padding: 0;
   flex: 0 0 auto;
   min-height: 0;
+}
+
+.pm-mulligan-bar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 160px;
+  max-width: 280px;
+  padding: 10px 12px;
+  border-radius: var(--pm-zone-radius);
+  background: linear-gradient(160deg, #2a1a1a 0%, #1a1218 100%);
+  border: 1px solid rgba(220 80 80 / 35%);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 45%);
+}
+
+.pm-mulligan-bar.hidden {
+  display: none;
+}
+
+.pm-mulligan-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgb(230 220 220 / 92%);
+}
+
+.pm-mulligan-counts {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgb(255 200 200 / 95%);
+}
+
+.pm-mulligan-confirm {
+  align-self: flex-start;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 6px;
+  border: 1px solid rgba(220 90 90 / 55%);
+  background: linear-gradient(180deg, #c44 0%, #8b2020 100%);
+  color: #fff;
+  cursor: pointer;
+}
+
+.pm-mulligan-confirm:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.pm-hand-card-wrap--mulligan-return {
+  outline: 2px solid rgba(220 60 60 / 95%);
+  outline-offset: 2px;
+  border-radius: 6px;
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 50%),
+    0 0 12px rgba(200 40 40 / 55%);
+  filter: none;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.pm-hand-card-wrap--mulligan-return > .power-card {
+  pointer-events: none;
+}
+
+/* During mulligan, wrappers must receive clicks (stack normally uses pointer-events: none on wraps). */
+.pm-hand-stack.pm-hand-stack--mulligan .pm-hand-card-wrap {
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 /* One container: label + inner row of cards (inner preserves label when JS refreshes) */

@@ -5,7 +5,7 @@
 
   const STR = {
     "en-US": {
-      title: "Deck builder",
+      title: "Deck Builder",
       back: "← Lobby",
       type: "Card type",
       mana: "Mana cost",
@@ -33,6 +33,8 @@
       count: "{n} / 20",
       needLogin: "Log in from the lobby to build decks.",
       saveFailed: "Could not save.",
+      saveSuccessTitle: "Success",
+      deckSavedSuccess: "Deck saved successfully.",
       deckNameRequired: "Enter a deck name.",
       skills: [
         ["reinforcements", "Reinforcements"],
@@ -58,7 +60,7 @@
       confirmDeleteBtn: "Delete"
     },
     "pt-BR": {
-      title: "Deck builder",
+      title: "Editor de deck",
       back: "← Lobby",
       type: "Tipo da carta",
       mana: "Custo de mana",
@@ -86,6 +88,8 @@
       count: "{n} / 20",
       needLogin: "Entre pela lobby para montar decks.",
       saveFailed: "Não foi possível salvar.",
+      saveSuccessTitle: "Sucesso",
+      deckSavedSuccess: "Deck salvo com sucesso.",
       deckNameRequired: "Informe o nome do deck.",
       skills: [
         ["reinforcements", "Reinforcements"],
@@ -208,6 +212,7 @@
 
   function applyStaticLabels() {
     el.title.textContent = t("title");
+    document.title = `${t("title")} — POWER CHESS`;
     el.back.textContent = t("back");
     document.getElementById("dbFilterTypeLabel").textContent = t("type");
     document.getElementById("dbFilterManaLabel").textContent = t("mana");
@@ -730,6 +735,7 @@
       openAlertModal(t("saveFailed"));
       return;
     }
+    openAlertModal(t("deckSavedSuccess"), { titleKey: "saveSuccessTitle" });
   }
 
   function openNewModal() {

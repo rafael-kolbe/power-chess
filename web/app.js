@@ -1,8 +1,4 @@
 (function () {
-    const PAGE = document.body.dataset.page || "lobby";
-    const isLobbyPage = PAGE === "lobby";
-    const isMatchPage = PAGE === "match";
-
     /**
      * When `true`, the match playmat renders fake data (5 hand cards, 3 banished, 6 cooldown per side)
      * for layout testing. Does not touch the server. Set to `true` only while tuning CSS.
@@ -29,6 +25,8 @@
     let pendingJoinAttempt = null;
     /** @type {string} Room name shown in the private-join modal (for i18n refresh). */
     let privateJoinPendingRoomName = "";
+    /** @type {Set<number>} Hand indices selected to return to the deck during mulligan (local UI only). */
+    let mulliganPick = new Set();
 
     const AUTH_TOKEN_KEY = "powerChessAuthToken";
     /** When false, server has no DATABASE_URL auth; lobby works without login. */
@@ -226,14 +224,22 @@
             lobbyGuest: "Guest (no account)",
             lobbyDeckLabel: "Deck for match",
             lobbyDeckHint: "This deck is used when you join or create a room. Change it before connecting.",
-            noSavedDeckAlert: "You have no saved deck. Use Deck builder to create one (20 cards) before playing.",
+            noSavedDeckAlert:
+                "You have no saved deck. Use Deck Builder to create one (20 cards) before playing.",
             lobbyDeckView: "View",
-            lobbyDeckBuilder: "Deck builder",
+            lobbyDeckBuilder: "Deck Builder",
             deckViewClose: "Close",
             debugLogsTitle: "Debug logs",
             zoneHand: "Hand",
             zoneDeck: "Deck",
             drawFromDeck: "DRAW",
+            connectErrorPrefix: "Could not connect:",
+            mulliganHint: "Tap cards to mark them red (they return to the deck). Confirm when ready.",
+            mulliganConfirm: "Confirm mulligan",
+            mulliganWaitingYou: "Waiting for you to confirm…",
+            mulliganWaitingOpp: "Waiting for opponent…",
+            mulliganLine: "Mulligan — White: {w} | Black: {b}",
+            mulliganPending: "…",
         },
         "pt-BR": {
             title: "POWER CHESS (Alpha)",
@@ -345,14 +351,21 @@
             lobbyDeckLabel: "Deck para a partida",
             lobbyDeckHint: "Este deck é usado ao criar ou entrar em uma sala. Altere antes de conectar.",
             noSavedDeckAlert:
-                "Você não tem nenhum deck salvo. Use o Deck builder para criar um (20 cartas) antes de jogar.",
+                "Você não tem nenhum deck salvo. Use o Editor de deck para criar um (20 cartas) antes de jogar.",
             lobbyDeckView: "Visualizar",
-            lobbyDeckBuilder: "Deck builder",
+            lobbyDeckBuilder: "Editor de deck",
             deckViewClose: "Fechar",
             debugLogsTitle: "Logs de debug",
             zoneHand: "Mão",
             zoneDeck: "Deck",
             drawFromDeck: "Comprar",
+            connectErrorPrefix: "Não foi possível conectar:",
+            mulliganHint: "Toque nas cartas para marcar em vermelho (voltam ao deck). Confirme quando terminar.",
+            mulliganConfirm: "Confirmar mulligan",
+            mulliganWaitingYou: "Aguardando sua confirmação…",
+            mulliganWaitingOpp: "Aguardando o oponente…",
+            mulliganLine: "Mulligan — Brancas: {w} | Pretas: {b}",
+            mulliganPending: "…",
         },
     };
     let locale = "en-US";
@@ -732,6 +745,7 @@
         s("deckLabelSelf", "zoneDeck");
         s("deckLabelOpp", "zoneDeck");
         if (pmEl.drawBtn) pmEl.drawBtn.textContent = t("drawFromDeck");
+        if (lastSnapshot) renderMulliganBar(lastSnapshot);
         updateCoordsToggleLabel();
         updateReactionToggleLabel();
         s("clockLabelA", "clock");
@@ -749,24 +763,22 @@
         s("connectBtn", "create");
         syncPlayerRoleLabels();
 
-        if (isLobbyPage) {
-            refreshLobbyUserLabel();
-            renderRoomList(lobbyRooms);
-            if (lastSnapshot) renderInRoomLabel(lastSnapshot);
-            if (joinedRoom && lastSnapshot) updateOpponentDisconnectOverlay(lastSnapshot);
-            updatePasswordToggleVisual();
-            refreshPrivateJoinModalTexts();
-            if (lobbyPrivatePasswordErrorEl && !lobbyPrivatePasswordErrorEl.classList.contains("hidden")) {
-                lobbyPrivatePasswordErrorEl.textContent = t("privateNeedsPassword");
-            }
-            if (cardMarqueeLabelEl) cardMarqueeLabelEl.textContent = t("cardMarqueeTitle");
-            s("lobbyDeckLabel", "lobbyDeckLabel");
-            if (lobbyDeckViewBtnEl) lobbyDeckViewBtnEl.textContent = t("lobbyDeckView");
-            if (lobbyDeckBuilderLinkEl) lobbyDeckBuilderLinkEl.textContent = t("lobbyDeckBuilder");
-            if (deckViewCloseBtnEl) deckViewCloseBtnEl.textContent = t("deckViewClose");
-            if (lobbyDeckHintEl)
-                lobbyDeckHintEl.textContent = lobbyDeckRowEl?.classList?.contains("hidden") ? "" : t("lobbyDeckHint");
+        refreshLobbyUserLabel();
+        renderRoomList(lobbyRooms);
+        if (lastSnapshot) renderInRoomLabel(lastSnapshot);
+        if (joinedRoom && lastSnapshot) updateOpponentDisconnectOverlay(lastSnapshot);
+        updatePasswordToggleVisual();
+        refreshPrivateJoinModalTexts();
+        if (lobbyPrivatePasswordErrorEl && !lobbyPrivatePasswordErrorEl.classList.contains("hidden")) {
+            lobbyPrivatePasswordErrorEl.textContent = t("privateNeedsPassword");
         }
+        if (cardMarqueeLabelEl) cardMarqueeLabelEl.textContent = t("cardMarqueeTitle");
+        s("lobbyDeckLabel", "lobbyDeckLabel");
+        if (lobbyDeckViewBtnEl) lobbyDeckViewBtnEl.textContent = t("lobbyDeckView");
+        if (lobbyDeckBuilderLinkEl) lobbyDeckBuilderLinkEl.textContent = t("lobbyDeckBuilder");
+        if (deckViewCloseBtnEl) deckViewCloseBtnEl.textContent = t("deckViewClose");
+        if (lobbyDeckHintEl)
+            lobbyDeckHintEl.textContent = lobbyDeckRowEl?.classList?.contains("hidden") ? "" : t("lobbyDeckHint");
     }
 
     /**
@@ -1030,15 +1042,33 @@
         return u.toString();
     }
 
+    /**
+     * Opens the WebSocket and sends join_match.
+     * @param {string} roomId
+     * @param {string} [pieceTypeOverride]
+     * @param {string} [roomNameOverride]
+     * @param {boolean} [privateOverride]
+     * @param {string} [passwordOverride]
+     */
     async function connectToRoom(roomId, pieceTypeOverride, roomNameOverride, privateOverride, passwordOverride) {
-        if (isLobbyPage && readStoredToken() && authBackendAvailable) {
+        if (readStoredToken() && authBackendAvailable) {
             if (!(await ensureHasDeckForMatch())) return;
         }
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.close();
+        }
+        joinedRoom = false;
+        gameStarted = false;
+        prevMatchEnded = false;
+        hideMatchEndOverlay();
+        hideLobbyPrivatePasswordError();
+        // API /api/rooms may return roomId as a JSON number; always send a string for join_match.
+        const roomIdStr = String(roomId ?? "").trim();
         const pieceType = pieceTypeOverride || (pieceTypeEl ? pieceTypeEl.value : "random") || "random";
         const roomName =
             (roomNameOverride || (roomNameEl ? roomNameEl.value : "Let's Play!") || "Let's Play!").trim() ||
             "Let's Play!";
-        const creatingNewRoom = !String(roomId || "").trim();
+        const creatingNewRoom = !roomIdStr;
         const isPrivate =
             typeof privateOverride === "boolean"
                 ? privateOverride
@@ -1053,39 +1083,14 @@
         } else if (creatingNewRoom && roomPasswordEl) {
             password = roomPasswordEl.value;
         }
-        if (isLobbyPage && isPrivate && !String(password || "").trim()) {
+        if (isPrivate && !String(password || "").trim()) {
             showLobbyPrivatePasswordError();
             if (roomPasswordEl) roomPasswordEl.focus();
             return;
         }
-        const playerId = desiredPlayerForPieceType(pieceType);
-
-        if (isLobbyPage) {
-            sessionStorage.setItem(
-                "matchParams",
-                JSON.stringify({
-                    roomId: roomId || "",
-                    roomName,
-                    pieceType,
-                    playerId,
-                    isPrivate,
-                    password,
-                }),
-            );
-            location.href = "/match.html";
-            return;
-        }
-
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.close();
-        }
-        joinedRoom = false;
-        gameStarted = false;
-        prevMatchEnded = false;
-        hideMatchEndOverlay();
-        playerEl.value = playerId;
+        playerEl.value = desiredPlayerForPieceType(pieceType);
         pendingJoinAttempt = {
-            roomId: roomId || "",
+            roomId: roomIdStr,
             roomName,
             isPrivate,
             password,
@@ -1097,7 +1102,7 @@
         ws.onopen = () => {
             logEvent({ event: "socket_open" });
             send("join_match", {
-                roomId: roomId || "",
+                roomId: roomIdStr,
                 roomName,
                 pieceType,
                 playerId: playerEl.value,
@@ -1549,6 +1554,10 @@
         cooldownOpp: document.getElementById("cooldownOpp"),
         ignitionSelf: document.getElementById("ignitionSelf"),
         ignitionOpp: document.getElementById("ignitionOpp"),
+        mulliganBar: document.getElementById("mulliganBar"),
+        mulliganHint: document.getElementById("mulliganHint"),
+        mulliganCounts: document.getElementById("mulliganCounts"),
+        mulliganConfirmBtn: document.getElementById("mulliganConfirmBtn"),
     };
 
     // ---------------------------------------------------------------------------
@@ -1657,7 +1666,11 @@
      * @returns {boolean} Whether {@link applyPlaymatUiTestOverlay} should run (see {@link PLAYMAT_UI_TEST_OVERLAY}).
      */
     function isPlaymatUiTestEnabled() {
-        return isMatchPage && PLAYMAT_UI_TEST_OVERLAY;
+        return (
+            PLAYMAT_UI_TEST_OVERLAY &&
+            gameShellEl &&
+            !gameShellEl.classList.contains("hidden")
+        );
     }
 
     /**
@@ -2004,14 +2017,35 @@
         }
     }
 
+    /**
+     * Minimal opponent slice when the snapshot has only one player entry (defensive).
+     * @param {string} localPID
+     * @returns {object}
+     */
+    function emptyOppPlaymatStub(localPID) {
+        const oid = localPID === "A" ? "B" : "A";
+        return {
+            playerId: oid,
+            handCount: 0,
+            deckCount: 0,
+            sleeveColor: "",
+            banishedCards: [],
+            graveyardPieces: [],
+            cooldownPreview: [],
+            cooldownHiddenCount: 0,
+        };
+    }
+
     /** @param {object} snapshot */
     function renderPlaymat(snapshot) {
         if (!snapshot || !snapshot.players) return;
         const view = isPlaymatUiTestEnabled() ? applyPlaymatUiTestOverlay(snapshot) : snapshot;
-        const localPID = playerEl.value; // "A" or "B"
+        const localPID = String(playerEl.value || "").trim();
+        if (localPID !== "A" && localPID !== "B") return;
         const self = view.players.find((p) => p.playerId === localPID);
-        const opp = view.players.find((p) => p.playerId !== localPID);
-        if (!self || !opp) return;
+        let opp = view.players.find((p) => p.playerId !== localPID);
+        if (!self) return;
+        if (!opp) opp = emptyOppPlaymatStub(localPID);
 
         renderDeckZone(self, opp);
         renderGraveyardZone(self, opp);
@@ -2020,16 +2054,62 @@
         renderCooldownZone(self, opp);
         renderHandZone(self, opp);
         updateDrawButton(snapshot, self);
+        renderMulliganBar(snapshot);
+    }
+
+    /**
+     * Shows mulligan instructions, public return counts, and confirm for the local player when the opening phase is active.
+     * @param {object} snapshot
+     */
+    function renderMulliganBar(snapshot) {
+        const bar = pmEl.mulliganBar;
+        const hint = pmEl.mulliganHint;
+        const countsEl = pmEl.mulliganCounts;
+        const btn = pmEl.mulliganConfirmBtn;
+        if (!bar || !hint || !countsEl || !btn) return;
+
+        const active = !!snapshot.mulliganPhaseActive;
+        bar.classList.toggle("hidden", !active);
+        if (!active) {
+            mulliganPick.clear();
+            return;
+        }
+
+        hint.textContent = t("mulliganHint");
+        const mr = snapshot.mulliganReturned || {};
+        const fmt = (v) => (v === undefined || v < 0 ? t("mulliganPending") : String(v));
+        countsEl.textContent = t("mulliganLine", { w: fmt(mr.A), b: fmt(mr.B) });
+
+        const my = playerEl.value;
+        const myDone = mr[my] !== undefined && mr[my] >= 0;
+        if (myDone) {
+            btn.disabled = true;
+            btn.textContent = t("mulliganWaitingOpp");
+        } else {
+            btn.disabled = false;
+            btn.textContent = t("mulliganConfirm");
+        }
+    }
+
+    if (pmEl.mulliganConfirmBtn) {
+        pmEl.mulliganConfirmBtn.addEventListener("click", () => {
+            if (!lastSnapshot?.mulliganPhaseActive) return;
+            const my = playerEl.value;
+            if ((lastSnapshot.mulliganReturned || {})[my] >= 0) return;
+            const indices = [...mulliganPick].sort((a, b) => a - b);
+            send("confirm_mulligan", { handIndices: indices });
+            mulliganPick.clear();
+        });
     }
 
     function renderDeckZone(self, opp) {
         if (pmEl.deckCountSelf) pmEl.deckCountSelf.textContent = self.deckCount ?? "—";
         if (pmEl.deckCountOpp) pmEl.deckCountOpp.textContent = opp.deckCount ?? "—";
-        if (pmEl.deckSleeveSelf && self.sleeveColor) {
-            pmEl.deckSleeveSelf.style.backgroundImage = `url('${sleeveUrl(self.sleeveColor)}')`;
+        if (pmEl.deckSleeveSelf) {
+            pmEl.deckSleeveSelf.style.backgroundImage = `url('${sleeveUrl(self.sleeveColor || "blue")}')`;
         }
-        if (pmEl.deckSleeveOpp && opp.sleeveColor) {
-            pmEl.deckSleeveOpp.style.backgroundImage = `url('${sleeveUrl(opp.sleeveColor)}')`;
+        if (pmEl.deckSleeveOpp) {
+            pmEl.deckSleeveOpp.style.backgroundImage = `url('${sleeveUrl(opp.sleeveColor || "blue")}')`;
         }
     }
 
@@ -2315,9 +2395,16 @@
         if (!cardsRoot) return;
         cardsRoot.innerHTML = "";
         const hand = self.hand || [];
+        for (const idx of [...mulliganPick]) {
+            if (idx < 0 || idx >= hand.length) mulliganPick.delete(idx);
+        }
         const snap = lastSnapshot;
         const isMyTurn = snap && snap.turnPlayer === playerEl.value;
         const ignitionOccupied = snap && snap.ignitionOn;
+        const mr = snap?.mulliganReturned || {};
+        const myPid = playerEl.value;
+        const myMulliganDone = mr[myPid] !== undefined && mr[myPid] >= 0;
+        const mulliganChoose = !!(snap?.mulliganPhaseActive && !myMulliganDone);
         if (hand.length === 0) {
             cardsRoot.classList.remove("pm-hand-cards--overlap");
             return;
@@ -2329,6 +2416,7 @@
 
         const stack = document.createElement("div");
         stack.className = "pm-hand-stack";
+        stack.classList.toggle("pm-hand-stack--mulligan", mulliganChoose);
         cardsRoot.appendChild(stack);
 
         for (let i = 0; i < hand.length; i++) {
@@ -2359,8 +2447,20 @@
                 wrap.appendChild(card);
             }
             wrap.style.setProperty("--i", String(i));
-            const canActivate = isMyTurn && (!ignitionOccupied || entry.cardId === "save-it-for-later");
+            const canActivate =
+                !mulliganChoose && isMyTurn && (!ignitionOccupied || entry.cardId === "save-it-for-later");
             wrap.classList.toggle("pm-hand-card-wrap--inactive", !canActivate);
+            wrap.classList.toggle("pm-hand-card-wrap--mulligan-return", mulliganChoose && mulliganPick.has(i));
+            if (mulliganChoose) {
+                wrap.addEventListener("click", (ev) => {
+                    if (ev.target instanceof Element && ev.target.closest(".power-card__toggle")) return;
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    if (mulliganPick.has(i)) mulliganPick.delete(i);
+                    else mulliganPick.add(i);
+                    if (lastSnapshot) renderPlaymat(lastSnapshot);
+                });
+            }
             stack.appendChild(wrap);
         }
 
@@ -2369,7 +2469,9 @@
             peekClassName: "pm-hand-card-wrap--peek",
             hiddenSelector: null,
         });
-        wireHandStackPointerDrag(stack);
+        if (!mulliganChoose) {
+            wireHandStackPointerDrag(stack);
+        }
     }
 
     function renderOppHand(container, opp) {
@@ -2413,7 +2515,8 @@
         const hasMana = (self.mana || 0) >= 2;
         const hasSpace = (self.handCount || 0) < 5;
         const gameOn = snapshot.gameStarted && !snapshot.matchEnded;
-        btn.disabled = !(isMyTurn && hasMana && hasSpace && gameOn);
+        const mulliganOn = !!snapshot.mulliganPhaseActive;
+        btn.disabled = mulliganOn || !(isMyTurn && hasMana && hasSpace && gameOn);
     }
 
     // ---------------------------------------------------------------------------
@@ -3325,10 +3428,6 @@
     }
 
     function resetToLobbyUi() {
-        if (isMatchPage) {
-            location.href = "/";
-            return;
-        }
         joinedRoom = false;
         gameStarted = false;
         lastSnapshot = null;
@@ -3362,6 +3461,7 @@
     }
 
     function renderRoomList(rooms) {
+        if (!roomListEl || !roomListEmptyEl) return;
         roomListEl.innerHTML = "";
         if (!rooms.length) {
             roomListEmptyEl.classList.remove("hidden");
@@ -3391,7 +3491,13 @@
                         if (typed == null) return;
                         joinPassword = typed;
                     }
-                    void connectToRoom(rm.roomId, pieceType, rm.roomName || "Let's Play!", false, joinPassword);
+                    void connectToRoom(
+                        rm.roomId,
+                        pieceType,
+                        rm.roomName || "Let's Play!",
+                        !!rm.roomPrivate,
+                        joinPassword,
+                    );
                 })();
             });
             roomListEl.appendChild(li);
@@ -3419,7 +3525,7 @@
     function pieceTypeForRoomJoin(rm) {
         if ((rm.connectedA || 0) > 0 && (rm.connectedB || 0) === 0) return "black";
         if ((rm.connectedB || 0) > 0 && (rm.connectedA || 0) === 0) return "white";
-        return pieceTypeEl.value || "random";
+        return (pieceTypeEl && pieceTypeEl.value) || "random";
     }
 
     async function refreshRoomList() {
@@ -3449,12 +3555,12 @@
     }
 
     // -----------------------------------------------------------------------
-    // Lobby-only event listeners
+    // Lobby UI event listeners
     // -----------------------------------------------------------------------
-    if (isLobbyPage) {
-        document.getElementById("connectBtn").addEventListener("click", () => {
-            void connectToRoom("", pieceTypeEl.value, roomNameEl.value);
-        });
+    document.getElementById("connectBtn").addEventListener("click", () => {
+        void connectToRoom("", pieceTypeEl.value, roomNameEl.value);
+    });
+    if (lobbyDeckSelectEl) {
         lobbyDeckSelectEl.addEventListener("change", async () => {
             const id = Number(lobbyDeckSelectEl.value, 10);
             if (!id || !readStoredToken()) return;
@@ -3468,55 +3574,65 @@
                 /* ignore */
             }
         });
-        lobbyDeckViewBtnEl.addEventListener("click", () => void openDeckViewModal());
-        deckViewCloseBtnEl.addEventListener("click", () => closeDeckViewModal());
+    }
+    if (lobbyDeckViewBtnEl) lobbyDeckViewBtnEl.addEventListener("click", () => void openDeckViewModal());
+    if (deckViewCloseBtnEl) deckViewCloseBtnEl.addEventListener("click", () => closeDeckViewModal());
+    if (deckViewModalEl) {
         deckViewModalEl.addEventListener("click", (ev) => {
             if (ev.target === deckViewModalEl) closeDeckViewModal();
         });
-        authRegisterBtnEl.addEventListener("click", () => void submitRegister());
-        authLoginBtnEl.addEventListener("click", () => void submitLogin());
-        logoutBtnEl.addEventListener("click", () => logoutSession());
-        localeSelectEl.addEventListener("change", () => setLocale(localeSelectEl.value));
-        privateRoomEl.addEventListener("change", updatePrivatePasswordVisibility);
-        roomPasswordEl.addEventListener("input", () => hideLobbyPrivatePasswordError());
+    }
+    if (authRegisterBtnEl) authRegisterBtnEl.addEventListener("click", () => void submitRegister());
+    if (authLoginBtnEl) authLoginBtnEl.addEventListener("click", () => void submitLogin());
+    if (logoutBtnEl) logoutBtnEl.addEventListener("click", () => logoutSession());
+    if (localeSelectEl) localeSelectEl.addEventListener("change", () => setLocale(localeSelectEl.value));
+    if (privateRoomEl) privateRoomEl.addEventListener("change", updatePrivatePasswordVisibility);
+    if (roomPasswordEl) roomPasswordEl.addEventListener("input", () => hideLobbyPrivatePasswordError());
+    if (roomPasswordToggleEl && roomPasswordEl) {
         roomPasswordToggleEl.addEventListener("click", () => {
             roomPasswordEl.type = roomPasswordEl.type === "password" ? "text" : "password";
             updatePasswordToggleVisual();
         });
+    }
+    if (roomNameEl) {
         roomNameEl.addEventListener("focus", () => roomNameEl.select());
         roomNameEl.addEventListener("pointerdown", () => {
             if (document.activeElement !== roomNameEl) setTimeout(() => roomNameEl.select(), 0);
         });
-        roomSearchEl.addEventListener("input", () => applyRoomSearch());
     }
+    if (roomSearchEl) roomSearchEl.addEventListener("input", () => applyRoomSearch());
 
     function returnToLobbyAfterMatch() {
         hideMatchEndOverlay();
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.close();
         }
-        if (isMatchPage) {
-            location.href = "/";
-        }
     }
 
     // -----------------------------------------------------------------------
-    // Match-only event listeners
+    // Match / playmat event listeners
     // -----------------------------------------------------------------------
-    if (isMatchPage) {
+    if (matchEndStayEl) {
         matchEndStayEl.addEventListener("click", () => {
             send("stay_in_room", {});
             hideMatchEndOverlay();
         });
+    }
+    if (matchEndRematchEl) {
         matchEndRematchEl.addEventListener("click", () => {
             send("request_rematch", {});
             matchEndRematchEl.disabled = true;
         });
-        matchEndToLobbyEl.addEventListener("click", () => returnToLobbyAfterMatch());
+    }
+    if (matchEndToLobbyEl) matchEndToLobbyEl.addEventListener("click", () => returnToLobbyAfterMatch());
+    if (matchEndOverlayEl) {
         matchEndOverlayEl.addEventListener("click", (ev) => {
             if (ev.target === matchEndOverlayEl) hideMatchEndOverlay();
         });
-        document.getElementById("disconnectBtn").addEventListener("click", () => {
+    }
+    const disconnectBtnEl = document.getElementById("disconnectBtn");
+    if (disconnectBtnEl) {
+        disconnectBtnEl.addEventListener("click", () => {
             if (ws && ws.readyState === WebSocket.OPEN) {
                 send("leave_match", {});
                 setTimeout(() => {
@@ -3524,11 +3640,15 @@
                 }, 250);
             }
         });
-        reactionToggleEl.addEventListener("change", updateReactionToggleLabel);
+    }
+    if (reactionToggleEl) reactionToggleEl.addEventListener("change", updateReactionToggleLabel);
+    if (coordsInSquaresEl) {
         coordsInSquaresEl.addEventListener("change", () => {
             updateCoordsToggleLabel();
             if (lastSnapshot?.board) renderBoard(lastSnapshot.board);
         });
+    }
+    if (playerEl) {
         playerEl.addEventListener("change", () => {
             syncPlayerRoleLabels();
             if (lastSnapshot?.board) renderBoard(lastSnapshot.board);
@@ -3536,7 +3656,7 @@
     }
 
     // -----------------------------------------------------------------------
-    // Initialization (page-specific)
+    // Initialization
     // -----------------------------------------------------------------------
     let savedLocale = "en-US";
     try {
@@ -3546,32 +3666,14 @@
     }
     setLocale(savedLocale);
 
-    if (isLobbyPage) {
-        updatePrivatePasswordVisibility();
-        updatePasswordToggleVisual();
-        renderBoard([]);
-        renderStatus({});
-        void bootstrapAuthSession();
-        startRoomListPolling();
-    }
-
-    if (isMatchPage) {
-        globalThis.setInterval(renderTurnClocks, 250);
-        renderTurnClocks();
-        renderBoard([]);
-        renderStatus({});
-        // Hide card hover preview on scroll or resize (same as deck builder).
-        document.addEventListener("scroll", () => hideCardPreview(), true);
-        window.addEventListener("resize", () => hideCardPreview());
-        const raw = sessionStorage.getItem("matchParams");
-        if (raw) {
-            const p = JSON.parse(raw);
-            sessionStorage.removeItem("matchParams");
-            playerEl.value = p.playerId || "A";
-            syncBoardPerspectiveClass();
-            void connectToRoom(p.roomId, p.pieceType, p.roomName, p.isPrivate, p.password);
-        } else {
-            location.href = "/";
-        }
-    }
+    globalThis.setInterval(renderTurnClocks, 250);
+    renderTurnClocks();
+    updatePrivatePasswordVisibility();
+    updatePasswordToggleVisual();
+    renderBoard([]);
+    renderStatus({});
+    void bootstrapAuthSession();
+    startRoomListPolling();
+    document.addEventListener("scroll", () => hideCardPreview(), true);
+    window.addEventListener("resize", () => hideCardPreview());
 })();

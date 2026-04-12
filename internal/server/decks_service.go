@@ -204,6 +204,15 @@ func validSleeve(s string) bool {
 	return ok
 }
 
+// DefaultSleeveColor returns s when it is a known sleeve asset key; otherwise SleeveBlue.
+func DefaultSleeveColor(s string) string {
+	s = strings.TrimSpace(s)
+	if validSleeve(s) {
+		return s
+	}
+	return SleeveBlue
+}
+
 // UpdateDeck replaces deck contents and metadata for an owned deck.
 func (s *DeckService) UpdateDeck(userID, deckID uint64, name string, ids []gameplay.CardID, skill gameplay.PlayerSkillID, sleeve string) error {
 	if s.userInMatch(userID) {

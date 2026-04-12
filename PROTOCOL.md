@@ -112,6 +112,7 @@ Broadcast do estado da sala. Campos principais:
 |------|-----------|
 | Sala | `roomId`, `roomName`, `roomPrivate`, `roomPassword`, `connectedA/B`, `gameStarted` |
 | Turno | `turnPlayer`, `turnSeconds`, `turnNumber`, `ignitionOn`, `ignitionCard`, `ignitionOwner`, `ignitionTurnsRemaining` |
+| Abertura | `mulliganPhaseActive` — `true` enquanto os dois jogadores podem confirmar mulligan; `mulliganReturned` — mapa `{"A": n, "B": n}` com quantas cartas cada um já devolveu (`-1` até confirmar) |
 | Perspectiva | `viewerPlayerId` — identifica o destinatário deste snapshot (determina visibilidade da mão) |
 | Tabuleiro | `board` 8×8 (códigos `wK`, `bP`, `""` vazio), `enPassant`, `castlingRights` |
 | Jogadores | `players[]`: `mana`, `maxMana`, `energizedMana`, `maxEnergized`, `handCount`, `cooldownCount`, `graveyardCount`, `strikes`, `deckCount`, `sleeveColor`, `hand` (privado — só no snapshot do próprio jogador), `banishedCards[]`, `graveyardPieces[]` (ordenado Q>R>B>N>P), `cooldownPreview[]` (até 4), `cooldownHiddenCount` |
@@ -284,6 +285,16 @@ Compra uma carta do deck pagando 2 mana. Só permitido no próprio turno, fora d
 ```json
 { "id": "req-4b", "type": "draw_card", "payload": {} }
 ```
+
+### `confirm_mulligan`
+
+Confirma o mulligan de abertura: as cartas nos índices indicados da mão voltam ao deck, o deck é embaralhado e o jogador compra a mesma quantidade. Só quando `mulliganPhaseActive` está ativo; cada jogador confirma uma vez. Quando o segundo jogador confirma, o servidor inicia o primeiro turno de xadrez (white).
+
+```json
+{ "id": "req-4c", "type": "confirm_mulligan", "payload": { "handIndices": [0, 2] } }
+```
+
+- `handIndices`: índices 0-based na mão atual; podem ser repetidos na lista (deduplicados no servidor); lista vazia = aceitar as 3 cartas sem devolver nenhuma.
 
 ### `resolve_pending_effect`
 

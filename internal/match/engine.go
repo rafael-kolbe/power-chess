@@ -8,6 +8,20 @@ import (
 	"power-chess/internal/gameplay"
 )
 
+var errMatchNotStarted = errors.New("match not started")
+var errMulliganInProgress = errors.New("mulligan in progress")
+
+// errIfOpeningBlocksGameplay returns an error while the mulligan phase is active or before the first turn has begun.
+func (e *Engine) errIfOpeningBlocksGameplay() error {
+	if e.State.MulliganPhaseActive {
+		return errMulliganInProgress
+	}
+	if !e.State.Started {
+		return errMatchNotStarted
+	}
+	return nil
+}
+
 const (
 	CardKnightTouch gameplay.CardID = "knight-touch"
 	CardRookTouch   gameplay.CardID = "rook-touch"
@@ -78,6 +92,9 @@ func (e *Engine) SetMoveBuffTarget(pid gameplay.PlayerID, kind MoveBuffKind, pos
 // DrawCard pays the draw-mana cost and moves one card from the player's deck to their hand.
 // Drawing is only permitted on the player's own turn and outside an open reaction window.
 func (e *Engine) DrawCard(pid gameplay.PlayerID) error {
+	if err := e.errIfOpeningBlocksGameplay(); err != nil {
+		return err
+	}
 	if e.State.CurrentTurn != pid {
 		return errors.New("can only draw on your own turn")
 	}
@@ -89,6 +106,9 @@ func (e *Engine) DrawCard(pid gameplay.PlayerID) error {
 
 // ActivateCard validates reaction constraints (if any) and delegates activation to gameplay state.
 func (e *Engine) ActivateCard(pid gameplay.PlayerID, handIndex int) error {
+	if err := e.errIfOpeningBlocksGameplay(); err != nil {
+		return err
+	}
 	p := e.State.Players[pid]
 	if handIndex < 0 || handIndex >= len(p.Hand) {
 		return errors.New("invalid hand index")
@@ -121,6 +141,9 @@ func (e *Engine) ActivateCard(pid gameplay.PlayerID, handIndex int) error {
 
 // ResolvePendingEffect applies the next queued target-dependent effect for the player.
 func (e *Engine) ResolvePendingEffect(pid gameplay.PlayerID, target EffectTarget) error {
+	if err := e.errIfOpeningBlocksGameplay(); err != nil {
+		return err
+	}
 	queue := e.pendingEffects[pid]
 	if len(queue) == 0 {
 		return errors.New("no pending effect for player")
@@ -132,6 +155,9 @@ func (e *Engine) ResolvePendingEffect(pid gameplay.PlayerID, target EffectTarget
 
 // SubmitMove executes a move, including temporary movement buffs and extra-move rules.
 func (e *Engine) SubmitMove(pid gameplay.PlayerID, m chess.Move) error {
+	if err := e.errIfOpeningBlocksGameplay(); err != nil {
+		return err
+	}
 	e.reconcileTurnState()
 	if e.State.CurrentTurn != pid {
 		return errors.New("not current player turn")
@@ -225,6 +251,9 @@ func (e *Engine) processResolvedIgnitions() error {
 
 // ActivatePlayerSkill executes the selected player skill on the current turn and consumes that turn.
 func (e *Engine) ActivatePlayerSkill(pid gameplay.PlayerID) error {
+	if err := e.errIfOpeningBlocksGameplay(); err != nil {
+		return err
+	}
 	color := toColor(pid)
 	if e.Chess.Turn != color {
 		return errors.New("chess turn out of sync with match turn")

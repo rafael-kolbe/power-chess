@@ -2,10 +2,13 @@ package gameplay
 
 import "testing"
 
-func TestNewMatchStateInitialDraw(t *testing.T) {
+func TestBeginOpeningPhaseDrawsThree(t *testing.T) {
 	s, err := NewMatchState(StarterDeck(), StarterDeck())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := BeginOpeningPhase(s); err != nil {
+		t.Fatalf("BeginOpeningPhase: %v", err)
 	}
 	if len(s.Players[PlayerA].Hand) != 3 || len(s.Players[PlayerB].Hand) != 3 {
 		t.Fatalf("expected 3 initial cards in hand")
@@ -14,6 +17,15 @@ func TestNewMatchStateInitialDraw(t *testing.T) {
 
 func TestDrawCardManaAndHandLimit(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
+	if err := BeginOpeningPhase(s); err != nil {
+		t.Fatalf("BeginOpeningPhase: %v", err)
+	}
+	if _, err := s.ConfirmMulligan(PlayerA, nil); err != nil {
+		t.Fatalf("ConfirmMulligan A: %v", err)
+	}
+	if _, err := s.ConfirmMulligan(PlayerB, nil); err != nil {
+		t.Fatalf("ConfirmMulligan B: %v", err)
+	}
 	p := s.Players[PlayerA]
 	p.Mana = 10
 	for i := 0; i < 2; i++ {

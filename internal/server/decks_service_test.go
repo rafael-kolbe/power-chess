@@ -35,3 +35,15 @@ func TestDeckServiceEnsureDefaultAndMaxDecks(t *testing.T) {
 		t.Fatalf("expected ErrTooManyDecks, got %v", err)
 	}
 }
+
+func TestDefaultSleeveColor(t *testing.T) {
+	if got := DefaultSleeveColor(""); got != SleeveBlue {
+		t.Fatalf("empty: want %q got %q", SleeveBlue, got)
+	}
+	if got := DefaultSleeveColor("  green  "); got != SleeveGreen {
+		t.Fatalf("green: want %q got %q", SleeveGreen, got)
+	}
+	if got := DefaultSleeveColor("not-a-sleeve"); got != SleeveBlue {
+		t.Fatalf("invalid: want %q got %q", SleeveBlue, got)
+	}
+}

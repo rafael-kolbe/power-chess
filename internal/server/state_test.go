@@ -176,6 +176,8 @@ func TestResolveReactionTimeoutIfExpired(t *testing.T) {
 	board.SetPiece(chess.Pos{Row: 5, Col: 5}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
 	room.Engine.Chess = board
 	room.reactionTimeout = 5 * time.Millisecond
+	room.Engine.State.MulliganPhaseActive = false
+	room.Engine.State.Started = true
 
 	if err := room.Engine.SubmitMove(gameplay.PlayerA, chess.Move{
 		From: chess.Pos{Row: 6, Col: 4},

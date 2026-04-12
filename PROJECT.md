@@ -44,6 +44,7 @@
 
 ## Mana e mana energizada
 
+- No início da partida (antes do primeiro **início de turno** aplicado pelo servidor), o pool de mana de cada jogador está em **0**; o primeiro ganho de mana no turno vem do passo “início do turno” (+1 mana ao jogador ativo), conforme `state_snapshot`.
 - Ganho de mana por turno e por captura conforme regras do servidor (valores no `state_snapshot`).
 - Pools com **máximo** (ex.: mana 10, energizada 20 — conforme implementação atual).
 - Mana gasta em **poderes de carta** gera **mana energizada** (regra geral; exceções no texto das cartas).
@@ -82,9 +83,11 @@ Fluxo típico de ativação:
 
 ## Deck e mão
 
-- Deck por jogador (tamanho conforme regras atuais no código).  
-- Compra inicial e compra pagando mana conforme implementação.  
-- Limite de mão e cópias por carta conforme regras do jogo.  
+- Deck por jogador (tamanho conforme regras atuais no código).
+- **Compra inicial**: só depois que **os dois** jogadores estão na sala o servidor embaralha cada deck (RNG criptográfico) e cada um compra 3 cartas. Quem entra primeiro **não** compra antes do oponente.
+- **Mulligan** (estilo Shadowverse): cada jogador escolhe qualquer subconjunto da mão inicial para devolver ao deck; o deck é embaralhado de novo e o jogador compra a mesma quantidade de cartas. Ambos veem **quantas** cartas cada um devolveu (não vêem quais cartas). Após os dois confirmarem, a partida de xadrez prossegue.
+- Compra pagando mana conforme implementação (fora da abertura).
+- Limite de mão e cópias por carta conforme regras do jogo.
 - Cartas **banidas** não voltam ao deck salvo efeito específico.
 
 ---

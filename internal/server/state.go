@@ -180,6 +180,13 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 	if r.matchEnded {
 		board = serializeBoard(chess.NewGame().Board)
 	}
+	var mulliganReturned map[string]int
+	if s.MulliganReturnedCount != nil {
+		mulliganReturned = map[string]int{
+			"A": s.MulliganReturnedCount[gameplay.PlayerA],
+			"B": s.MulliganReturnedCount[gameplay.PlayerB],
+		}
+	}
 	payload := StateSnapshotPayload{
 		RoomID:         r.RoomID,
 		RoomName:       r.RoomName,
@@ -190,6 +197,8 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 		PlayerAName:    r.displayNameByPlayer[gameplay.PlayerA],
 		PlayerBName:    r.displayNameByPlayer[gameplay.PlayerB],
 		GameStarted:    (cA > 0 && cB > 0) || reconnectGrace,
+		MulliganPhaseActive: s.MulliganPhaseActive,
+		MulliganReturned:    mulliganReturned,
 		TurnPlayer:     string(s.CurrentTurn),
 		TurnSeconds:    s.TurnSeconds,
 		TurnNumber:     s.TurnNumber,
@@ -528,6 +537,10 @@ func (r *RoomSession) ResolveTurnTimeoutIfExpired(now time.Time) (bool, error) {
 	r.stateM.Lock()
 	defer r.stateM.Unlock()
 	if r.matchEnded {
+		r.turnDeadline = time.Time{}
+		return false, nil
+	}
+	if r.Engine.State.MulliganPhaseActive {
 		r.turnDeadline = time.Time{}
 		return false, nil
 	}
@@ -874,7 +887,7 @@ func playerHUDState(pid gameplay.PlayerID, p *gameplay.PlayerState, sleeve strin
 		GraveyardCount:      len(p.Graveyard),
 		Strikes:             p.Strikes,
 		DeckCount:           len(p.Deck),
-		SleeveColor:         sleeve,
+		SleeveColor:         DefaultSleeveColor(sleeve),
 		BanishedCards:       banished,
 		GraveyardPieces:     graveyard,
 		CooldownPreview:     preview,

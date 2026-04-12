@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // MessageType identifies protocol-level websocket event kinds.
@@ -21,6 +22,7 @@ const (
 	MessageResolveReaction MessageType = "resolve_reactions"
 	MessageStayInRoom      MessageType = "stay_in_room"
 	MessageRequestRematch  MessageType = "request_rematch"
+	MessageConfirmMulligan MessageType = "confirm_mulligan"
 	// Server -> Client
 	MessageHello         MessageType = "hello"
 	MessageAck           MessageType = "ack"
@@ -52,10 +54,31 @@ type PingPayload struct {
 	Timestamp int64 `json:"timestamp"`
 }
 
+// joinRoomID unmarshals roomId from JSON as either a string or a number (some clients send a bare integer).
+type joinRoomID string
+
+func (j *joinRoomID) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		*j = joinRoomID(strings.TrimSpace(s))
+		return nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(b, &n); err != nil {
+		return err
+	}
+	s := strings.TrimSpace(n.String())
+	*j = joinRoomID(s)
+	return nil
+}
+
 // JoinMatchPayload requests a room assignment and player identity.
 type JoinMatchPayload struct {
-	RoomID    string `json:"roomId,omitempty"`
-	RoomName  string `json:"roomName,omitempty"`
+	RoomID    joinRoomID `json:"roomId,omitempty"`
+	RoomName  string     `json:"roomName,omitempty"`
 	PlayerID  string `json:"playerId,omitempty"`
 	PieceType string `json:"pieceType,omitempty"`
 	IsPrivate bool   `json:"isPrivate,omitempty"`
@@ -73,6 +96,11 @@ type SubmitMovePayload struct {
 // ActivateCardPayload requests activation of a card from hand index.
 type ActivateCardPayload struct {
 	HandIndex int `json:"handIndex"`
+}
+
+// ConfirmMulliganPayload submits which hand cards (by index) are returned to the deck for the mulligan.
+type ConfirmMulliganPayload struct {
+	HandIndices []int `json:"handIndices"`
 }
 
 // ResolvePendingPayload provides a generic target for pending effects.
@@ -195,6 +223,10 @@ type StateSnapshotPayload struct {
 	PlayerAName  string `json:"playerAName,omitempty"`
 	PlayerBName  string `json:"playerBName,omitempty"`
 	GameStarted  bool   `json:"gameStarted"`
+	// MulliganPhaseActive is true while players are choosing cards to return (opening).
+	MulliganPhaseActive bool `json:"mulliganPhaseActive,omitempty"`
+	// MulliganReturned maps seat id ("A"/"B") to how many cards that player returned; -1 until they confirm.
+	MulliganReturned map[string]int `json:"mulliganReturned,omitempty"`
 	// ReconnectPendingFor is "A" or "B" while that seat's socket is gone but the grace timer has not fired yet.
 	ReconnectPendingFor     string                 `json:"reconnectPendingFor,omitempty"`
 	ReconnectDeadlineUnixMs int64                  `json:"reconnectDeadlineUnixMs,omitempty"`

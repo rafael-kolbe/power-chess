@@ -33,8 +33,8 @@ func TestWebSocketJoinAndSnapshotBroadcast(t *testing.T) {
 	_ = c2.SetReadDeadline(time.Now().Add(2 * time.Second))
 	_, _, _ = c2.ReadMessage() // hello
 
-	joinA := Envelope{ID: "j1", Type: MessageJoinMatch, Payload: MustPayload(JoinMatchPayload{RoomID: "1", PieceType: "white", PlayerID: "A"})}
-	joinB := Envelope{ID: "j2", Type: MessageJoinMatch, Payload: MustPayload(JoinMatchPayload{RoomID: "1", PieceType: "black", PlayerID: "B"})}
+	joinA := Envelope{ID: "j1", Type: MessageJoinMatch, Payload: MustPayload(JoinMatchPayload{RoomID: joinRoomID("1"), PieceType: "white", PlayerID: "A"})}
+	joinB := Envelope{ID: "j2", Type: MessageJoinMatch, Payload: MustPayload(JoinMatchPayload{RoomID: joinRoomID("1"), PieceType: "black", PlayerID: "B"})}
 
 	rawA, _ := EncodeEnvelope(joinA)
 	rawB, _ := EncodeEnvelope(joinB)
@@ -67,7 +67,7 @@ func TestWebSocketRequestIdempotency(t *testing.T) {
 	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 	_, _, _ = c.ReadMessage() // hello
 
-	join := Envelope{ID: "same-id", Type: MessageJoinMatch, Payload: MustPayload(JoinMatchPayload{RoomID: "2", PieceType: "white", PlayerID: "A"})}
+	join := Envelope{ID: "same-id", Type: MessageJoinMatch, Payload: MustPayload(JoinMatchPayload{RoomID: joinRoomID("2"), PieceType: "white", PlayerID: "A"})}
 	raw, _ := EncodeEnvelope(join)
 	if err := c.WriteMessage(websocket.TextMessage, raw); err != nil {
 		t.Fatalf("write join failed: %v", err)
