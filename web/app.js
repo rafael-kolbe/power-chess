@@ -2108,6 +2108,24 @@ import {
                     });
                 }
             }
+            // Cards that left cooldown entirely this turn (hit 0 turns → returned to deck).
+            // The server removes them from cooldownPreview atomically, so nextCD never contains
+            // them; we must detect their absence and animate the final N→0 tick.
+            for (const pEntry of prevCD) {
+                if (nextCD.find((n) => n.cardId === pEntry.cardId)) continue;
+                if (pEntry.turnsRemaining <= 0) continue;
+                const wrap = container?.querySelector(
+                    `[data-card-id="${escapeCardIdForSelector(String(pEntry.cardId))}"]`,
+                );
+                const turnsEl = wrap?.querySelector(".pm-cooldown-turns");
+                if (turnsEl) {
+                    cooldownTasks.push({
+                        el: turnsEl,
+                        from: `${pEntry.turnsRemaining}t`,
+                        to: "0t",
+                    });
+                }
+            }
         }
 
         if (ignitionOdometer) {
@@ -2184,6 +2202,54 @@ import {
             prevSnap.ignitionOwner
         ) {
             flyIgnitionResolvedToCooldown(prevSnap);
+        }
+
+        // 3c. Card with ignition=0 activated: the server resolves it atomically so the ignition
+        // slot is never "occupied" in any snapshot the client sees.  Detect a new cooldown entry
+        // whose card definition has ignition=0 and show a brief glow + fly from the ignition zone.
+        if (!prevSnap.ignitionOn && !nextSnap.ignitionOn) {
+            const prevSelfCD = prevSelf?.cooldownPreview || [];
+            const nextSelfCD = nextSelf?.cooldownPreview || [];
+            const newSelfEntry = nextSelfCD.find((e) => !prevSelfCD.some((p) => p.cardId === e.cardId));
+            if (newSelfEntry && (getCardDef(newSelfEntry.cardId)?.ignition ?? -1) === 0) {
+                const slotEl = pmEl.ignitionSelf;
+                if (slotEl) {
+                    slotEl.classList.remove("pm-ignition-activating");
+                    void slotEl.offsetWidth;
+                    slotEl.classList.add("pm-ignition-activating");
+                    setTimeout(() => slotEl.classList.remove("pm-ignition-activating"), 650);
+                }
+                const frSelf = zoneRect(pmEl.ignitionCardSelf);
+                const trSelf = zoneRect(pmEl.cooldownCardsSelf);
+                if (frSelf && trSelf) {
+                    setTimeout(
+                        () => flyCard(frSelf, trSelf, null, nextSelf.sleeveColor || "blue", 400, null, { fitDestination: false }),
+                        220,
+                    );
+                }
+            }
+            if (nextOpp && prevOpp) {
+                const prevOppCD = prevOpp?.cooldownPreview || [];
+                const nextOppCD = nextOpp?.cooldownPreview || [];
+                const newOppEntry = nextOppCD.find((e) => !prevOppCD.some((p) => p.cardId === e.cardId));
+                if (newOppEntry && (getCardDef(newOppEntry.cardId)?.ignition ?? -1) === 0) {
+                    const slotEl = pmEl.ignitionOpp;
+                    if (slotEl) {
+                        slotEl.classList.remove("pm-ignition-activating");
+                        void slotEl.offsetWidth;
+                        slotEl.classList.add("pm-ignition-activating");
+                        setTimeout(() => slotEl.classList.remove("pm-ignition-activating"), 650);
+                    }
+                    const frOpp = zoneRect(pmEl.ignitionCardOpp);
+                    const trOpp = zoneRect(pmEl.cooldownCardsOpp);
+                    if (frOpp && trOpp) {
+                        setTimeout(
+                            () => flyCard(frOpp, trOpp, null, nextOpp.sleeveColor || "blue", 400, null, { fitDestination: false }),
+                            220,
+                        );
+                    }
+                }
+            }
         }
 
         // 4. Card banished: banishedCards length increased → fly from deck or ignition area to banish zone.
@@ -3550,13 +3616,15 @@ import {
                         lastSnapshot?.castlingRights,
                     );
                     refreshBoardHighlights();
-                    sq.classList.add("sq--piece-dragging");
                     const pImg = sq.querySelector(".piece-img");
                     if (pImg instanceof HTMLImageElement) {
                         const w = pImg.offsetWidth || 48;
                         const h = pImg.offsetHeight || 48;
                         dt.setDragImage(pImg, w / 2, h / 2);
                     }
+                    // Add the fading class AFTER setDragImage so the browser captures the
+                    // ghost at full opacity (the class reduces piece opacity to 0.35).
+                    sq.classList.add("sq--piece-dragging");
                     dt.setData("text/plain", posKey(r, c));
                     dt.effectAllowed = "move";
                 });
