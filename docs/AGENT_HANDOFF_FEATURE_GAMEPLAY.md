@@ -33,11 +33,10 @@ Use este arquivo quando o contexto da conversa se perder. A fonte canônica deta
 
 ## Desconexão
 
-- Servidor detecta desconexão **na hora**; **pausa** a partida (nada de jogada válida para o outro enquanto pausado).
-- **Grace mínimo de 5 s por disconnect:** só depois de **5 s** desde a detecção o servidor pode declarar vitória do outro **por desconexão** (evita win instantâneo).
-- **60s** = orçamento **total** desconectado por jogador por partida (**não** zera a cada queda).
-- Banner **verde**: **pt-BR** *“Jogador desconectado (Xs)”* · **EN** *“Opponent disconnected (Xs)”* — **X** dinâmico (protocolo).
-- Vitória ao esgotar orçamento (respeitando grace); reconectar **retoma** processo pausado.
+- **Implementado (servidor):** orçamento **60 s** de tempo **offline** cumulativo por jogador por partida (`disconnectBudgetRemaining`); ao reconectar, o segmento atual debita do orçamento. Vitória do oponente em `disconnect_timeout` no instante `max(detecção + 5 s, detecção + orçamento restante)` (campos configuráveis por sala: `DisconnectBudgetTotal`, `DisconnectMinWinDelay` — testes usam valores curtos).
+- Enquanto um lado está offline e o outro online, `BothPlayersConnected` é falso → o cliente já bloqueia jogadas; timers de **reação** também não avançam com um lado a zero.
+- Banner **verde** / contagem: UI usa `reconnectPendingFor` + `reconnectDeadlineUnixMs` no snapshot (deadline efetiva do fim por desconexão desse evento).
+- **Pendente / UX:** textos finais EN/pt-BR no banner se ainda não estiverem no i18n; afinações de cópia ver skill de copy.
 
 ## i18n
 

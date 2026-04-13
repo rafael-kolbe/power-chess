@@ -10,6 +10,14 @@ import (
 
 const newRoomFailedFmt = "new room failed: %v"
 
+// syncDisconnectBudgetForTest sets per-seat remaining disconnect budget to d (tests that tune DisconnectBudgetTotal).
+func syncDisconnectBudgetForTest(room *RoomSession, d time.Duration) {
+	room.DisconnectBudgetTotal = d
+	room.ensureDisconnectBudgetMapsUnsafe()
+	room.disconnectBudgetRemaining[gameplay.PlayerA] = d
+	room.disconnectBudgetRemaining[gameplay.PlayerB] = d
+}
+
 // TestMarkRequestOnce ensures request idempotency keys are accepted only once.
 func TestMarkRequestOnce(t *testing.T) {
 	room, err := NewRoomSession("room-test")
@@ -31,7 +39,7 @@ func TestJoinSeatBlockedDuringReconnectGrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf(newRoomFailedFmt, err)
 	}
-	room.DisconnectGrace = time.Minute
+	syncDisconnectBudgetForTest(room, time.Minute)
 	room.RegisterPlayerConnection(gameplay.PlayerA)
 	room.RegisterPlayerConnection(gameplay.PlayerB)
 	room.HandlePlayerDisconnect(gameplay.PlayerA)
@@ -48,12 +56,13 @@ func TestDisconnectTimeoutGivesWinToConnectedPlayer(t *testing.T) {
 	if err != nil {
 		t.Fatalf(newRoomFailedFmt, err)
 	}
-	room.DisconnectGrace = 20 * time.Millisecond
+	syncDisconnectBudgetForTest(room, 25*time.Millisecond)
+	room.DisconnectMinWinDelay = 5 * time.Millisecond
 	room.RegisterPlayerConnection(gameplay.PlayerA)
 	room.RegisterPlayerConnection(gameplay.PlayerB)
 
 	room.HandlePlayerDisconnect(gameplay.PlayerA)
-	time.Sleep(40 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	s := room.SnapshotSafe()
 	if !s.MatchEnded || s.Winner != string(gameplay.PlayerB) || s.EndReason != "disconnect_timeout" {
@@ -67,7 +76,8 @@ func TestBothDisconnectedCancelsMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf(newRoomFailedFmt, err)
 	}
-	room.DisconnectGrace = 20 * time.Millisecond
+	syncDisconnectBudgetForTest(room, 25*time.Millisecond)
+	room.DisconnectMinWinDelay = 5 * time.Millisecond
 	room.RegisterPlayerConnection(gameplay.PlayerA)
 	room.RegisterPlayerConnection(gameplay.PlayerB)
 
@@ -178,6 +188,8 @@ func TestResolveReactionTimeoutIfExpired(t *testing.T) {
 	room.reactionTimeout = 5 * time.Millisecond
 	room.Engine.State.MulliganPhaseActive = false
 	room.Engine.State.Started = true
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	room.RegisterPlayerConnection(gameplay.PlayerB)
 
 	if err := room.Engine.SubmitMove(gameplay.PlayerA, chess.Move{
 		From: chess.Pos{Row: 6, Col: 4},

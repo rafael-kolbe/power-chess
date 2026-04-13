@@ -429,7 +429,7 @@ Payload: `white` e `black` são obrigatórios. Cada lado tem:
 | Situação | Efeito típico |
 |----------|----------------|
 | Ambos desconectam | Partida cancelada (`both_disconnected_cancelled` ou equivalente) |
-| Um desconecta | Grace ~60 s; ao expirar, vitória do outro (`disconnect_timeout`) |
+| Um desconecta | Orçamento **60 s** de tempo offline **cumulativo** por jogador na partida; vitória do outro (`disconnect_timeout`) no instante `max(detectou + 5 s, detectou + orçamento restante)`; `reconnectDeadlineUnixMs` no snapshot aponta esse instante enquanto o timer está ativo |
 | `leave_match` com oponente na sala | Vitória do oponente (`left_room`) |
 | Timeout de turno | +1 strike no jogador ativo; turno passa; 3 strikes → derrota (`strike_limit`) |
 

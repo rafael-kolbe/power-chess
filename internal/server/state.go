@@ -26,15 +26,24 @@ type RoomSession struct {
 	seen               map[string]struct{}
 	connectedByPlayer  map[gameplay.PlayerID]int
 	disconnectTimers   map[gameplay.PlayerID]*time.Timer
-	disconnectDeadline map[gameplay.PlayerID]time.Time // when grace timer fires for that seat
-	DisconnectGrace    time.Duration
-	matchEnded         bool
-	winner             gameplay.PlayerID
-	endReason          string
-	reactionTimeout    time.Duration
-	reactionDeadline   time.Time
-	turnDeadline       time.Time
-	turnDeadlineFor    gameplay.PlayerID
+	disconnectDeadline map[gameplay.PlayerID]time.Time // wall-clock instant when disconnect win may be applied for that seat
+	// DisconnectGrace is deprecated: use DisconnectBudgetTotal. Kept for tests that set a long "grace" window.
+	DisconnectGrace time.Duration
+	// DisconnectBudgetTotal is cumulative wall-clock time a player may spend disconnected per match (default 60s).
+	DisconnectBudgetTotal time.Duration
+	// DisconnectMinWinDelay is the minimum time after disconnect detection before declaring a disconnect win (default 5s).
+	DisconnectMinWinDelay time.Duration
+	// disconnectBudgetRemaining is unused disconnect budget per seat for this match (drains while offline).
+	disconnectBudgetRemaining map[gameplay.PlayerID]time.Duration
+	// disconnectSegmentStart records when the current offline segment began (zero if seat is connected or not in segment).
+	disconnectSegmentStart map[gameplay.PlayerID]time.Time
+	matchEnded             bool
+	winner                 gameplay.PlayerID
+	endReason              string
+	reactionTimeout        time.Duration
+	reactionDeadline       time.Time
+	turnDeadline           time.Time
+	turnDeadlineFor        gameplay.PlayerID
 	// pausedTurnRemaining holds the main turn timer slice while a reaction window waits for the
 	// first response (capture_attempt or ignite_reaction); turnDeadline is cleared in that state.
 	pausedTurnRemaining time.Duration
@@ -81,6 +90,7 @@ func newRoomSessionWithEngine(roomID, roomName string, engine *match.Engine) *Ro
 	if strings.TrimSpace(roomName) == "" {
 		roomName = defaultRoomName
 	}
+	defaultBudget := 60 * time.Second
 	return &RoomSession{
 		RoomID:   roomID,
 		RoomName: roomName,
@@ -92,12 +102,19 @@ func newRoomSessionWithEngine(roomID, roomName string, engine *match.Engine) *Ro
 			gameplay.PlayerA: 0,
 			gameplay.PlayerB: 0,
 		},
-		disconnectTimers:   map[gameplay.PlayerID]*time.Timer{},
-		disconnectDeadline: map[gameplay.PlayerID]time.Time{},
-		DisconnectGrace:    60 * time.Second,
-		reactionTimeout:    30 * time.Second,
-		rematchVotes:       map[gameplay.PlayerID]bool{},
-		lastActivity:       time.Now().UTC(),
+		disconnectTimers:      map[gameplay.PlayerID]*time.Timer{},
+		disconnectDeadline:    map[gameplay.PlayerID]time.Time{},
+		DisconnectGrace:       defaultBudget,
+		DisconnectBudgetTotal: defaultBudget,
+		DisconnectMinWinDelay: 5 * time.Second,
+		disconnectBudgetRemaining: map[gameplay.PlayerID]time.Duration{
+			gameplay.PlayerA: defaultBudget,
+			gameplay.PlayerB: defaultBudget,
+		},
+		disconnectSegmentStart: nil,
+		reactionTimeout:        30 * time.Second,
+		rematchVotes:           map[gameplay.PlayerID]bool{},
+		lastActivity:           time.Now().UTC(),
 		displayNameByPlayer: map[gameplay.PlayerID]string{
 			gameplay.PlayerA: "",
 			gameplay.PlayerB: "",
@@ -466,6 +483,10 @@ func (r *RoomSession) EvaluateMatchOutcome() {
 func (r *RoomSession) ResolveReactionTimeoutIfExpired(now time.Time) (bool, error) {
 	r.stateM.Lock()
 	defer r.stateM.Unlock()
+	if r.connectedByPlayer[gameplay.PlayerA] == 0 || r.connectedByPlayer[gameplay.PlayerB] == 0 {
+		r.reactionDeadline = time.Time{}
+		return false, nil
+	}
 	rw, _, ok := r.Engine.ReactionWindowSnapshot()
 	if !ok || !rw.Open {
 		r.reactionDeadline = time.Time{}
@@ -560,7 +581,9 @@ func (r *RoomSession) shutdownTimers() {
 	r.stateM.Lock()
 	defer r.stateM.Unlock()
 	for _, tm := range r.disconnectTimers {
-		tm.Stop()
+		if tm != nil {
+			tm.Stop()
+		}
 	}
 	r.disconnectTimers = map[gameplay.PlayerID]*time.Timer{}
 	r.disconnectDeadline = map[gameplay.PlayerID]time.Time{}
@@ -588,19 +611,72 @@ func (r *RoomSession) SetPlayerDisplayNameUnsafe(pid gameplay.PlayerID, name str
 	r.displayNameByPlayer[pid] = strings.TrimSpace(name)
 }
 
+// ensureDisconnectBudgetMapsUnsafe initializes per-seat disconnect budget maps when nil.
+func (r *RoomSession) ensureDisconnectBudgetMapsUnsafe() {
+	total := r.effectiveDisconnectBudgetTotal()
+	if r.disconnectBudgetRemaining == nil {
+		r.disconnectBudgetRemaining = map[gameplay.PlayerID]time.Duration{
+			gameplay.PlayerA: total,
+			gameplay.PlayerB: total,
+		}
+	}
+	if r.disconnectSegmentStart == nil {
+		r.disconnectSegmentStart = map[gameplay.PlayerID]time.Time{}
+	}
+}
+
+// effectiveDisconnectBudgetTotal returns the configured match-wide disconnect budget per player.
+func (r *RoomSession) effectiveDisconnectBudgetTotal() time.Duration {
+	if r.DisconnectBudgetTotal > 0 {
+		return r.DisconnectBudgetTotal
+	}
+	if r.DisconnectGrace > 0 {
+		return r.DisconnectGrace
+	}
+	return 60 * time.Second
+}
+
+// effectiveDisconnectMinWinDelay returns the minimum delay after disconnect before a disconnect win.
+func (r *RoomSession) effectiveDisconnectMinWinDelay() time.Duration {
+	if r.DisconnectMinWinDelay > 0 {
+		return r.DisconnectMinWinDelay
+	}
+	return 5 * time.Second
+}
+
+// endDisconnectSegmentUnsafe subtracts wall time since disconnectSegmentStart[pid] from budget and clears the segment.
+func (r *RoomSession) endDisconnectSegmentUnsafe(pid gameplay.PlayerID, now time.Time) {
+	if r.disconnectSegmentStart == nil {
+		return
+	}
+	t0, ok := r.disconnectSegmentStart[pid]
+	if !ok || t0.IsZero() {
+		return
+	}
+	spent := now.Sub(t0)
+	r.disconnectBudgetRemaining[pid] -= spent
+	if r.disconnectBudgetRemaining[pid] < 0 {
+		r.disconnectBudgetRemaining[pid] = 0
+	}
+	r.disconnectSegmentStart[pid] = time.Time{}
+}
+
 // RegisterPlayerConnection marks player as connected and clears pending disconnect timeout.
 func (r *RoomSession) RegisterPlayerConnection(pid gameplay.PlayerID) {
 	r.stateM.Lock()
 	defer r.stateM.Unlock()
-	r.lastActivity = time.Now().UTC()
+	now := time.Now().UTC()
+	r.lastActivity = now
+	r.ensureDisconnectBudgetMapsUnsafe()
+	r.endDisconnectSegmentUnsafe(pid, now)
 	r.connectedByPlayer[pid]++
-	if timer, ok := r.disconnectTimers[pid]; ok {
+	if timer, ok := r.disconnectTimers[pid]; ok && timer != nil {
 		timer.Stop()
 		delete(r.disconnectTimers, pid)
 	}
 	delete(r.disconnectDeadline, pid)
 	if r.connectedByPlayer[gameplay.PlayerA] > 0 && r.connectedByPlayer[gameplay.PlayerB] > 0 {
-		r.resetTurnDeadlineUnsafe(time.Now())
+		r.resetTurnDeadlineUnsafe(now)
 	}
 }
 
@@ -650,11 +726,14 @@ func (r *RoomSession) handlePlayerLeaveUnsafe(pid gameplay.PlayerID) {
 		r.SetPlayerDisplayNameUnsafe(pid, "")
 	}
 	r.turnDeadline = time.Time{}
-	if timer, ok := r.disconnectTimers[pid]; ok {
+	if timer, ok := r.disconnectTimers[pid]; ok && timer != nil {
 		timer.Stop()
 		delete(r.disconnectTimers, pid)
 	}
 	delete(r.disconnectDeadline, pid)
+	if r.disconnectSegmentStart != nil {
+		r.disconnectSegmentStart[pid] = time.Time{}
+	}
 	if r.matchEnded {
 		return
 	}
@@ -783,23 +862,45 @@ func (r *RoomSession) cancelMatchNoWinner() {
 	r.startPostMatchWindowUnsafe()
 	r.lastActivity = time.Now().UTC()
 	for _, tm := range r.disconnectTimers {
-		tm.Stop()
+		if tm != nil {
+			tm.Stop()
+		}
 	}
 	r.disconnectTimers = map[gameplay.PlayerID]*time.Timer{}
 	r.disconnectDeadline = map[gameplay.PlayerID]time.Time{}
+	if r.disconnectSegmentStart != nil {
+		r.disconnectSegmentStart[gameplay.PlayerA] = time.Time{}
+		r.disconnectSegmentStart[gameplay.PlayerB] = time.Time{}
+	}
 }
 
 func (r *RoomSession) scheduleDisconnectTimeout(pid gameplay.PlayerID) {
-	if timer, ok := r.disconnectTimers[pid]; ok {
+	r.ensureDisconnectBudgetMapsUnsafe()
+	if timer, ok := r.disconnectTimers[pid]; ok && timer != nil {
 		timer.Stop()
 	}
-	grace := r.DisconnectGrace
-	deadline := time.Now().Add(grace)
+	now := time.Now()
 	if r.disconnectDeadline == nil {
 		r.disconnectDeadline = make(map[gameplay.PlayerID]time.Time)
 	}
-	r.disconnectDeadline[pid] = deadline
-	r.disconnectTimers[pid] = time.AfterFunc(grace, func() {
+	budget := r.disconnectBudgetRemaining[pid]
+	minD := r.effectiveDisconnectMinWinDelay()
+	graceEnd := now.Add(minD)
+	budgetEnd := now.Add(budget)
+	winAt := graceEnd
+	if budgetEnd.After(graceEnd) {
+		winAt = budgetEnd
+	}
+	if budget <= 0 {
+		winAt = graceEnd
+	}
+	r.disconnectSegmentStart[pid] = now
+	r.disconnectDeadline[pid] = winAt
+	dur := winAt.Sub(now)
+	if dur < 0 {
+		dur = 0
+	}
+	r.disconnectTimers[pid] = time.AfterFunc(dur, func() {
 		r.stateM.Lock()
 		defer r.stateM.Unlock()
 		delete(r.disconnectDeadline, pid)
@@ -810,6 +911,7 @@ func (r *RoomSession) scheduleDisconnectTimeout(pid gameplay.PlayerID) {
 		if r.connectedByPlayer[winner] == 0 {
 			return
 		}
+		r.endDisconnectSegmentUnsafe(pid, time.Now().UTC())
 		r.matchEnded = true
 		r.winner = winner
 		r.endReason = "disconnect_timeout"
@@ -875,14 +977,37 @@ func (r *RoomSession) swapConnectedPlayerSidesUnsafe() {
 	connectedB := r.connectedByPlayer[gameplay.PlayerB]
 	r.connectedByPlayer[gameplay.PlayerA] = connectedB
 	r.connectedByPlayer[gameplay.PlayerB] = connectedA
-	timerA := r.disconnectTimers[gameplay.PlayerA]
-	timerB := r.disconnectTimers[gameplay.PlayerB]
-	r.disconnectTimers[gameplay.PlayerA] = timerB
-	r.disconnectTimers[gameplay.PlayerB] = timerA
-	ddA := r.disconnectDeadline[gameplay.PlayerA]
-	ddB := r.disconnectDeadline[gameplay.PlayerB]
-	r.disconnectDeadline[gameplay.PlayerA] = ddB
-	r.disconnectDeadline[gameplay.PlayerB] = ddA
+	timerA, okTA := r.disconnectTimers[gameplay.PlayerA]
+	timerB, okTB := r.disconnectTimers[gameplay.PlayerB]
+	delete(r.disconnectTimers, gameplay.PlayerA)
+	delete(r.disconnectTimers, gameplay.PlayerB)
+	if okTB && timerB != nil {
+		r.disconnectTimers[gameplay.PlayerA] = timerB
+	}
+	if okTA && timerA != nil {
+		r.disconnectTimers[gameplay.PlayerB] = timerA
+	}
+	ddA, okDA := r.disconnectDeadline[gameplay.PlayerA]
+	ddB, okDB := r.disconnectDeadline[gameplay.PlayerB]
+	delete(r.disconnectDeadline, gameplay.PlayerA)
+	delete(r.disconnectDeadline, gameplay.PlayerB)
+	if okDB {
+		r.disconnectDeadline[gameplay.PlayerA] = ddB
+	}
+	if okDA {
+		r.disconnectDeadline[gameplay.PlayerB] = ddA
+	}
+	r.ensureDisconnectBudgetMapsUnsafe()
+	ba := r.disconnectBudgetRemaining[gameplay.PlayerA]
+	bb := r.disconnectBudgetRemaining[gameplay.PlayerB]
+	r.disconnectBudgetRemaining[gameplay.PlayerA] = bb
+	r.disconnectBudgetRemaining[gameplay.PlayerB] = ba
+	if r.disconnectSegmentStart != nil {
+		sa := r.disconnectSegmentStart[gameplay.PlayerA]
+		sb := r.disconnectSegmentStart[gameplay.PlayerB]
+		r.disconnectSegmentStart[gameplay.PlayerA] = sb
+		r.disconnectSegmentStart[gameplay.PlayerB] = sa
+	}
 	nameA := r.displayNameByPlayer[gameplay.PlayerA]
 	nameB := r.displayNameByPlayer[gameplay.PlayerB]
 	r.displayNameByPlayer[gameplay.PlayerA] = nameB
@@ -911,6 +1036,19 @@ func (r *RoomSession) resetForNewMatchUnsafe() {
 		gameplay.PlayerA: ReactionModeOn,
 		gameplay.PlayerB: ReactionModeOn,
 	}
+	for _, tm := range r.disconnectTimers {
+		if tm != nil {
+			tm.Stop()
+		}
+	}
+	r.disconnectTimers = map[gameplay.PlayerID]*time.Timer{}
+	r.disconnectDeadline = map[gameplay.PlayerID]time.Time{}
+	total := r.effectiveDisconnectBudgetTotal()
+	r.ensureDisconnectBudgetMapsUnsafe()
+	r.disconnectBudgetRemaining[gameplay.PlayerA] = total
+	r.disconnectBudgetRemaining[gameplay.PlayerB] = total
+	r.disconnectSegmentStart[gameplay.PlayerA] = time.Time{}
+	r.disconnectSegmentStart[gameplay.PlayerB] = time.Time{}
 }
 
 // ShouldForceClosePostMatch reports if post-match idle deadline elapsed.

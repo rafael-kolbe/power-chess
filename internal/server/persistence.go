@@ -55,6 +55,9 @@ type roomServerState struct {
 	TurnDeadlineFor        string `json:"turnDeadlineFor,omitempty"`
 	PausedTurnRemainingMs  int64  `json:"pausedTurnRemainingMs,omitempty"`
 	ReactionDeadlineUnixMs int64  `json:"reactionDeadlineUnixMs,omitempty"`
+	// DisconnectBudgetRemainMsA/B are unused disconnect budget per seat (milliseconds, wall clock while offline).
+	DisconnectBudgetRemainMsA int64 `json:"disconnectBudgetRemainMsA,omitempty"`
+	DisconnectBudgetRemainMsB int64 `json:"disconnectBudgetRemainMsB,omitempty"`
 }
 
 // PostgresRoomStore stores room snapshots in PostgreSQL.
@@ -143,6 +146,9 @@ func (s *PostgresRoomStore) SaveRoom(ctx context.Context, room *RoomSession) err
 	if !room.reactionDeadline.IsZero() {
 		srv.ReactionDeadlineUnixMs = room.reactionDeadline.UnixMilli()
 	}
+	room.ensureDisconnectBudgetMapsUnsafe()
+	srv.DisconnectBudgetRemainMsA = room.disconnectBudgetRemaining[gameplay.PlayerA].Milliseconds()
+	srv.DisconnectBudgetRemainMsB = room.disconnectBudgetRemaining[gameplay.PlayerB].Milliseconds()
 	serverRaw, err := json.Marshal(srv)
 	if err != nil {
 		return err
@@ -224,6 +230,15 @@ func (s *PostgresRoomStore) LoadRoom(ctx context.Context, roomID string) (*RoomS
 	}
 	if state.ReactionDeadlineUnixMs > 0 {
 		room.reactionDeadline = time.UnixMilli(state.ReactionDeadlineUnixMs)
+	}
+	room.ensureDisconnectBudgetMapsUnsafe()
+	if state.DisconnectBudgetRemainMsA == 0 && state.DisconnectBudgetRemainMsB == 0 && !state.MatchEnded {
+		full := room.effectiveDisconnectBudgetTotal()
+		room.disconnectBudgetRemaining[gameplay.PlayerA] = full
+		room.disconnectBudgetRemaining[gameplay.PlayerB] = full
+	} else {
+		room.disconnectBudgetRemaining[gameplay.PlayerA] = time.Duration(state.DisconnectBudgetRemainMsA) * time.Millisecond
+		room.disconnectBudgetRemaining[gameplay.PlayerB] = time.Duration(state.DisconnectBudgetRemainMsB) * time.Millisecond
 	}
 	// Persisted engine is authoritative; do not run MaybeRebuild again.
 	room.deckMatchInitialized = true
