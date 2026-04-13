@@ -10,8 +10,8 @@ var igniteReactionFirstCardIDs = map[string]struct{}{
 // in an ignite_reaction window: a Retribution card, or Extinguish, with sufficient mana and
 // no duplicate of that card id on cooldown (same rule as ignition activation).
 //
-// Retribution card text conditions are intentionally ignored until feature/gameplay-next;
-// see internal/match/reactions.go TODO for Counter parity.
+// Retribution card text conditions are intentionally ignored for now (deferred); see
+// internal/match/reactions.go TODO(future) for Counter AUTO parity when extended.
 func EligibleForIgniteReactionAUTO(s *MatchState, pid PlayerID) bool {
 	if s == nil {
 		return false
