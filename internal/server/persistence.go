@@ -56,8 +56,12 @@ type roomServerState struct {
 	PausedTurnRemainingMs  int64  `json:"pausedTurnRemainingMs,omitempty"`
 	ReactionDeadlineUnixMs int64  `json:"reactionDeadlineUnixMs,omitempty"`
 	// DisconnectBudgetRemainMsA/B are unused disconnect budget per seat (milliseconds, wall clock while offline).
-	DisconnectBudgetRemainMsA int64 `json:"disconnectBudgetRemainMsA,omitempty"`
-	DisconnectBudgetRemainMsB int64 `json:"disconnectBudgetRemainMsB,omitempty"`
+	DisconnectBudgetRemainMsA   int64  `json:"disconnectBudgetRemainMsA,omitempty"`
+	DisconnectBudgetRemainMsB   int64  `json:"disconnectBudgetRemainMsB,omitempty"`
+	DisconnectFrozenMainMs      int64  `json:"disconnectFrozenMainMs,omitempty"`
+	DisconnectFrozenMainFor     string `json:"disconnectFrozenMainFor,omitempty"`
+	DisconnectFrozenCarryPaused bool   `json:"disconnectFrozenCarryPaused,omitempty"`
+	DisconnectFrozenReactionMs  int64  `json:"disconnectFrozenReactionMs,omitempty"`
 }
 
 // PostgresRoomStore stores room snapshots in PostgreSQL.
@@ -149,6 +153,14 @@ func (s *PostgresRoomStore) SaveRoom(ctx context.Context, room *RoomSession) err
 	room.ensureDisconnectBudgetMapsUnsafe()
 	srv.DisconnectBudgetRemainMsA = room.disconnectBudgetRemaining[gameplay.PlayerA].Milliseconds()
 	srv.DisconnectBudgetRemainMsB = room.disconnectBudgetRemaining[gameplay.PlayerB].Milliseconds()
+	if room.disconnectFrozenMainRemaining > 0 {
+		srv.DisconnectFrozenMainMs = room.disconnectFrozenMainRemaining.Milliseconds()
+		srv.DisconnectFrozenMainFor = string(room.disconnectFrozenMainFor)
+		srv.DisconnectFrozenCarryPaused = room.disconnectFrozenCarryPausedTurn
+	}
+	if room.disconnectFrozenReactionRemaining > 0 {
+		srv.DisconnectFrozenReactionMs = room.disconnectFrozenReactionRemaining.Milliseconds()
+	}
 	serverRaw, err := json.Marshal(srv)
 	if err != nil {
 		return err
@@ -239,6 +251,14 @@ func (s *PostgresRoomStore) LoadRoom(ctx context.Context, roomID string) (*RoomS
 	} else {
 		room.disconnectBudgetRemaining[gameplay.PlayerA] = time.Duration(state.DisconnectBudgetRemainMsA) * time.Millisecond
 		room.disconnectBudgetRemaining[gameplay.PlayerB] = time.Duration(state.DisconnectBudgetRemainMsB) * time.Millisecond
+	}
+	if state.DisconnectFrozenMainMs > 0 && state.DisconnectFrozenMainFor != "" {
+		room.disconnectFrozenMainRemaining = time.Duration(state.DisconnectFrozenMainMs) * time.Millisecond
+		room.disconnectFrozenMainFor = gameplay.PlayerID(state.DisconnectFrozenMainFor)
+		room.disconnectFrozenCarryPausedTurn = state.DisconnectFrozenCarryPaused
+	}
+	if state.DisconnectFrozenReactionMs > 0 {
+		room.disconnectFrozenReactionRemaining = time.Duration(state.DisconnectFrozenReactionMs) * time.Millisecond
 	}
 	// Persisted engine is authoritative; do not run MaybeRebuild again.
 	room.deckMatchInitialized = true

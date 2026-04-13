@@ -47,6 +47,7 @@ alwaysApply: true
 - Existing undocumented functions can be documented incrementally over time.
 
 ## Delivery Discipline
+- **Git push policy:** see `.cursor/rules/git-branch-push.mdc` — never push `main` without written authorization; never push `dev` without consent; autonomous pushes only on `feature/<feature-name>` (or user-agreed work branches).
 - Document rule changes in `PROJECT.md` when they affect gameplay.
 - Update `README.md` when setup, tooling, or run instructions change.
 - Review and update relevant markdown docs (`PROJECT.md`, `README.md`, `PROTOCOL.md`, card/skill docs) whenever behavior changes.

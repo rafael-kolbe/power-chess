@@ -212,8 +212,7 @@ import {
             reasonCheckmateShort: "Reason: checkmate.",
             reasonStalemateShort: "Reason: stalemate.",
             disconnectWinAlert: "Victory: opponent disconnected and did not return in time.",
-            opponentDisconnectedTitle: "Opponent disconnected",
-            opponentDisconnectedSeconds: "{s}s",
+            opponentDisconnectedBanner: "Opponent disconnected ({s}s)",
             opponentDisconnectedHint:
                 "You will win when the timer reaches 0 if they do not return. This seat is closed to other players until then.",
             rematchProposed: "New game proposed, click on 'Play again' to accept.",
@@ -342,8 +341,7 @@ import {
             reasonCheckmateShort: "Motivo: Xeque-mate.",
             reasonStalemateShort: "Motivo: Afogamento (stalemate).",
             disconnectWinAlert: "Vitória: o adversário saiu da sala (tempo de reconexão expirou).",
-            opponentDisconnectedTitle: "Oponente desconectou",
-            opponentDisconnectedSeconds: "{s}s",
+            opponentDisconnectedBanner: "Jogador desconectado ({s}s)",
             opponentDisconnectedHint:
                 "Você vence quando o tempo chegar a 0 se o adversário não voltar. Este lugar fica fechado para outros até lá.",
             rematchProposed: "Novo jogo proposto, clique em 'Jogar novamente' para aceitar.",
@@ -3799,12 +3797,13 @@ import {
         }
         opponentDisconnectOverlayEl.classList.remove("hidden");
         opponentDisconnectOverlayEl.setAttribute("aria-hidden", "false");
-        document.getElementById("opponentDisconnectTitle").textContent = t("opponentDisconnectedTitle");
-        document.getElementById("opponentDisconnectHint").textContent = t("opponentDisconnectedHint");
+        const titleEl = document.getElementById("opponentDisconnectTitle");
         const countdownEl = document.getElementById("opponentDisconnectCountdown");
+        document.getElementById("opponentDisconnectHint").textContent = t("opponentDisconnectedHint");
+        if (countdownEl) countdownEl.classList.add("hidden");
         const tick = () => {
             const sec = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-            countdownEl.textContent = t("opponentDisconnectedSeconds", { s: sec });
+            if (titleEl) titleEl.textContent = t("opponentDisconnectedBanner", { s: sec });
             if (sec <= 0) {
                 hideOpponentDisconnectOverlay();
             }

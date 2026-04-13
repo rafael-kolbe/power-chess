@@ -373,8 +373,8 @@ button:disabled {
   padding: 16px 18px;
   text-align: center;
   pointer-events: auto;
-  background: #1a2330;
-  border: 1px solid #3d5a7a;
+  background: linear-gradient(160deg, #143524 0%, #0f2a1c 100%);
+  border: 1px solid #2d6b4a;
   border-radius: 10px;
   box-shadow: 0 8px 28px rgb(0 0 0 / 45%);
 }
@@ -383,7 +383,7 @@ button:disabled {
   margin: 0 0 8px;
   font-size: 17px;
   font-weight: 700;
-  color: #e8c96a;
+  color: #c8f5d8;
 }
 
 .opponent-disconnect-countdown {
@@ -398,7 +398,7 @@ button:disabled {
   margin: 0;
   font-size: 13px;
   line-height: 1.4;
-  color: #a9b6c4;
+  color: #9ec9ae;
 }
 
 .match-error-banner {

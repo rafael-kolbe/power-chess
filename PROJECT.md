@@ -124,7 +124,7 @@ Fluxo típico de ativação:
 - Enquanto a partida estiver **pausada por desconexão**, o jogador **ainda conectado não pode avançar** a partida (nada de novo lance válido que dependa do outro lado).
 - **Orçamento de desconexão por jogador por partida: 60 s no total** (não reinicia a cada queda: se o jogador cair de novo na mesma partida, o contador **continua de onde parou**).
 - **Grace mínimo de 5 s por evento de desconexão:** desde a detecção, o servidor **não** declara vitória ao outro jogador **por desconexão** antes de passarem **no mínimo 5 s** (falhas de rede ou fechar aba por instantes não encerram a partida na hora). **Após** esse grace, se as regras de fim por desconexão forem atendidas (ex.: orçamento de 60 s esgotado), a vitória do conectado pode ser aplicada.
-- **Banner verde** na área do oponente, com contagem do tempo restante do orçamento (ou campo equivalente no protocolo). Textos sugeridos: **pt-BR** — *“Jogador desconectado (Xs)”*; **EN** — *“Opponent disconnected (Xs)”* (o **X** é o valor dinâmico vindo do servidor).
+- **Banner verde** na área do oponente, com contagem do tempo restante do orçamento (ou campo equivalente no protocolo). Textos sugeridos: **pt-BR** — *“Jogador desconectado ({s}s)”*; **EN** — *“Opponent disconnected ({s}s)”* (o **`{s}`** é o valor dinâmico em segundos vindo do cliente com base no protocolo).
 - Esgotado o orçamento (após o grace, conforme acima): vitória do conectado por desconexão / fim de partida (detalhar em [PROTOCOL.md](PROTOCOL.md)).
 - Ambos offline → partida cancelada sem vencedor (conforme `endReason`), salvo regra futura explícita.
 - `leave_match` com oponente conectado pode encerrar com vitória do outro.  
@@ -167,7 +167,13 @@ Fluxo típico de ativação:
 ## Qualidade e commits
 
 - Toda funcionalidade nova ou bugfix relevante deve incluir **testes**.  
-- Commits na **`main`** quando a entrega estiver **coesa** e **`go test ./...`** (e E2E quando aplicável) estiver verde.
+- Commits na **`branch feature/<feature-name>`** quando a entrega estiver **coesa** e **`go test ./...`** (e E2E quando aplicável) estiver verde.
+
+### Política de push (Git)
+
+- **`main`**: não fazer push sem **autorização explícita por escrito**.
+- **`dev`**: não fazer push sem **consentimento** explícito.
+- **Trabalho corrente**: push automático permitido apenas em **`feature/<feature-name>`** (ou branch de trabalho equivalente acordada). A regra detalhada para agentes está em `.cursor/rules/git-branch-push.mdc`.
 
 ---
 

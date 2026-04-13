@@ -33,6 +33,81 @@ func TestMarkRequestOnce(t *testing.T) {
 	}
 }
 
+// TestDisconnectFreezePreservesMainClockInSnapshot exposes frozen main turn time during reconnect grace.
+func TestDisconnectFreezePreservesMainClockInSnapshot(t *testing.T) {
+	room, err := NewRoomSession("room-freeze-main")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	syncDisconnectBudgetForTest(room, time.Minute)
+	room.Engine.State.MulliganPhaseActive = false
+	room.Engine.State.Started = true
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	room.RegisterPlayerConnection(gameplay.PlayerB)
+
+	remaining := 40 * time.Second
+	room.stateM.Lock()
+	room.turnDeadline = time.Now().UTC().Add(remaining)
+	room.turnDeadlineFor = gameplay.PlayerA
+	room.stateM.Unlock()
+
+	room.HandlePlayerDisconnect(gameplay.PlayerA)
+
+	snap := room.SnapshotForPlayerSafe(gameplay.PlayerB)
+	if snap.TurnMainDeadlineUnixMs == 0 || snap.TurnMainPausedRemainingMs != 0 {
+		t.Fatalf("expected TurnMainDeadlineUnixMs during grace, got deadline=%d paused=%d",
+			snap.TurnMainDeadlineUnixMs, snap.TurnMainPausedRemainingMs)
+	}
+	gotRem := time.Until(time.UnixMilli(snap.TurnMainDeadlineUnixMs))
+	slack := 2500 * time.Millisecond
+	if gotRem < remaining-slack || gotRem > remaining+slack {
+		t.Fatalf("frozen main remaining want ~%v got %v", remaining, gotRem)
+	}
+
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	snap2 := room.SnapshotForPlayerSafe(gameplay.PlayerB)
+	if snap2.TurnMainDeadlineUnixMs == 0 {
+		t.Fatalf("expected resumed TurnMainDeadlineUnixMs after reconnect")
+	}
+	gotRem2 := time.Until(time.UnixMilli(snap2.TurnMainDeadlineUnixMs))
+	if gotRem2 < remaining-slack || gotRem2 > remaining+slack {
+		t.Fatalf("resumed main remaining want ~%v got %v", remaining, gotRem2)
+	}
+}
+
+// TestDisconnectFreezePreservesPausedMainTurn mirrors a main turn paused for capture/ignite reaction during opponent disconnect.
+func TestDisconnectFreezePreservesPausedMainTurn(t *testing.T) {
+	room, err := NewRoomSession("room-freeze-paused")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	syncDisconnectBudgetForTest(room, time.Minute)
+	room.Engine.State.MulliganPhaseActive = false
+	room.Engine.State.Started = true
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	room.RegisterPlayerConnection(gameplay.PlayerB)
+
+	room.stateM.Lock()
+	room.pausedTurnRemaining = 30 * time.Second
+	room.turnDeadlineFor = gameplay.PlayerA
+	room.turnDeadline = time.Time{}
+	room.stateM.Unlock()
+
+	room.HandlePlayerDisconnect(gameplay.PlayerA)
+
+	snap := room.SnapshotForPlayerSafe(gameplay.PlayerB)
+	if snap.TurnMainPausedRemainingMs != 30000 || snap.TurnMainDeadlineUnixMs != 0 {
+		t.Fatalf("expected paused main 30000ms in snapshot, got deadline=%d paused=%d",
+			snap.TurnMainDeadlineUnixMs, snap.TurnMainPausedRemainingMs)
+	}
+
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	snap2 := room.SnapshotForPlayerSafe(gameplay.PlayerB)
+	if snap2.TurnMainPausedRemainingMs != 30000 {
+		t.Fatalf("want resumed paused 30000ms, got %d", snap2.TurnMainPausedRemainingMs)
+	}
+}
+
 // TestJoinSeatBlockedDuringReconnectGrace ensures a third party cannot take the vacant seat while the grace timer runs.
 func TestJoinSeatBlockedDuringReconnectGrace(t *testing.T) {
 	room, err := NewRoomSession("room-join-grace")

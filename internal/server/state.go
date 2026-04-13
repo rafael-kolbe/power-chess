@@ -37,13 +37,18 @@ type RoomSession struct {
 	disconnectBudgetRemaining map[gameplay.PlayerID]time.Duration
 	// disconnectSegmentStart records when the current offline segment began (zero if seat is connected or not in segment).
 	disconnectSegmentStart map[gameplay.PlayerID]time.Time
-	matchEnded             bool
-	winner                 gameplay.PlayerID
-	endReason              string
-	reactionTimeout        time.Duration
-	reactionDeadline       time.Time
-	turnDeadline           time.Time
-	turnDeadlineFor        gameplay.PlayerID
+	// disconnectFrozen* preserve match clocks while exactly one player is offline (PROJECT.md pause).
+	disconnectFrozenReactionRemaining time.Duration
+	disconnectFrozenMainRemaining     time.Duration
+	disconnectFrozenMainFor           gameplay.PlayerID
+	disconnectFrozenCarryPausedTurn   bool
+	matchEnded                        bool
+	winner                            gameplay.PlayerID
+	endReason                         string
+	reactionTimeout                   time.Duration
+	reactionDeadline                  time.Time
+	turnDeadline                      time.Time
+	turnDeadlineFor                   gameplay.PlayerID
 	// pausedTurnRemaining holds the main turn timer slice while a reaction window waits for the
 	// first response (capture_attempt or ignite_reaction); turnDeadline is cleared in that state.
 	pausedTurnRemaining time.Duration
@@ -418,7 +423,13 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 	payload.ReconnectPendingFor = reconnectFor
 	payload.ReconnectDeadlineUnixMs = reconnectUntil
 	if !r.matchEnded && !s.MulliganPhaseActive && (cA > 0 && cB > 0 || reconnectGrace) {
-		if !r.turnDeadline.IsZero() {
+		if reconnectGrace && r.disconnectFrozenMainRemaining > 0 && r.disconnectFrozenMainFor != "" {
+			if r.disconnectFrozenCarryPausedTurn {
+				payload.TurnMainPausedRemainingMs = r.disconnectFrozenMainRemaining.Milliseconds()
+			} else {
+				payload.TurnMainDeadlineUnixMs = time.Now().Add(r.disconnectFrozenMainRemaining).UnixMilli()
+			}
+		} else if !r.turnDeadline.IsZero() {
 			payload.TurnMainDeadlineUnixMs = r.turnDeadline.UnixMilli()
 		} else if r.pausedTurnRemaining > 0 {
 			payload.TurnMainPausedRemainingMs = r.pausedTurnRemaining.Milliseconds()
@@ -676,8 +687,69 @@ func (r *RoomSession) RegisterPlayerConnection(pid gameplay.PlayerID) {
 	}
 	delete(r.disconnectDeadline, pid)
 	if r.connectedByPlayer[gameplay.PlayerA] > 0 && r.connectedByPlayer[gameplay.PlayerB] > 0 {
+		r.resumeClocksAfterDisconnectIfNeededUnsafe(now)
+	}
+}
+
+// freezeClocksForDisconnectUnsafe snapshots active turn/reaction deadlines before pausing for a single-side disconnect.
+func (r *RoomSession) freezeClocksForDisconnectUnsafe(now time.Time) {
+	r.disconnectFrozenReactionRemaining = 0
+	r.disconnectFrozenMainRemaining = 0
+	r.disconnectFrozenMainFor = ""
+	r.disconnectFrozenCarryPausedTurn = false
+	if !r.reactionDeadline.IsZero() && now.Before(r.reactionDeadline) {
+		r.disconnectFrozenReactionRemaining = r.reactionDeadline.Sub(now)
+	}
+	if !r.turnDeadline.IsZero() && now.Before(r.turnDeadline) {
+		r.disconnectFrozenMainRemaining = r.turnDeadline.Sub(now)
+		r.disconnectFrozenMainFor = r.turnDeadlineFor
+	} else if r.pausedTurnRemaining > 0 {
+		r.disconnectFrozenMainRemaining = r.pausedTurnRemaining
+		r.disconnectFrozenMainFor = r.turnDeadlineFor
+		r.disconnectFrozenCarryPausedTurn = true
+		r.pausedTurnRemaining = 0
+	}
+	r.turnDeadline = time.Time{}
+	r.reactionDeadline = time.Time{}
+}
+
+// resumeClocksAfterDisconnectIfNeededUnsafe restores deadlines frozen during disconnect, or arms a fresh turn clock.
+func (r *RoomSession) resumeClocksAfterDisconnectIfNeededUnsafe(now time.Time) {
+	hadReaction := r.disconnectFrozenReactionRemaining > 0
+	if hadReaction {
+		r.reactionDeadline = now.Add(r.disconnectFrozenReactionRemaining)
+		r.disconnectFrozenReactionRemaining = 0
+	}
+	mRem := r.disconnectFrozenMainRemaining
+	mFor := r.disconnectFrozenMainFor
+	carry := r.disconnectFrozenCarryPausedTurn
+	if mRem > 0 && mFor != "" {
+		if carry {
+			r.pausedTurnRemaining = mRem
+			r.turnDeadlineFor = mFor
+			r.turnDeadline = time.Time{}
+		} else {
+			r.turnDeadline = now.Add(mRem)
+			r.turnDeadlineFor = mFor
+			r.pausedTurnRemaining = 0
+		}
+		r.disconnectFrozenMainRemaining = 0
+		r.disconnectFrozenCarryPausedTurn = false
+		return
+	}
+	r.disconnectFrozenCarryPausedTurn = false
+	r.disconnectFrozenMainRemaining = 0
+	if !hadReaction {
 		r.resetTurnDeadlineUnsafe(now)
 	}
+}
+
+// clearDisconnectFrozenUnsafe drops any in-memory disconnect freeze (match end, leave, or reset).
+func (r *RoomSession) clearDisconnectFrozenUnsafe() {
+	r.disconnectFrozenReactionRemaining = 0
+	r.disconnectFrozenMainRemaining = 0
+	r.disconnectFrozenMainFor = ""
+	r.disconnectFrozenCarryPausedTurn = false
 }
 
 // HandlePlayerDisconnect marks player as disconnected and applies timeout-based match ending rules.
@@ -698,6 +770,7 @@ func (r *RoomSession) HandlePlayerDisconnect(pid gameplay.PlayerID) {
 	bConnected := r.connectedByPlayer[gameplay.PlayerB] > 0
 	if !aConnected && !bConnected {
 		r.turnDeadline = time.Time{}
+		r.clearDisconnectFrozenUnsafe()
 		r.evaluateMatchOutcomeUnsafe()
 		if !r.matchEnded {
 			r.cancelMatchNoWinner()
@@ -705,7 +778,7 @@ func (r *RoomSession) HandlePlayerDisconnect(pid gameplay.PlayerID) {
 		return
 	}
 	if (pid == gameplay.PlayerA && bConnected) || (pid == gameplay.PlayerB && aConnected) {
-		r.turnDeadline = time.Time{}
+		r.freezeClocksForDisconnectUnsafe(time.Now().UTC())
 		r.scheduleDisconnectTimeout(pid)
 	}
 }
@@ -719,6 +792,7 @@ func (r *RoomSession) HandlePlayerLeave(pid gameplay.PlayerID) {
 
 func (r *RoomSession) handlePlayerLeaveUnsafe(pid gameplay.PlayerID) {
 	r.lastActivity = time.Now().UTC()
+	r.clearDisconnectFrozenUnsafe()
 	if r.connectedByPlayer[pid] > 0 {
 		r.connectedByPlayer[pid]--
 	}
@@ -856,6 +930,7 @@ func toChessColor(pid gameplay.PlayerID) chess.Color {
 }
 
 func (r *RoomSession) cancelMatchNoWinner() {
+	r.clearDisconnectFrozenUnsafe()
 	r.endReason = "both_disconnected_cancelled"
 	r.matchEnded = true
 	r.winner = ""
@@ -1049,6 +1124,7 @@ func (r *RoomSession) resetForNewMatchUnsafe() {
 	r.disconnectBudgetRemaining[gameplay.PlayerB] = total
 	r.disconnectSegmentStart[gameplay.PlayerA] = time.Time{}
 	r.disconnectSegmentStart[gameplay.PlayerB] = time.Time{}
+	r.clearDisconnectFrozenUnsafe()
 }
 
 // ShouldForceClosePostMatch reports if post-match idle deadline elapsed.
