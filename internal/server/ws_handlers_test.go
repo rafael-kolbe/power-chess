@@ -37,7 +37,7 @@ func dialAndHello(t *testing.T, wsURL string) *websocket.Conn {
 	}
 	t.Cleanup(func() { c.Close() })
 	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, _, _ = c.ReadMessage() // hello
+	_, _, _ = c.ReadMessage()          // hello
 	_ = c.SetReadDeadline(time.Time{}) // clear deadline
 	return c
 }
@@ -717,6 +717,43 @@ func TestHandleSetReactionModeSucceeds(t *testing.T) {
 		t.Fatal("expected ack for set_reaction_mode")
 	}
 	_ = cB
+}
+
+// TestStateSnapshotIncludesReconnectFieldsWhenPeerDisconnects ensures the surviving peer receives
+// reconnect grace fields over WebSocket after the other socket closes (HUD banner + frozen clock).
+func TestStateSnapshotIncludesReconnectFieldsWhenPeerDisconnects(t *testing.T) {
+	t.Setenv("ADMIN_DEBUG_MATCH", "1")
+	_, wsURL := wsSetup(t)
+	cA, cB := joinTwoPlayers(t, wsURL, "924")
+	applyDebugFixtureFromClient(t, cA)
+	confirmMulliganBoth(t, cA, cB)
+
+	_ = cA.Close()
+
+	var snap StateSnapshotPayload
+	foundGrace := false
+	for i := 0; i < 25; i++ {
+		env, ok := drainUntilType(t, cB, MessageStateSnapshot, 8)
+		if !ok {
+			t.Fatalf("expected state_snapshot after peer disconnect (iter %d)", i)
+		}
+		if err := json.Unmarshal(env.Payload, &snap); err != nil {
+			t.Fatalf("unmarshal snapshot: %v", err)
+		}
+		if snap.ReconnectPendingFor == "A" && snap.ReconnectDeadlineUnixMs > 0 {
+			foundGrace = true
+			break
+		}
+	}
+	if !foundGrace {
+		t.Fatalf("expected reconnectPendingFor=A and reconnect deadline, last snap=%+v", snap)
+	}
+	if snap.MatchEnded {
+		t.Fatalf("did not expect match ended during grace, got %+v", snap)
+	}
+	if snap.TurnMainDeadlineUnixMs == 0 && snap.TurnMainPausedRemainingMs == 0 {
+		t.Fatalf("expected frozen or active main clock in snapshot during grace, got %+v", snap)
+	}
 }
 
 // --- Duplicate request idempotency for action handlers ---

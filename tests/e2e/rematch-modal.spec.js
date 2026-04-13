@@ -185,7 +185,7 @@ test("if opponent leaves after proposal, keeps player gets proper message and ac
     globalThis.__wsMock.sendToLast({ type: "state_snapshot", payload: snapshot });
   }, baseSnapshot({ matchEnded: true, winner: "A", endReason: "left_room", rematchA: true, rematchB: false, connectedA: 1, connectedB: 0 }));
 
-  await expect(page.locator("#matchEndBody")).toContainText("O outro jogador saiu da sala.");
+  await expect(page.locator("#matchEndBody")).toContainText("O oponente saiu da sala.");
   const actionState = await page.evaluate(() => ({
     stayHidden: document.getElementById("matchEndStay")?.classList.contains("hidden"),
     rematchHidden: document.getElementById("matchEndRematch")?.classList.contains("hidden")
@@ -199,7 +199,7 @@ test("shows waiting message after local rematch vote", async ({ page }) => {
     globalThis.__wsMock.sendToLast({ type: "state_snapshot", payload: snapshot });
   }, baseSnapshot({ matchEnded: true, winner: "A", endReason: "left_room", rematchA: true, rematchB: false, connectedA: 1, connectedB: 1 }));
 
-  await expect(page.locator("#matchEndBody")).toContainText("Aguardando o adversário aceitar o novo jogo.");
+  await expect(page.locator("#matchEndBody")).toContainText("Aguardando o oponente aceitar o novo jogo.");
 });
 
 test("hides end-match overlay when a new match starts", async ({ page }) => {

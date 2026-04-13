@@ -35,13 +35,20 @@ Use este arquivo quando o contexto da conversa se perder. A fonte canônica deta
 
 - **Implementado (servidor):** orçamento **60 s** de tempo **offline** cumulativo por jogador por partida (`disconnectBudgetRemaining`); ao reconectar, o segmento atual debita do orçamento. Vitória do oponente em `disconnect_timeout` no instante `max(detecção + 5 s, detecção + orçamento restante)` (campos configuráveis por sala: `DisconnectBudgetTotal`, `DisconnectMinWinDelay` — testes usam valores curtos).
 - Enquanto um lado está offline e o outro online, `BothPlayersConnected` é falso → o cliente já bloqueia jogadas; timers de **reação** também não avançam com um lado a zero.
-- Banner **verde** / contagem: UI usa `reconnectPendingFor` + `reconnectDeadlineUnixMs` no snapshot (deadline efetiva do fim por desconexão desse evento).
-- **Pendente / UX:** textos finais EN/pt-BR no banner se ainda não estiverem no i18n; afinações de cópia ver skill de copy.
+- Banner **verde** / contagem: UI usa `reconnectPendingFor` + `reconnectDeadlineUnixMs` no snapshot (deadline efetiva do fim por desconexão desse evento). Textos EN/pt-BR do banner em `web/app.js` (`opponentDisconnectedBanner` / hint); revisão fina de cópia: skill **power-chess-tcg-copy-review**.
 
 ## i18n
 
-- Traduzir textos de jogo (EN + pt-BR) salvo exceções que o designer especificar.
+- Textos de jogo em EN + pt-BR no cliente; termo preferido para o adversário na UI: **oponente** (pt-BR), salvo strings canónicas do produto (ex.: banner *Jogador desconectado* alinhado a `PROJECT.md`).
 
 ## Cartas / efeitos
 
 - Foco inicial: **tipo** de carta e **abertura correta de janelas**; efeitos finos das cartas depois.
+
+---
+
+## Estado da feature (checklist de roadmap)
+
+Objetivos desta linha (**reações OFF/ON/AUTO**, **tempo 30s+30s**, **captura + ignite reaction**, **desconexão 60s + grace 5s + pausa de relógio + banner**) estão **implementados** e cobertos por testes Go (incl. snapshot de reconnect via WebSocket).
+
+**Explicitamente fora desta entrega:** condições **textuais** das Counter no modo **AUTO** — `TODO` em `internal/match/reactions.go`.
