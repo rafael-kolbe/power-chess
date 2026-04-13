@@ -122,8 +122,10 @@ Fluxo típico de ativação:
 
 - O **servidor** deve detectar desconexão (WebSocket fechado / perda de sessão) **de imediato** e **pausar** qualquer fluxo de partida que dependa daquele jogador (jogadas, timers de reação, chains — animações puramente locais no cliente podem terminar, mas estado autoritativo fica **pausado** até retomada).
 - Enquanto a partida estiver **pausada por desconexão**, o jogador **ainda conectado não pode avançar** a partida (nada de novo lance válido que dependa do outro lado).
-- **Orçamento de desconexão por jogador por partida: 60 s no total** (não reinicia a cada queda: se o jogador cair de novo na mesma partida, o contador **continua de onde parou**). Exibir na UI do oponente um **banner verde** com texto do tipo **“Jogador desconectado (60s)”** e **contagem regressiva** do tempo restante desse orçamento (ou do que o protocolo expuser).
-- Esgotado o orçamento (ou regra equivalente no servidor): vitória do conectado por desconexão / fim de partida (detalhar em [PROTOCOL.md](PROTOCOL.md)).
+- **Orçamento de desconexão por jogador por partida: 60 s no total** (não reinicia a cada queda: se o jogador cair de novo na mesma partida, o contador **continua de onde parou**).
+- **Grace mínimo de 5 s por evento de desconexão:** desde a detecção, o servidor **não** declara vitória ao outro jogador **por desconexão** antes de passarem **no mínimo 5 s** (falhas de rede ou fechar aba por instantes não encerram a partida na hora). **Após** esse grace, se as regras de fim por desconexão forem atendidas (ex.: orçamento de 60 s esgotado), a vitória do conectado pode ser aplicada.
+- **Banner verde** na área do oponente, com contagem do tempo restante do orçamento (ou campo equivalente no protocolo). Textos sugeridos: **pt-BR** — *“Jogador desconectado (Xs)”*; **EN** — *“Opponent disconnected (Xs)”* (o **X** é o valor dinâmico vindo do servidor).
+- Esgotado o orçamento (após o grace, conforme acima): vitória do conectado por desconexão / fim de partida (detalhar em [PROTOCOL.md](PROTOCOL.md)).
 - Ambos offline → partida cancelada sem vencedor (conforme `endReason`), salvo regra futura explícita.
 - `leave_match` com oponente conectado pode encerrar com vitória do outro.  
 - Detalhes em [PROTOCOL.md](PROTOCOL.md) (`matchEnded`, `winner`, `endReason`, rematch).
