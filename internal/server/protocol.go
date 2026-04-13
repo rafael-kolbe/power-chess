@@ -261,18 +261,22 @@ type StateSnapshotPayload struct {
 	// MulliganDeadlineUnixMs is when unconfirmed seats auto-keep all cards (0 if not in mulligan).
 	MulliganDeadlineUnixMs int64 `json:"mulliganDeadlineUnixMs,omitempty"`
 	// ReconnectPendingFor is "A" or "B" while that seat's socket is gone but the grace timer has not fired yet.
-	ReconnectPendingFor     string                 `json:"reconnectPendingFor,omitempty"`
-	ReconnectDeadlineUnixMs int64                  `json:"reconnectDeadlineUnixMs,omitempty"`
-	TurnPlayer              string                 `json:"turnPlayer"`
-	TurnSeconds             int                    `json:"turnSeconds"`
-	TurnNumber              int                    `json:"turnNumber"`
-	IgnitionOn              bool                   `json:"ignitionOn"`
-	IgnitionCard            string                 `json:"ignitionCard,omitempty"`
-	IgnitionOwner           string                 `json:"ignitionOwner,omitempty"`
-	IgnitionTurnsRemaining  int                    `json:"ignitionTurnsRemaining"`
-	Board                   [8][8]string           `json:"board"`
-	EnPassant               EnPassantStateSnapshot `json:"enPassant"`
-	CastlingRights          CastlingRightsSnapshot `json:"castlingRights"`
+	ReconnectPendingFor     string `json:"reconnectPendingFor,omitempty"`
+	ReconnectDeadlineUnixMs int64  `json:"reconnectDeadlineUnixMs,omitempty"`
+	TurnPlayer              string `json:"turnPlayer"`
+	TurnSeconds             int    `json:"turnSeconds"`
+	TurnNumber              int    `json:"turnNumber"`
+	// TurnMainDeadlineUnixMs is the wall-clock instant when the main turn timer expires (0 if paused for reaction).
+	TurnMainDeadlineUnixMs int64 `json:"turnMainDeadlineUnixMs,omitempty"`
+	// TurnMainPausedRemainingMs is remaining main-turn budget while the first reaction response is pending (0 if not paused).
+	TurnMainPausedRemainingMs int64                  `json:"turnMainPausedRemainingMs,omitempty"`
+	IgnitionOn                bool                   `json:"ignitionOn"`
+	IgnitionCard              string                 `json:"ignitionCard,omitempty"`
+	IgnitionOwner             string                 `json:"ignitionOwner,omitempty"`
+	IgnitionTurnsRemaining    int                    `json:"ignitionTurnsRemaining"`
+	Board                     [8][8]string           `json:"board"`
+	EnPassant                 EnPassantStateSnapshot `json:"enPassant"`
+	CastlingRights            CastlingRightsSnapshot `json:"castlingRights"`
 	// ViewerPlayerID identifies whose perspective this snapshot is for (drives hand visibility).
 	ViewerPlayerID  string               `json:"viewerPlayerId,omitempty"`
 	Players         []PlayerHUDState     `json:"players"`

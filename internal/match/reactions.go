@@ -6,10 +6,10 @@ import (
 	"power-chess/internal/gameplay"
 )
 
-// TODO(feature/gameplay-next): For reaction mode AUTO, eligibility must eventually include
-// Counter card activation conditions (e.g. capture context) in addition to hand, mana,
-// cooldown duplicate rule, and card type. First delivery may omit Counter condition checks;
-// see PROJECT.md ("Modo AUTO" / entregas) and docs/AGENT_HANDOFF_FEATURE_GAMEPLAY.md.
+// TODO(future): For reaction mode AUTO, extend eligibility with Counter card **text conditions**
+// (e.g. capture context for Counterattack) in addition to hand, mana, cooldown duplicate rule,
+// and card type. Explicitly deferred — not part of the feature/gameplay delivery scope;
+// see PROJECT.md ("Modo AUTO") when implementing.
 
 // ReactionWindow defines an open response window (Counter/Retribution) for the current trigger.
 type ReactionWindow struct {
@@ -78,6 +78,15 @@ func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, target 
 			return errors.New("capture reaction chain must start with a Counter card")
 		}
 	}
+	if e.ReactionWindow.Trigger == "ignite_reaction" && len(e.reactionStack) == 0 {
+		if pid == e.ReactionWindow.Actor {
+			return errors.New("ignite reaction must be started by the opponent")
+		}
+		firstOK := def.Type == gameplay.CardTypeRetribution || (def.Type == gameplay.CardTypePower && card.CardID == CardExtinguish)
+		if !firstOK {
+			return errors.New("ignite reaction must start with Retribution or Extinguish")
+		}
+	}
 	if def.ID == CardBlockade {
 		if e.ReactionWindow.Trigger != "capture_attempt" || e.pendingMove == nil {
 			return errors.New("blockade requires an active capture_attempt chain")
@@ -92,6 +101,14 @@ func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, target 
 	if len(e.reactionStack) > 0 {
 		prev := e.reactionStack[len(e.reactionStack)-1]
 		prevDef, ok := gameplay.CardDefinitionByID(prev.Card.CardID)
+		if e.ReactionWindow.Trigger == "ignite_reaction" {
+			if ok && prevDef.Type == gameplay.CardTypeRetribution && def.Type != gameplay.CardTypeRetribution {
+				return errors.New("only Retribution cards can respond to Retribution cards")
+			}
+			if ok && prevDef.Type == gameplay.CardTypePower && def.Type != gameplay.CardTypeRetribution {
+				return errors.New("only Retribution cards can respond after a Power reaction")
+			}
+		}
 		if ok && prevDef.Type == gameplay.CardTypeCounter && def.Type != gameplay.CardTypeCounter {
 			return errors.New("only Counter cards can respond to Counter cards")
 		}
@@ -168,4 +185,3 @@ func (e *Engine) ReactionWindowSnapshot() (ReactionWindow, int, bool) {
 	cp.EligibleTypes = append([]gameplay.CardType(nil), cp.EligibleTypes...)
 	return cp, len(e.reactionStack), true
 }
-

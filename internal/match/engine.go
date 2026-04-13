@@ -136,7 +136,31 @@ func (e *Engine) ActivateCard(pid gameplay.PlayerID, handIndex int) error {
 	if err := e.State.ActivateCard(pid, handIndex); err != nil {
 		return err
 	}
-	return e.processResolvedIgnitions()
+	if err := e.processResolvedIgnitions(); err != nil {
+		return err
+	}
+	e.maybeOpenIgniteReactionWindow(pid)
+	return nil
+}
+
+// maybeOpenIgniteReactionWindow opens ignite_reaction for the opponent when a Power or Continuous
+// card remains in the ignition slot with ignition turns remaining (same-turn retribution window).
+func (e *Engine) maybeOpenIgniteReactionWindow(activator gameplay.PlayerID) {
+	if e.ReactionWindow != nil && e.ReactionWindow.Open {
+		return
+	}
+	if !e.State.IgnitionSlot.Occupied || e.State.IgnitionSlot.TurnsRemaining <= 0 {
+		return
+	}
+	card := e.State.IgnitionSlot.Card
+	def, ok := gameplay.CardDefinitionByID(card.CardID)
+	if !ok {
+		return
+	}
+	if def.Type != gameplay.CardTypePower && def.Type != gameplay.CardTypeContinuous {
+		return
+	}
+	e.OpenReactionWindow("ignite_reaction", activator, []gameplay.CardType{gameplay.CardTypeRetribution, gameplay.CardTypePower})
 }
 
 // ResolvePendingEffect applies the next queued target-dependent effect for the player.
@@ -168,6 +192,9 @@ func (e *Engine) SubmitMove(pid gameplay.PlayerID, m chess.Move) error {
 	}
 	if e.pendingMove != nil {
 		return errors.New("cannot submit another move while capture reaction window is pending")
+	}
+	if e.ReactionWindow != nil && e.ReactionWindow.Open && e.ReactionWindow.Trigger == "ignite_reaction" {
+		return errors.New("cannot submit move while ignite reaction window is open")
 	}
 
 	if e.isCaptureAttempt(pid, m) {

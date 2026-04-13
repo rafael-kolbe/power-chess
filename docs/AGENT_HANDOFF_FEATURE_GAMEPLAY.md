@@ -8,7 +8,7 @@ Use este arquivo quando o contexto da conversa se perder. A fonte canônica deta
 - Qualquer jogador pode mudar o toggle **a qualquer momento**; o **servidor** passa a respeitar o novo estado **a partir desse instante** (não só UI).
 - **OFF**: **não abrir** janelas de reação só para dar pass — o jogador da vez segue sem micro-interrupções; equivalência conceitual ao oponente não poder reagir naquele trecho.
 - **ON**: oponente recebe direito de reação nas ações elegíveis **mesmo** sem carta/mana útil.
-- **AUTO**: direito de reação só se houver **caminho plausível** de resposta: cartas na mão, **mana atual**, **não haver cópia da mesma carta na recarga** (bloqueia ignição da cópia na mão), tipo de carta permitido na janela. **Primeira entrega:** não validar ainda **condições textuais de Counter Cards** (só na próxima feature) — ver `TODO` em `internal/match/reactions.go`.
+- **AUTO**: direito de reação só se houver **caminho plausível** de resposta: cartas na mão, **mana atual**, **não haver cópia da mesma carta na recarga** (bloqueia ignição da cópia na mão), tipo de carta permitido na janela. **Fora do escopo desta feature:** validação das **condições textuais** das Counter cards no AUTO — permanece como **TODO** no código (`internal/match/reactions.go`) para retomada futura.
 
 ## Tempo (30s + 30s)
 

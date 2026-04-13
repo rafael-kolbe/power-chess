@@ -67,6 +67,7 @@ import {
     const pieceTypeEl = document.getElementById("pieceType");
     const boardWrapEl = document.getElementById("boardWrap");
     const boardFrameEl = document.getElementById("boardFrame");
+    const captureThreatOverlayEl = document.getElementById("captureThreatOverlay");
     const snapshotEl = document.getElementById("snapshot");
     const eventsEl = document.getElementById("events");
     const statusEl = document.getElementById("status");
@@ -3529,6 +3530,51 @@ import {
         return true;
     }
 
+    /** Draws arrow from attacker to capture target while `pendingCapture` is active (server snapshot). */
+    function renderCaptureThreatOverlay() {
+        const svg = captureThreatOverlayEl;
+        if (!svg || !boardFrameEl) return;
+        const pc = lastSnapshot?.pendingCapture;
+        if (!pc?.active) {
+            svg.innerHTML = "";
+            return;
+        }
+        requestAnimationFrame(() => {
+            if (!boardFrameEl || !captureThreatOverlayEl) return;
+            const pcInner = lastSnapshot?.pendingCapture;
+            if (!pcInner?.active) {
+                svg.innerHTML = "";
+                return;
+            }
+            const fromSq = boardFrameEl.querySelector(
+                `.sq[data-row="${pcInner.fromRow}"][data-col="${pcInner.fromCol}"]`,
+            );
+            const toSq = boardFrameEl.querySelector(
+                `.sq[data-row="${pcInner.toRow}"][data-col="${pcInner.toCol}"]`,
+            );
+            if (!fromSq || !toSq) {
+                svg.innerHTML = "";
+                return;
+            }
+            const br = boardFrameEl.getBoundingClientRect();
+            const w = Math.max(1, br.width);
+            const h = Math.max(1, br.height);
+            svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+            svg.setAttribute("width", "100%");
+            svg.setAttribute("height", "100%");
+            const r1 = fromSq.getBoundingClientRect();
+            const r2 = toSq.getBoundingClientRect();
+            const x1 = r1.left - br.left + r1.width / 2;
+            const y1 = r1.top - br.top + r1.height / 2;
+            const x2 = r2.left - br.left + r2.width / 2;
+            const y2 = r2.top - br.top + r2.height / 2;
+            const mid = `capture-arrow-head`;
+            const defs = `<defs><marker id="${mid}" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#dc2626"/></marker></defs>`;
+            const line = `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#dc2626" stroke-width="3" stroke-linecap="round" marker-end="url(#${mid})" opacity="0.88"/>`;
+            svg.innerHTML = defs + line;
+        });
+    }
+
     function renderBoard(board) {
         if (!boardFrameEl) return;
         syncBoardPerspectiveClass();
@@ -3537,6 +3583,7 @@ import {
         const moveSet = boardMoveKeySet();
         const selectedKey = selectedFrom ? posKey(selectedFrom.row, selectedFrom.col) : null;
         const ep = lastSnapshot?.enPassant;
+        const pendingCap = lastSnapshot?.pendingCapture;
 
         for (let gr = 0; gr < 10; gr++) {
             for (let gc = 0; gc < 10; gc++) {
@@ -3580,6 +3627,9 @@ import {
                 if (code) sq.classList.add("piece");
                 if (selectedKey === posKey(r, c)) sq.classList.add("selected");
                 if (moveSet.has(posKey(r, c))) sq.classList.add("move");
+                if (pendingCap?.active && pendingCap.toRow === r && pendingCap.toCol === c) {
+                    sq.classList.add("capture-threat-target");
+                }
                 const coordSpan = document.createElement("span");
                 coordSpan.className = "sq-coord";
                 coordSpan.textContent = logicalToAlgebraic(r, c);
@@ -3698,6 +3748,7 @@ import {
                 boardFrameEl.appendChild(sq);
             }
         }
+        renderCaptureThreatOverlay();
     }
 
     function renderStatus(snapshot) {
@@ -3952,6 +4003,18 @@ import {
     function syncTurnFromSnapshot(payload) {
         if (!clocksActive(payload)) return;
         turnSeconds = turnSecondsFromSnapshot(payload);
+        const mainEnd = Number(payload?.turnMainDeadlineUnixMs);
+        const pausedMs = Number(payload?.turnMainPausedRemainingMs);
+        if (Number.isFinite(mainEnd) && mainEnd > 0) {
+            turnDeadline = mainEnd;
+            if (payload.turnPlayer) currentTurn = payload.turnPlayer;
+            return;
+        }
+        if (Number.isFinite(pausedMs) && pausedMs > 0) {
+            turnDeadline = Date.now() + pausedMs;
+            if (payload.turnPlayer) currentTurn = payload.turnPlayer;
+            return;
+        }
         if (payload.turnPlayer && payload.turnPlayer !== currentTurn) {
             currentTurn = payload.turnPlayer;
             turnDeadline = Date.now() + turnSeconds * 1000;

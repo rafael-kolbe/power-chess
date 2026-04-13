@@ -241,6 +241,45 @@ func TestCaptureReactionSkippedWhenOpponentReactionOff(t *testing.T) {
 	}
 }
 
+// TestIgniteReactionSkippedWhenOpponentReactionOff closes ignite_reaction immediately when the responder uses OFF.
+func TestIgniteReactionSkippedWhenOpponentReactionOff(t *testing.T) {
+	room, err := NewRoomSession("room-ignite-off")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	s := room.Engine.State
+	s.MulliganPhaseActive = false
+	s.Started = true
+	s.CurrentTurn = gameplay.PlayerA
+	dt := gameplay.CardInstance{InstanceID: "dt1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}
+	s.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{dt}
+	s.Players[gameplay.PlayerA].Mana = 10
+	s.Players[gameplay.PlayerB].Mana = 10
+	room.reactionModeByPlayer[gameplay.PlayerB] = ReactionModeOff
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	room.RegisterPlayerConnection(gameplay.PlayerB)
+
+	if err := room.Execute(func() error {
+		if err := room.Engine.ActivateCard(gameplay.PlayerA, 0); err != nil {
+			return err
+		}
+		if err := room.maybeAutoResolveIgniteReactionUnsafe(); err != nil {
+			return err
+		}
+		room.pauseMainTurnIfReactionWindowOpenUnsafe(time.Now())
+		return nil
+	}); err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+	rw, _, ok := room.Engine.ReactionWindowSnapshot()
+	if ok && rw.Open {
+		t.Fatalf("expected ignite reaction window closed, got %+v", rw)
+	}
+	if !s.IgnitionSlot.Occupied {
+		t.Fatalf("expected ignition slot still occupied after skipped reaction")
+	}
+}
+
 // TestCaptureReactionWindowWhenOpponentReactionOn keeps the reaction window open until resolve.
 func TestCaptureReactionWindowWhenOpponentReactionOn(t *testing.T) {
 	room, err := NewRoomSession("room-cap-on")
@@ -257,6 +296,8 @@ func TestCaptureReactionWindowWhenOpponentReactionOn(t *testing.T) {
 	room.Engine.State.Started = true
 	room.Engine.State.CurrentTurn = gameplay.PlayerA
 	room.reactionModeByPlayer[gameplay.PlayerB] = ReactionModeOn
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	room.RegisterPlayerConnection(gameplay.PlayerB)
 
 	if err := room.Execute(func() error {
 		if err := room.Engine.SubmitMove(gameplay.PlayerA, chess.Move{
@@ -265,13 +306,20 @@ func TestCaptureReactionWindowWhenOpponentReactionOn(t *testing.T) {
 		}); err != nil {
 			return err
 		}
-		return room.maybeAutoResolveCaptureReactionUnsafe()
+		if err := room.maybeAutoResolveCaptureReactionUnsafe(); err != nil {
+			return err
+		}
+		room.pauseMainTurnIfReactionWindowOpenUnsafe(time.Now())
+		return nil
 	}); err != nil {
 		t.Fatalf("execute failed: %v", err)
 	}
 	rw, _, ok := room.Engine.ReactionWindowSnapshot()
 	if !ok || !rw.Open || rw.Trigger != "capture_attempt" {
 		t.Fatalf("expected open capture_attempt window, got ok=%v rw=%+v", ok, rw)
+	}
+	if room.pausedTurnRemaining <= 0 || !room.turnDeadline.IsZero() {
+		t.Fatalf("expected main turn clock paused for capture reaction, paused=%v deadline=%v", room.pausedTurnRemaining, room.turnDeadline)
 	}
 }
 

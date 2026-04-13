@@ -38,7 +38,7 @@
 - Qualquer jogador pode alterar o toggle **a qualquer momento**; a partir desse instante o **servidor** deve respeitar o **novo** estado (autoridade no backend, não só preferência de UI).
 - **OFF**: enquanto o oponente age, **não** conceder direito de reação — e **não abrir** janelas só para o oponente “dar pass”. O jogador da vez joga **sem micro-interrupções** por reação.
 - **ON**: oponente recebe direito de reação nas ações elegíveis **mesmo** que não tenha resposta viável (mana/cartas/condições).
-- **AUTO**: direito de reação só se for **identificável** que o jogador pode responder: cartas na **mão**, **mana atual**, **regra de cópia na recarga** (não pode **ignitar** uma carta se já existir **cópia** dela na zona de recarga), e **tipo** de carta permitido na janela. **Primeira entrega (feature/gameplay):** **não** é obrigatório validar ainda as **condições textuais** das **Counter Cards** (isso fica para a **próxima** feature); anotado em `internal/match/reactions.go` e em `docs/AGENT_HANDOFF_FEATURE_GAMEPLAY.md`.
+- **AUTO**: direito de reação só se for **identificável** que o jogador pode responder: cartas na **mão**, **mana atual**, **regra de cópia na recarga** (não pode **ignitar** uma carta se já existir **cópia** dela na zona de recarga), e **tipo** de carta permitido na janela. As **condições textuais** das Counter cards no AUTO ficam para **implementação futura**; `TODO` em `internal/match/reactions.go`.
 
 ### Tempo: turno principal e tempo de reação (30s + 30s)
 

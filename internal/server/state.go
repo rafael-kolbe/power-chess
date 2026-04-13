@@ -35,6 +35,9 @@ type RoomSession struct {
 	reactionDeadline   time.Time
 	turnDeadline       time.Time
 	turnDeadlineFor    gameplay.PlayerID
+	// pausedTurnRemaining holds the main turn timer slice while a reaction window waits for the
+	// first response (capture_attempt or ignite_reaction); turnDeadline is cleared in that state.
+	pausedTurnRemaining time.Duration
 	// mulliganDeadline is when the server auto-confirms any player who has not locked in (opening only).
 	mulliganDeadline  time.Time
 	postMatchDeadline time.Time
@@ -205,7 +208,73 @@ func (r *RoomSession) maybeAutoResolveCaptureReactionUnsafe() error {
 		return err
 	}
 	r.reactionDeadline = time.Time{}
+	r.resumeMainTurnAfterReactionUnsafe(time.Now())
 	return nil
+}
+
+// maybeAutoResolveIgniteReactionUnsafe resolves an empty ignite_reaction window when the
+// opponent's reaction mode skips it (off, or auto with no eligible opening card).
+func (r *RoomSession) maybeAutoResolveIgniteReactionUnsafe() error {
+	rw, stackSize, ok := r.Engine.ReactionWindowSnapshot()
+	if !ok || !rw.Open || rw.Trigger != "ignite_reaction" || stackSize != 0 {
+		return nil
+	}
+	responder := oppositePlayer(rw.Actor)
+	switch r.reactionModeUnsafe(responder) {
+	case ReactionModeOn:
+		return nil
+	case ReactionModeAuto:
+		if gameplay.EligibleForIgniteReactionAUTO(r.Engine.State, responder) {
+			return nil
+		}
+	default:
+	}
+	if err := r.Engine.ResolveReactionStack(); err != nil {
+		return err
+	}
+	r.reactionDeadline = time.Time{}
+	r.resumeMainTurnAfterReactionUnsafe(time.Now())
+	return nil
+}
+
+// pauseMainTurnIfReactionWindowOpenUnsafe freezes the main turn deadline when a reaction window
+// is waiting for the first response. Caller must hold r.stateM.
+func (r *RoomSession) pauseMainTurnIfReactionWindowOpenUnsafe(now time.Time) {
+	rw, stackSize, ok := r.Engine.ReactionWindowSnapshot()
+	if !ok || !rw.Open || stackSize != 0 {
+		return
+	}
+	if rw.Trigger != "capture_attempt" && rw.Trigger != "ignite_reaction" {
+		return
+	}
+	if r.pausedTurnRemaining > 0 {
+		return
+	}
+	if r.turnDeadline.IsZero() || r.turnDeadlineFor != rw.Actor {
+		return
+	}
+	r.pausedTurnRemaining = r.turnDeadline.Sub(now)
+	if r.pausedTurnRemaining < 0 {
+		r.pausedTurnRemaining = 0
+	}
+	r.turnDeadline = time.Time{}
+}
+
+// resumeMainTurnAfterReactionUnsafe restores the main turn deadline after the reaction window closes.
+// Caller must hold r.stateM.
+func (r *RoomSession) resumeMainTurnAfterReactionUnsafe(now time.Time) {
+	if r.pausedTurnRemaining <= 0 {
+		return
+	}
+	r.turnDeadlineFor = r.Engine.State.CurrentTurn
+	r.turnDeadline = now.Add(r.pausedTurnRemaining)
+	r.pausedTurnRemaining = 0
+}
+
+// noteReactionChainStartedUnsafe clears the reaction timeout while a non-empty stack is resolving.
+// Caller must hold r.stateM.
+func (r *RoomSession) noteReactionChainStartedUnsafe() {
+	r.reactionDeadline = time.Time{}
 }
 
 // Snapshot builds a compact state payload for UI synchronization.
@@ -331,6 +400,13 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 	payload.RematchB = r.rematchVotes[gameplay.PlayerB]
 	payload.ReconnectPendingFor = reconnectFor
 	payload.ReconnectDeadlineUnixMs = reconnectUntil
+	if !r.matchEnded && !s.MulliganPhaseActive && (cA > 0 && cB > 0 || reconnectGrace) {
+		if !r.turnDeadline.IsZero() {
+			payload.TurnMainDeadlineUnixMs = r.turnDeadline.UnixMilli()
+		} else if r.pausedTurnRemaining > 0 {
+			payload.TurnMainPausedRemainingMs = r.pausedTurnRemaining.Milliseconds()
+		}
+	}
 	if r.matchEnded && !r.postMatchDeadline.IsZero() {
 		msLeft := time.Until(r.postMatchDeadline).Milliseconds()
 		if msLeft < 0 {
@@ -406,6 +482,7 @@ func (r *RoomSession) ResolveReactionTimeoutIfExpired(now time.Time) (bool, erro
 		return false, err
 	}
 	r.reactionDeadline = time.Time{}
+	r.resumeMainTurnAfterReactionUnsafe(now)
 	r.evaluateMatchOutcomeUnsafe()
 	return true, nil
 }
@@ -651,6 +728,9 @@ func (r *RoomSession) ResolveTurnTimeoutIfExpired(now time.Time) (bool, error) {
 	}
 	cur := r.Engine.State.CurrentTurn
 	if r.turnDeadline.IsZero() || r.turnDeadlineFor != cur {
+		if r.pausedTurnRemaining > 0 {
+			return false, nil
+		}
 		r.resetTurnDeadlineUnsafe(now)
 		return false, nil
 	}
@@ -686,6 +766,7 @@ func (r *RoomSession) resetTurnDeadlineUnsafe(now time.Time) {
 	}
 	r.turnDeadlineFor = r.Engine.State.CurrentTurn
 	r.turnDeadline = now.Add(time.Duration(seconds) * time.Second)
+	r.pausedTurnRemaining = 0
 }
 
 func toChessColor(pid gameplay.PlayerID) chess.Color {
@@ -823,6 +904,7 @@ func (r *RoomSession) resetForNewMatchUnsafe() {
 	r.rematchVotes = map[gameplay.PlayerID]bool{}
 	r.turnDeadline = time.Time{}
 	r.turnDeadlineFor = ""
+	r.pausedTurnRemaining = 0
 	r.reactionDeadline = time.Time{}
 	r.mulliganDeadline = time.Time{}
 	r.reactionModeByPlayer = map[gameplay.PlayerID]string{

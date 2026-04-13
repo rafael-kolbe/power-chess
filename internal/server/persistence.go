@@ -36,20 +36,25 @@ type roomSnapshotModel struct {
 }
 
 type roomServerState struct {
-	RoomName     string              `json:"roomName"`
-	RoomPrivate  bool                `json:"roomPrivate"`
-	RoomPassword string              `json:"roomPassword"`
-	MatchEnded   bool                `json:"matchEnded"`
-	Winner       gameplay.PlayerID   `json:"winner"`
-	EndReason    string              `json:"endReason"`
-	Seen         map[string]struct{} `json:"seen"`
-	AuthUserA    uint64              `json:"authUserA,omitempty"`
-	AuthUserB    uint64              `json:"authUserB,omitempty"`
-	DeckMatchOK  bool                `json:"deckMatchOk,omitempty"`
-	SleeveA      string              `json:"sleeveA,omitempty"`
-	SleeveB      string              `json:"sleeveB,omitempty"`
-	ReactionModeA string             `json:"reactionModeA,omitempty"`
-	ReactionModeB string             `json:"reactionModeB,omitempty"`
+	RoomName      string              `json:"roomName"`
+	RoomPrivate   bool                `json:"roomPrivate"`
+	RoomPassword  string              `json:"roomPassword"`
+	MatchEnded    bool                `json:"matchEnded"`
+	Winner        gameplay.PlayerID   `json:"winner"`
+	EndReason     string              `json:"endReason"`
+	Seen          map[string]struct{} `json:"seen"`
+	AuthUserA     uint64              `json:"authUserA,omitempty"`
+	AuthUserB     uint64              `json:"authUserB,omitempty"`
+	DeckMatchOK   bool                `json:"deckMatchOk,omitempty"`
+	SleeveA       string              `json:"sleeveA,omitempty"`
+	SleeveB       string              `json:"sleeveB,omitempty"`
+	ReactionModeA string              `json:"reactionModeA,omitempty"`
+	ReactionModeB string              `json:"reactionModeB,omitempty"`
+	// Turn timer fields mirror RoomSession turn deadlines across process restarts.
+	TurnDeadlineUnixMs     int64  `json:"turnDeadlineUnixMs,omitempty"`
+	TurnDeadlineFor        string `json:"turnDeadlineFor,omitempty"`
+	PausedTurnRemainingMs  int64  `json:"pausedTurnRemainingMs,omitempty"`
+	ReactionDeadlineUnixMs int64  `json:"reactionDeadlineUnixMs,omitempty"`
 }
 
 // PostgresRoomStore stores room snapshots in PostgreSQL.
@@ -109,22 +114,36 @@ func (s *PostgresRoomStore) SaveRoom(ctx context.Context, room *RoomSession) err
 		rmA = room.reactionModeByPlayer[gameplay.PlayerA]
 		rmB = room.reactionModeByPlayer[gameplay.PlayerB]
 	}
-	serverRaw, err := json.Marshal(roomServerState{
-		RoomName:     room.RoomName,
-		RoomPrivate:  room.RoomPrivate,
-		RoomPassword: room.RoomPassword,
-		MatchEnded:   room.matchEnded,
-		Winner:       room.winner,
-		EndReason:    room.endReason,
-		Seen:         room.seen,
-		AuthUserA:    authA,
-		AuthUserB:    authB,
-		DeckMatchOK:  room.deckMatchInitialized,
+	srv := roomServerState{
+		RoomName:      room.RoomName,
+		RoomPrivate:   room.RoomPrivate,
+		RoomPassword:  room.RoomPassword,
+		MatchEnded:    room.matchEnded,
+		Winner:        room.winner,
+		EndReason:     room.endReason,
+		Seen:          room.seen,
+		AuthUserA:     authA,
+		AuthUserB:     authB,
+		DeckMatchOK:   room.deckMatchInitialized,
 		SleeveA:       sleeveA,
 		SleeveB:       sleeveB,
 		ReactionModeA: rmA,
 		ReactionModeB: rmB,
-	})
+	}
+	if !room.turnDeadline.IsZero() {
+		srv.TurnDeadlineUnixMs = room.turnDeadline.UnixMilli()
+		srv.TurnDeadlineFor = string(room.turnDeadlineFor)
+	}
+	if room.pausedTurnRemaining > 0 {
+		srv.PausedTurnRemainingMs = room.pausedTurnRemaining.Milliseconds()
+		if room.turnDeadlineFor != "" {
+			srv.TurnDeadlineFor = string(room.turnDeadlineFor)
+		}
+	}
+	if !room.reactionDeadline.IsZero() {
+		srv.ReactionDeadlineUnixMs = room.reactionDeadline.UnixMilli()
+	}
+	serverRaw, err := json.Marshal(srv)
 	if err != nil {
 		return err
 	}
@@ -192,6 +211,19 @@ func (s *PostgresRoomStore) LoadRoom(ctx context.Context, roomID string) (*RoomS
 		if state.ReactionModeB == "" {
 			room.reactionModeByPlayer[gameplay.PlayerB] = ReactionModeOn
 		}
+	}
+	if state.TurnDeadlineUnixMs > 0 {
+		room.turnDeadline = time.UnixMilli(state.TurnDeadlineUnixMs)
+		room.turnDeadlineFor = gameplay.PlayerID(state.TurnDeadlineFor)
+	}
+	if state.PausedTurnRemainingMs > 0 {
+		room.pausedTurnRemaining = time.Duration(state.PausedTurnRemainingMs) * time.Millisecond
+		if state.TurnDeadlineFor != "" {
+			room.turnDeadlineFor = gameplay.PlayerID(state.TurnDeadlineFor)
+		}
+	}
+	if state.ReactionDeadlineUnixMs > 0 {
+		room.reactionDeadline = time.UnixMilli(state.ReactionDeadlineUnixMs)
 	}
 	// Persisted engine is authoritative; do not run MaybeRebuild again.
 	room.deckMatchInitialized = true

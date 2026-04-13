@@ -111,7 +111,7 @@ Broadcast do estado da sala. Campos principais:
 | Área | Conteúdo |
 |------|-----------|
 | Sala | `roomId`, `roomName`, `roomPrivate`, `roomPassword`, `connectedA/B`, `gameStarted` |
-| Turno | `turnPlayer`, `turnSeconds`, `turnNumber`, `ignitionOn`, `ignitionCard`, `ignitionOwner`, `ignitionTurnsRemaining` |
+| Turno | `turnPlayer`, `turnSeconds`, `turnNumber`, `turnMainDeadlineUnixMs` (epoch ms do fim do timer principal; omitido se pausado), `turnMainPausedRemainingMs` (ms restantes do timer principal enquanto a primeira reação está pendente), `ignitionOn`, `ignitionCard`, `ignitionOwner`, `ignitionTurnsRemaining` |
 | Abertura | `mulliganPhaseActive` — `true` enquanto os dois jogadores podem confirmar mulligan; `mulliganReturned` — mapa `{"A": n, "B": n}` com quantas cartas cada um já devolveu (`-1` até confirmar); `mulliganDeadlineUnixMs` — instante (epoch ms) em que o servidor confirma automaticamente quem ainda não confirmou (devolução vazia, “keep”). Janela de 15 s a partir do início da fase de mulligan |
 | Perspectiva | `viewerPlayerId` — identifica o destinatário deste snapshot (determina visibilidade da mão) |
 | Tabuleiro | `board` 8×8 (códigos `wK`, `bP`, `""` vazio), `enPassant`, `castlingRights` |
@@ -415,6 +415,15 @@ Payload: `white` e `black` são obrigatórios. Cada lado tem:
 
 ---
 
+## Janela de ignição (`ignite_reaction`)
+
+- Ignição de **Power** ou **Continuous** com contador de ignição **> 0** abre `ignite_reaction` com `reactionWindow.actor` = quem ignitou. A **primeira** resposta é sempre do **oponente**: carta **Retribution** ou **Extinguish** (outras Powers são rejeitadas neste passo).
+- O modo `reactionMode` do oponente (`off`, ou `auto` sem carta elegível na mão) pode fazer o servidor resolver de imediato com pilha vazia (sem janela aberta).
+- Enquanto `ignite_reaction` estiver aberta, `submit_move` é rejeitado.
+- Cadeia após a primeira carta: só **Retribution** pode responder a **Retribution**; após **Extinguish** (Power), só **Retribution** pode responder.
+
+---
+
 ## Desconexão e timeout de turno
 
 | Situação | Efeito típico |
@@ -424,7 +433,7 @@ Payload: `white` e `black` são obrigatórios. Cada lado tem:
 | `leave_match` com oponente na sala | Vitória do oponente (`left_room`) |
 | Timeout de turno | +1 strike no jogador ativo; turno passa; 3 strikes → derrota (`strike_limit`) |
 
-`turnSeconds` no snapshot define o limite por jogada.
+`turnSeconds` no snapshot define o limite por jogada. O cliente deve preferir `turnMainDeadlineUnixMs` / `turnMainPausedRemainingMs` quando presentes para exibir o relógio principal alinhado ao servidor (pausa durante a primeira resposta de `capture_attempt` ou `ignite_reaction`).
 
 ---
 

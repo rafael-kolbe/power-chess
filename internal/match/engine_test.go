@@ -71,10 +71,10 @@ func TestDoubleTurnPowerMoveCanCheckmate(t *testing.T) {
 	state.CurrentTurn = gameplay.PlayerB
 
 	board := chess.NewEmptyGame(chess.Black)
-	board.SetPiece(chess.Pos{Row: 7, Col: 0}, chess.Piece{Type: chess.King, Color: chess.White}) // a1
-	board.SetPiece(chess.Pos{Row: 5, Col: 2}, chess.Piece{Type: chess.King, Color: chess.Black}) // c3
-	board.SetPiece(chess.Pos{Row: 6, Col: 1}, chess.Piece{Type: chess.Queen, Color: chess.Black}) // b2
-	board.SetPiece(chess.Pos{Row: 5, Col: 0}, chess.Piece{Type: chess.Rook, Color: chess.Black}) // a3
+	board.SetPiece(chess.Pos{Row: 7, Col: 0}, chess.Piece{Type: chess.King, Color: chess.White})   // a1
+	board.SetPiece(chess.Pos{Row: 5, Col: 2}, chess.Piece{Type: chess.King, Color: chess.Black})   // c3
+	board.SetPiece(chess.Pos{Row: 6, Col: 1}, chess.Piece{Type: chess.Queen, Color: chess.Black})  // b2
+	board.SetPiece(chess.Pos{Row: 5, Col: 0}, chess.Piece{Type: chess.Rook, Color: chess.Black})   // a3
 	board.SetPiece(chess.Pos{Row: 0, Col: 7}, chess.Piece{Type: chess.Bishop, Color: chess.Black}) // h8
 
 	e := NewEngine(state, board)
@@ -272,8 +272,11 @@ func TestExtinguishNegatesOpponentIgnition(t *testing.T) {
 	if !state.IgnitionSlot.Occupied {
 		t.Fatalf("expected ignition slot occupied")
 	}
+	rw, _, ok := e.ReactionWindowSnapshot()
+	if !ok || rw.Trigger != "ignite_reaction" {
+		t.Fatalf("expected ignite_reaction window open, got ok=%v rw=%+v", ok, rw)
+	}
 
-	e.OpenReactionWindow("on-ignite", gameplay.PlayerA, []gameplay.CardType{gameplay.CardTypeRetribution, gameplay.CardTypePower})
 	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
 		t.Fatalf("queue extinguish failed: %v", err)
 	}
@@ -309,6 +312,39 @@ func TestIgnitionZeroAllowsMultipleActivationsSameTurnWhenSlotFree(t *testing.T)
 	}
 	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
 		t.Fatalf("second ignition-0 activate failed: %v", err)
+	}
+}
+
+func TestSubmitMoveBlockedDuringIgniteReaction(t *testing.T) {
+	doubleTurn := gameplay.CardInstance{InstanceID: "dt1", CardID: CardDoubleTurn, ManaCost: 4, Ignition: 1, Cooldown: 5}
+	state, _ := gameplay.NewMatchState(testDeckWith(doubleTurn), testDeckWith(doubleTurn))
+	state.CurrentTurn = gameplay.PlayerA
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{doubleTurn}
+	state.Players[gameplay.PlayerA].Mana = 10
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
+	e := NewEngine(state, board)
+	markInPlayForTest(state)
+	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 4}, To: chess.Pos{Row: 5, Col: 4}}); err == nil {
+		t.Fatal("expected submit_move blocked during ignite_reaction")
+	}
+}
+
+func TestIgniteReactionRejectsActorStartingChain(t *testing.T) {
+	stopThere := gameplay.CardInstance{InstanceID: "s1", CardID: CardStopRightThere, ManaCost: 3, Ignition: 0, Cooldown: 5}
+	state, _ := gameplay.NewMatchState(testDeckWith(stopThere), testDeckWith(stopThere))
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{stopThere}
+	state.Players[gameplay.PlayerA].Mana = 10
+	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	markInPlayForTest(state)
+	e.OpenReactionWindow("ignite_reaction", gameplay.PlayerA, []gameplay.CardType{gameplay.CardTypeRetribution, gameplay.CardTypePower})
+	if err := e.QueueReactionCard(gameplay.PlayerA, 0, EffectTarget{}); err == nil {
+		t.Fatal("expected actor cannot open ignite_reaction chain")
 	}
 }
 

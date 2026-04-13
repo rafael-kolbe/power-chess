@@ -236,7 +236,10 @@
             </div>
           </div>
           <div id="waitingBanner" class="waiting-banner">Waiting for opponent...</div>
-          <div id="boardFrame" class="board-frame"></div>
+          <div class="board-frame-stack">
+            <div id="boardFrame" class="board-frame"></div>
+            <svg id="captureThreatOverlay" class="capture-threat-overlay" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
           <div class="player-a-stack">
             <div class="bar-group">
               <div class="bar mana-bar" id="manaBarA"><div class="fill" id="manaFillA"></div><span class="bar-label" id="manaLabelA">0/10</span></div>

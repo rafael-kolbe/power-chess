@@ -44,7 +44,7 @@ type Client struct {
 	room     *RoomSession
 	playerID gameplay.PlayerID
 	// authUserID is set when the server runs with auth and the connection presented a valid JWT (same token as /api/auth/login).
-	authUserID  uint64
+	authUserID uint64
 	// connID is a unique identifier for this connection, used to scope request deduplication.
 	connID      string
 	writeM      sync.Mutex
@@ -484,7 +484,11 @@ func (c *Client) handleSubmitMove(env Envelope) error {
 		if err := c.room.Engine.SubmitMove(c.playerID, mv); err != nil {
 			return err
 		}
-		return c.room.maybeAutoResolveCaptureReactionUnsafe()
+		if err := c.room.maybeAutoResolveCaptureReactionUnsafe(); err != nil {
+			return err
+		}
+		c.room.pauseMainTurnIfReactionWindowOpenUnsafe(time.Now())
+		return nil
 	}); err != nil {
 		if errors.Is(err, errDuplicateRequest) {
 			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
@@ -516,7 +520,14 @@ func (c *Client) handleActivateCard(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
-		return c.room.Engine.ActivateCard(c.playerID, p.HandIndex)
+		if err := c.room.Engine.ActivateCard(c.playerID, p.HandIndex); err != nil {
+			return err
+		}
+		if err := c.room.maybeAutoResolveIgniteReactionUnsafe(); err != nil {
+			return err
+		}
+		c.room.pauseMainTurnIfReactionWindowOpenUnsafe(time.Now())
+		return nil
 	}); err != nil {
 		if errors.Is(err, errDuplicateRequest) {
 			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
@@ -617,7 +628,14 @@ func (c *Client) handleQueueReaction(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
-		return c.room.Engine.QueueReactionCard(c.playerID, p.HandIndex, target)
+		_, prevStack, _ := c.room.Engine.ReactionWindowSnapshot()
+		if err := c.room.Engine.QueueReactionCard(c.playerID, p.HandIndex, target); err != nil {
+			return err
+		}
+		if prevStack == 0 {
+			c.room.noteReactionChainStartedUnsafe()
+		}
+		return nil
 	}); err != nil {
 		if errors.Is(err, errDuplicateRequest) {
 			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
@@ -643,7 +661,12 @@ func (c *Client) handleResolveReactions(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
-		return c.room.Engine.ResolveReactionStack()
+		if err := c.room.Engine.ResolveReactionStack(); err != nil {
+			return err
+		}
+		c.room.reactionDeadline = time.Time{}
+		c.room.resumeMainTurnAfterReactionUnsafe(time.Now())
+		return nil
 	}); err != nil {
 		if errors.Is(err, errDuplicateRequest) {
 			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
