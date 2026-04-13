@@ -23,6 +23,7 @@ const (
 	MessageStayInRoom        MessageType = "stay_in_room"
 	MessageRequestRematch    MessageType = "request_rematch"
 	MessageConfirmMulligan   MessageType = "confirm_mulligan"
+	MessageSetReactionMode   MessageType = "set_reaction_mode"
 	MessageDebugMatchFixture MessageType = "debug_match_fixture"
 	// Server -> Client
 	MessageHello         MessageType = "hello"
@@ -103,6 +104,12 @@ type ActivateCardPayload struct {
 // ConfirmMulliganPayload submits which hand cards (by index) are returned to the deck for the mulligan.
 type ConfirmMulliganPayload struct {
 	HandIndices []int `json:"handIndices"`
+}
+
+// SetReactionModePayload updates the player's capture/reaction preference for the match.
+// Mode is "off", "on", or "auto" (case-insensitive; unknown values become "on").
+type SetReactionModePayload struct {
+	Mode string `json:"mode"`
 }
 
 // DebugSideFixture lists full deck order (20 legal constructed cards) and hand card IDs to draw from that deck.
@@ -190,6 +197,8 @@ type PlayerHUDState struct {
 	GraveyardPieces     []string               `json:"graveyardPieces"`
 	CooldownPreview     []CooldownPreviewEntry `json:"cooldownPreview"`
 	CooldownHiddenCount int                    `json:"cooldownHiddenCount"`
+	// ReactionMode is off / on / auto — server authority for when to open reaction windows.
+	ReactionMode string `json:"reactionMode,omitempty"`
 }
 
 // PendingEffectState describes unresolved effects that need player input.

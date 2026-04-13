@@ -204,6 +204,77 @@ func TestResolveReactionTimeoutIfExpired(t *testing.T) {
 	}
 }
 
+// TestCaptureReactionSkippedWhenOpponentReactionOff ensures capture applies immediately without an open window.
+func TestCaptureReactionSkippedWhenOpponentReactionOff(t *testing.T) {
+	room, err := NewRoomSession("room-cap-off")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 5, Col: 5}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
+	room.Engine.Chess = board
+	room.Engine.State.MulliganPhaseActive = false
+	room.Engine.State.Started = true
+	room.Engine.State.CurrentTurn = gameplay.PlayerA
+	room.reactionModeByPlayer[gameplay.PlayerB] = ReactionModeOff
+
+	if err := room.Execute(func() error {
+		if err := room.Engine.SubmitMove(gameplay.PlayerA, chess.Move{
+			From: chess.Pos{Row: 6, Col: 4},
+			To:   chess.Pos{Row: 5, Col: 5},
+		}); err != nil {
+			return err
+		}
+		return room.maybeAutoResolveCaptureReactionUnsafe()
+	}); err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+	rw, _, ok := room.Engine.ReactionWindowSnapshot()
+	if ok && rw.Open {
+		t.Fatalf("expected reaction window closed, got %+v", rw)
+	}
+	if room.Engine.Chess.PieceAt(chess.Pos{Row: 5, Col: 5}).Color != chess.White {
+		t.Fatalf("expected capture applied immediately")
+	}
+}
+
+// TestCaptureReactionWindowWhenOpponentReactionOn keeps the reaction window open until resolve.
+func TestCaptureReactionWindowWhenOpponentReactionOn(t *testing.T) {
+	room, err := NewRoomSession("room-cap-on")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 5, Col: 5}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
+	room.Engine.Chess = board
+	room.Engine.State.MulliganPhaseActive = false
+	room.Engine.State.Started = true
+	room.Engine.State.CurrentTurn = gameplay.PlayerA
+	room.reactionModeByPlayer[gameplay.PlayerB] = ReactionModeOn
+
+	if err := room.Execute(func() error {
+		if err := room.Engine.SubmitMove(gameplay.PlayerA, chess.Move{
+			From: chess.Pos{Row: 6, Col: 4},
+			To:   chess.Pos{Row: 5, Col: 5},
+		}); err != nil {
+			return err
+		}
+		return room.maybeAutoResolveCaptureReactionUnsafe()
+	}); err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+	rw, _, ok := room.Engine.ReactionWindowSnapshot()
+	if !ok || !rw.Open || rw.Trigger != "capture_attempt" {
+		t.Fatalf("expected open capture_attempt window, got ok=%v rw=%+v", ok, rw)
+	}
+}
+
 // TestResolveTurnTimeoutIfExpiredAddsStrikeAndPassesTurn validates timeout strike and turn handoff.
 func TestResolveTurnTimeoutIfExpiredAddsStrikeAndPassesTurn(t *testing.T) {
 	room, err := NewRoomSession("room-turn-timeout")

@@ -4,6 +4,7 @@ Use este arquivo quando o contexto da conversa se perder. A fonte canônica deta
 
 ## Toggle Reactions (header): OFF / ON / AUTO
 
+- **Implementado (captura):** mensagem `set_reaction_mode`, campo `players[].reactionMode` no snapshot, e auto-resolução de `capture_attempt` no servidor conforme `off` / `on` / `auto` (AUTO usa `EligibleForCaptureCounterReactionAUTO` em `internal/gameplay/reaction_eligibility.go`).
 - Qualquer jogador pode mudar o toggle **a qualquer momento**; o **servidor** passa a respeitar o novo estado **a partir desse instante** (não só UI).
 - **OFF**: **não abrir** janelas de reação só para dar pass — o jogador da vez segue sem micro-interrupções; equivalência conceitual ao oponente não poder reagir naquele trecho.
 - **ON**: oponente recebe direito de reação nas ações elegíveis **mesmo** sem carta/mana útil.

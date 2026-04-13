@@ -166,9 +166,13 @@
         <input type="checkbox" id="coordsInSquares" />
         <span id="coordsInSquaresText" class="match-header-tool__text">Coords: Off</span>
       </label>
-      <label class="match-header-tool">
-        <input type="checkbox" id="reactionToggle" />
-        <span id="reactionToggleLabel" class="match-header-tool__text">Reactions: Off</span>
+      <label class="match-header-tool" for="reactionModeSelect">
+        <span id="reactionModeLabel" class="match-header-tool__text">Reactions: On</span>
+        <select id="reactionModeSelect" class="match-header-tool__select" aria-label="Reactions mode">
+          <option value="off">Off</option>
+          <option value="on" selected>On</option>
+          <option value="auto">Auto</option>
+        </select>
       </label>
     </div>
     <div id="boardArea" class="playmat-area">

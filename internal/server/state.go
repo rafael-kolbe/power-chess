@@ -50,6 +50,8 @@ type RoomSession struct {
 	sleeveByPlayer map[gameplay.PlayerID]string
 	// deckMatchInitialized is true after the engine was built from saved decks for both connected players, or when loaded from persistence.
 	deckMatchInitialized bool
+	// reactionModeByPlayer stores each seat's preference: off / on / auto (see NormalizeReactionMode).
+	reactionModeByPlayer map[gameplay.PlayerID]string
 }
 
 const defaultRoomName = "Let's Play!"
@@ -90,7 +92,7 @@ func newRoomSessionWithEngine(roomID, roomName string, engine *match.Engine) *Ro
 		disconnectTimers:   map[gameplay.PlayerID]*time.Timer{},
 		disconnectDeadline: map[gameplay.PlayerID]time.Time{},
 		DisconnectGrace:    60 * time.Second,
-		reactionTimeout:    10 * time.Second,
+		reactionTimeout:    30 * time.Second,
 		rematchVotes:       map[gameplay.PlayerID]bool{},
 		lastActivity:       time.Now().UTC(),
 		displayNameByPlayer: map[gameplay.PlayerID]string{
@@ -106,6 +108,10 @@ func newRoomSessionWithEngine(roomID, roomName string, engine *match.Engine) *Ro
 			gameplay.PlayerB: "",
 		},
 		deckMatchInitialized: false,
+		reactionModeByPlayer: map[gameplay.PlayerID]string{
+			gameplay.PlayerA: ReactionModeOn,
+			gameplay.PlayerB: ReactionModeOn,
+		},
 	}
 }
 
@@ -153,6 +159,53 @@ func (r *RoomSession) MarkRequestOnce(requestKey string) bool {
 	}
 	r.seen[requestKey] = struct{}{}
 	return true
+}
+
+// reactionModeUnsafe returns the canonical reaction mode for pid. Caller must hold r.stateM.
+func (r *RoomSession) reactionModeUnsafe(pid gameplay.PlayerID) string {
+	if r.reactionModeByPlayer == nil {
+		return ReactionModeOn
+	}
+	m, ok := r.reactionModeByPlayer[pid]
+	if !ok || m == "" {
+		return ReactionModeOn
+	}
+	return m
+}
+
+// setReactionModeUnsafe stores the player's reaction preference. Caller must hold r.stateM.
+func (r *RoomSession) setReactionModeUnsafe(pid gameplay.PlayerID, mode string) {
+	if r.reactionModeByPlayer == nil {
+		r.reactionModeByPlayer = map[gameplay.PlayerID]string{
+			gameplay.PlayerA: ReactionModeOn,
+			gameplay.PlayerB: ReactionModeOn,
+		}
+	}
+	r.reactionModeByPlayer[pid] = NormalizeReactionMode(mode)
+}
+
+// maybeAutoResolveCaptureReactionUnsafe applies capture immediately when the responder's
+// reaction mode skips the window (off, or auto with no eligible Counter). Caller must hold r.stateM.
+func (r *RoomSession) maybeAutoResolveCaptureReactionUnsafe() error {
+	rw, stackSize, ok := r.Engine.ReactionWindowSnapshot()
+	if !ok || !rw.Open || rw.Trigger != "capture_attempt" || stackSize != 0 {
+		return nil
+	}
+	responder := oppositePlayer(rw.Actor)
+	switch r.reactionModeUnsafe(responder) {
+	case ReactionModeOn:
+		return nil
+	case ReactionModeAuto:
+		if gameplay.EligibleForCaptureCounterReactionAUTO(r.Engine.State, responder) {
+			return nil
+		}
+	default: // off
+	}
+	if err := r.Engine.ResolveReactionStack(); err != nil {
+		return err
+	}
+	r.reactionDeadline = time.Time{}
+	return nil
 }
 
 // Snapshot builds a compact state payload for UI synchronization.
@@ -211,8 +264,8 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 		ViewerPlayerID:      string(viewerPID),
 		Board:               board,
 		Players: []PlayerHUDState{
-			playerHUDState(gameplay.PlayerA, s.Players[gameplay.PlayerA], r.sleeveByPlayer[gameplay.PlayerA], viewerPID),
-			playerHUDState(gameplay.PlayerB, s.Players[gameplay.PlayerB], r.sleeveByPlayer[gameplay.PlayerB], viewerPID),
+			playerHUDState(gameplay.PlayerA, s.Players[gameplay.PlayerA], r.sleeveByPlayer[gameplay.PlayerA], viewerPID, r.reactionModeUnsafe(gameplay.PlayerA)),
+			playerHUDState(gameplay.PlayerB, s.Players[gameplay.PlayerB], r.sleeveByPlayer[gameplay.PlayerB], viewerPID, r.reactionModeUnsafe(gameplay.PlayerB)),
 		},
 	}
 	if s.MulliganPhaseActive && !r.mulliganDeadline.IsZero() {
@@ -772,6 +825,10 @@ func (r *RoomSession) resetForNewMatchUnsafe() {
 	r.turnDeadlineFor = ""
 	r.reactionDeadline = time.Time{}
 	r.mulliganDeadline = time.Time{}
+	r.reactionModeByPlayer = map[gameplay.PlayerID]string{
+		gameplay.PlayerA: ReactionModeOn,
+		gameplay.PlayerB: ReactionModeOn,
+	}
 }
 
 // ShouldForceClosePostMatch reports if post-match idle deadline elapsed.
@@ -887,7 +944,8 @@ func graveyardPieceImportance(code string) int {
 
 // playerHUDState converts internal player state to transport-friendly HUD data.
 // sleeve is the player's chosen sleeve color; viewerPID restricts which hand is included.
-func playerHUDState(pid gameplay.PlayerID, p *gameplay.PlayerState, sleeve string, viewerPID gameplay.PlayerID) PlayerHUDState {
+// reactionMode is off / on / auto for that seat.
+func playerHUDState(pid gameplay.PlayerID, p *gameplay.PlayerState, sleeve string, viewerPID gameplay.PlayerID, reactionMode string) PlayerHUDState {
 	// Build the full cooldown list (all entries sent; frontend picks first 4 for inline display).
 	preview := make([]CooldownPreviewEntry, 0, len(p.Cooldowns))
 	for _, cd := range p.Cooldowns {
@@ -944,6 +1002,7 @@ func playerHUDState(pid gameplay.PlayerID, p *gameplay.PlayerState, sleeve strin
 		GraveyardPieces:     graveyard,
 		CooldownPreview:     preview,
 		CooldownHiddenCount: hidden,
+		ReactionMode:        reactionMode,
 	}
 
 	// Include hand only for the owning player.

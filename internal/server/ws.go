@@ -265,6 +265,8 @@ func (c *Client) handle(env Envelope) error {
 		return c.handleDrawCard(env)
 	case MessageConfirmMulligan:
 		return c.handleConfirmMulligan(env)
+	case MessageSetReactionMode:
+		return c.handleSetReactionMode(env)
 	case MessageResolvePending:
 		return c.handleResolvePending(env)
 	case MessageQueueReaction:
@@ -479,7 +481,10 @@ func (c *Client) handleSubmitMove(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
-		return c.room.Engine.SubmitMove(c.playerID, mv)
+		if err := c.room.Engine.SubmitMove(c.playerID, mv); err != nil {
+			return err
+		}
+		return c.room.maybeAutoResolveCaptureReactionUnsafe()
 	}); err != nil {
 		if errors.Is(err, errDuplicateRequest) {
 			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
@@ -725,6 +730,35 @@ func (c *Client) handleConfirmMulligan(env Envelope) error {
 			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
 		}
 		return protocolError{code: ErrorActionFailed, message: err.Error()}
+	}
+	_ = c.sendAck(env, "ok", "", "")
+	_ = c.server.persistRoom(context.Background(), c.room)
+	c.room.TouchActivity()
+	c.room.BroadcastSnapshot()
+	return nil
+}
+
+// handleSetReactionMode updates the caller's reaction preference (off / on / auto) for the match.
+func (c *Client) handleSetReactionMode(env Envelope) error {
+	if c.room == nil {
+		return protocolError{code: ErrorJoinRequired, message: "join_match is required before set_reaction_mode"}
+	}
+	var p SetReactionModePayload
+	if err := json.Unmarshal(env.Payload, &p); err != nil {
+		return err
+	}
+	if err := c.room.Execute(func() error {
+		requestKey := c.requestKey(env)
+		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
+			return errDuplicateRequest
+		}
+		c.room.setReactionModeUnsafe(c.playerID, p.Mode)
+		return nil
+	}); err != nil {
+		if errors.Is(err, errDuplicateRequest) {
+			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
+		}
+		return err
 	}
 	_ = c.sendAck(env, "ok", "", "")
 	_ = c.server.persistRoom(context.Background(), c.room)

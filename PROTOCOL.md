@@ -115,7 +115,7 @@ Broadcast do estado da sala. Campos principais:
 | Abertura | `mulliganPhaseActive` — `true` enquanto os dois jogadores podem confirmar mulligan; `mulliganReturned` — mapa `{"A": n, "B": n}` com quantas cartas cada um já devolveu (`-1` até confirmar); `mulliganDeadlineUnixMs` — instante (epoch ms) em que o servidor confirma automaticamente quem ainda não confirmou (devolução vazia, “keep”). Janela de 15 s a partir do início da fase de mulligan |
 | Perspectiva | `viewerPlayerId` — identifica o destinatário deste snapshot (determina visibilidade da mão) |
 | Tabuleiro | `board` 8×8 (códigos `wK`, `bP`, `""` vazio), `enPassant`, `castlingRights` |
-| Jogadores | `players[]`: `mana`, `maxMana`, `energizedMana`, `maxEnergized`, `handCount`, `cooldownCount`, `graveyardCount`, `strikes`, `deckCount`, `sleeveColor`, `hand` (privado — só no snapshot do próprio jogador), `banishedCards[]`, `graveyardPieces[]` (ordenado Q>R>B>N>P), `cooldownPreview[]` (até 4), `cooldownHiddenCount` |
+| Jogadores | `players[]`: `mana`, `maxMana`, `energizedMana`, `maxEnergized`, `handCount`, `cooldownCount`, `graveyardCount`, `strikes`, `deckCount`, `sleeveColor`, `reactionMode` (`off` / `on` / `auto`), `hand` (privado — só no snapshot do próprio jogador), `banishedCards[]`, `graveyardPieces[]` (ordenado Q>R>B>N>P), `cooldownPreview[]` (até 4), `cooldownHiddenCount` |
 | Efeitos | `pendingEffects`, `pendingCapture`, `reactionWindow` |
 | Fim | `matchEnded`, `winner`, `endReason`, `rematchA/B`, `postMatchMsLeft` |
 
@@ -132,6 +132,7 @@ Broadcast do estado da sala. Campos principais:
 | `graveyardPieces` | `string[]` | Peças capturadas pelo oponente (código `wQ`, `bP`, …) ordenadas por importância |
 | `cooldownPreview` | `CooldownPreviewEntry[]` | Até 4 cartas com recarga mais próxima de terminar |
 | `cooldownHiddenCount` | `int` | Quantidade de cartas na fila de recarga além das 4 exibidas |
+| `reactionMode` | `string` | Preferência do assento: `off`, `on`, `auto` — o servidor usa para decidir se abre janela de reação em captura (ver secção abaixo) |
 
 **`CardSnapshotEntry`**: `{ cardId, manaCost, ignition, cooldown }`  
 **`CooldownPreviewEntry`**: `{ cardId, manaCost, ignition, cooldown, turnsRemaining }`
@@ -296,6 +297,21 @@ Confirma o mulligan de abertura: as cartas nos índices indicados da mão voltam
 
 - `handIndices`: índices 0-based na mão atual; podem ser repetidos na lista (deduplicados no servidor); lista vazia = aceitar as 3 cartas sem devolver nenhuma.
 
+### `set_reaction_mode`
+
+Atualiza a preferência do jogador para **reações em captura** (e futuras janelas alinhadas a este toggle). Pode ser enviado **a qualquer momento** na partida; o servidor aplica já no próximo evento elegível.
+
+```json
+{ "id": "req-4d", "type": "set_reaction_mode", "payload": { "mode": "off" } }
+```
+
+- `mode`: `off`, `on` ou `auto` (case-insensitive; valores desconhecidos tratados como `on`).
+- **`off`**: o servidor **não mantém** janela `capture_attempt` aberta só para pass — aplica a captura de seguida.
+- **`on`**: mantém a janela como hoje (oponente pode reagir mesmo sem Counter jogável).
+- **`auto`**: o servidor só mantém a janela se o oponente tiver pelo menos um **Counter** na mão com mana suficiente e sem cópia do mesmo `cardId` na recarga (condições textuais das Counter cards podem ser fase posterior).
+
+O estado atual vem em cada entrada de `players[].reactionMode` no `state_snapshot`.
+
 ### `resolve_pending_effect`
 
 ```json
@@ -390,10 +406,11 @@ Payload: `white` e `black` são obrigatórios. Cada lado tem:
 
 ## Janela de captura e cadeia Counter
 
-- Captura válida (inclui en passant) pode abrir `capture_attempt` com movimento **pendente**.  
+- Captura válida (inclui en passant) pode abrir `capture_attempt` com movimento **pendente** — salvo o modo `reactionMode` do **oponente** (`off` / `auto` sem Counter elegível) fazer o servidor resolver de imediato como se fosse `resolve_reactions` com pilha vazia.  
 - A primeira resposta na cadeia costuma ser **Counter** do oponente.  
 - Reações resolvem em **LIFO**.  
 - Sem reações enfileiradas, `resolve_reactions` aplica a captura pendente.  
+- Timeout da janela de reação no servidor: **30 s** (por omissão na sala).  
 - **Counterattack** e **Blockade**: validação e efeitos conforme regras do servidor (ver [Cards.md](Cards.md)).
 
 ---
@@ -426,6 +443,7 @@ Testes de integração WebSocket cobrem, entre outros:
 - Idempotência por `requestId`  
 - `debug_match_fixture` com `ADMIN_DEBUG_MATCH` ligado/desligado  
 - Timeout de desconexão e cancelamento  
+- `set_reaction_mode` e `players[].reactionMode`  
 - Hooks de persistência (save/load)  
 - Contadores em `/metrics`  
 

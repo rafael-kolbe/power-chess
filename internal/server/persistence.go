@@ -48,6 +48,8 @@ type roomServerState struct {
 	DeckMatchOK  bool                `json:"deckMatchOk,omitempty"`
 	SleeveA      string              `json:"sleeveA,omitempty"`
 	SleeveB      string              `json:"sleeveB,omitempty"`
+	ReactionModeA string             `json:"reactionModeA,omitempty"`
+	ReactionModeB string             `json:"reactionModeB,omitempty"`
 }
 
 // PostgresRoomStore stores room snapshots in PostgreSQL.
@@ -102,6 +104,11 @@ func (s *PostgresRoomStore) SaveRoom(ctx context.Context, room *RoomSession) err
 		sleeveA = room.sleeveByPlayer[gameplay.PlayerA]
 		sleeveB = room.sleeveByPlayer[gameplay.PlayerB]
 	}
+	var rmA, rmB string
+	if room.reactionModeByPlayer != nil {
+		rmA = room.reactionModeByPlayer[gameplay.PlayerA]
+		rmB = room.reactionModeByPlayer[gameplay.PlayerB]
+	}
 	serverRaw, err := json.Marshal(roomServerState{
 		RoomName:     room.RoomName,
 		RoomPrivate:  room.RoomPrivate,
@@ -113,8 +120,10 @@ func (s *PostgresRoomStore) SaveRoom(ctx context.Context, room *RoomSession) err
 		AuthUserA:    authA,
 		AuthUserB:    authB,
 		DeckMatchOK:  room.deckMatchInitialized,
-		SleeveA:      sleeveA,
-		SleeveB:      sleeveB,
+		SleeveA:       sleeveA,
+		SleeveB:       sleeveB,
+		ReactionModeA: rmA,
+		ReactionModeB: rmB,
 	})
 	if err != nil {
 		return err
@@ -171,6 +180,18 @@ func (s *PostgresRoomStore) LoadRoom(ctx context.Context, roomID string) (*RoomS
 	if room.sleeveByPlayer != nil {
 		room.sleeveByPlayer[gameplay.PlayerA] = DefaultSleeveColor(state.SleeveA)
 		room.sleeveByPlayer[gameplay.PlayerB] = DefaultSleeveColor(state.SleeveB)
+	}
+	if state.ReactionModeA != "" || state.ReactionModeB != "" {
+		room.reactionModeByPlayer = map[gameplay.PlayerID]string{
+			gameplay.PlayerA: NormalizeReactionMode(state.ReactionModeA),
+			gameplay.PlayerB: NormalizeReactionMode(state.ReactionModeB),
+		}
+		if state.ReactionModeA == "" {
+			room.reactionModeByPlayer[gameplay.PlayerA] = ReactionModeOn
+		}
+		if state.ReactionModeB == "" {
+			room.reactionModeByPlayer[gameplay.PlayerB] = ReactionModeOn
+		}
 	}
 	// Persisted engine is authoritative; do not run MaybeRebuild again.
 	room.deckMatchInitialized = true

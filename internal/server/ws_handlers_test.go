@@ -680,6 +680,45 @@ func TestJoinMatchRejectsInvalidRoomID(t *testing.T) {
 	}
 }
 
+// --- set_reaction_mode ---
+
+func TestHandleSetReactionModeRequiresJoin(t *testing.T) {
+	_, wsURL := wsSetup(t)
+	c := dialAndHello(t, wsURL)
+	sendEnv(t, c, Envelope{
+		ID:      "srm1",
+		Type:    MessageSetReactionMode,
+		Payload: MustPayload(SetReactionModePayload{Mode: "off"}),
+	})
+	env, found := drainUntilType(t, c, MessageError, 5)
+	if !found {
+		t.Fatal("expected error for set_reaction_mode without join")
+	}
+	var ep ErrorPayload
+	_ = json.Unmarshal(env.Payload, &ep)
+	if ep.Code != ErrorJoinRequired {
+		t.Fatalf("expected join_required, got %s", ep.Code)
+	}
+}
+
+func TestHandleSetReactionModeSucceeds(t *testing.T) {
+	t.Setenv("ADMIN_DEBUG_MATCH", "1")
+	_, wsURL := wsSetup(t)
+	cA, cB := joinTwoPlayers(t, wsURL, "922")
+	applyDebugFixtureFromClient(t, cA)
+	confirmMulliganBoth(t, cA, cB)
+
+	sendEnv(t, cA, Envelope{
+		ID:      "srm2",
+		Type:    MessageSetReactionMode,
+		Payload: MustPayload(SetReactionModePayload{Mode: "auto"}),
+	})
+	if _, found := drainUntilType(t, cA, MessageAck, 10); !found {
+		t.Fatal("expected ack for set_reaction_mode")
+	}
+	_ = cB
+}
+
 // --- Duplicate request idempotency for action handlers ---
 
 func TestSubmitMoveDuplicateRequestAckedAsDuplicate(t *testing.T) {

@@ -71,8 +71,8 @@ import {
     const eventsEl = document.getElementById("events");
     const statusEl = document.getElementById("status");
     const playerEl = document.getElementById("playerId");
-    const reactionToggleEl = document.getElementById("reactionToggle");
-    const reactionToggleLabelEl = document.getElementById("reactionToggleLabel");
+    const reactionModeSelectEl = document.getElementById("reactionModeSelect");
+    const reactionModeLabelEl = document.getElementById("reactionModeLabel");
     const coordsInSquaresEl = document.getElementById("coordsInSquares");
     const coordsInSquaresTextEl = document.getElementById("coordsInSquaresText");
     const clockAEl = document.getElementById("clockA");
@@ -173,6 +173,9 @@ import {
             statusWaiting: "waiting",
             statusPlaying: "in game",
             reactions: "Reactions",
+            reactionModeOff: "Off",
+            reactionModeOn: "On",
+            reactionModeAuto: "Auto",
             toggleOn: "On",
             toggleOff: "Off",
             coordsLabel: "Coords",
@@ -300,6 +303,9 @@ import {
             statusWaiting: "aguardando",
             statusPlaying: "em partida",
             reactions: "Reações",
+            reactionModeOff: "Desligado",
+            reactionModeOn: "Ligado",
+            reactionModeAuto: "Automático",
             toggleOn: "Ligado",
             toggleOff: "Desligado",
             coordsLabel: "Coords",
@@ -763,7 +769,8 @@ import {
         if (pmEl.drawBtn) pmEl.drawBtn.textContent = t("drawFromDeck");
         if (lastSnapshot) renderMulliganBar(lastSnapshot);
         updateCoordsToggleLabel();
-        updateReactionToggleLabel();
+        updateReactionModeOptions();
+        updateReactionModeLabel();
         s("clockLabelA", "clock");
         s("clockLabelB", "clock");
         s("strikesLabelA", "strikes");
@@ -926,9 +933,37 @@ import {
         });
     }
 
-    function updateReactionToggleLabel() {
-        if (!reactionToggleEl || !reactionToggleLabelEl) return;
-        reactionToggleLabelEl.textContent = `${t("reactions")}: ${reactionToggleEl.checked ? t("toggleOn") : t("toggleOff")}`;
+    /** Fills reaction mode select option labels from the active locale. */
+    function updateReactionModeOptions() {
+        if (!reactionModeSelectEl || reactionModeSelectEl.options.length < 3) return;
+        reactionModeSelectEl.options[0].textContent = t("reactionModeOff");
+        reactionModeSelectEl.options[1].textContent = t("reactionModeOn");
+        reactionModeSelectEl.options[2].textContent = t("reactionModeAuto");
+    }
+
+    function updateReactionModeLabel() {
+        if (!reactionModeSelectEl || !reactionModeLabelEl) return;
+        const mode = reactionModeSelectEl.value;
+        let modeKey = "reactionModeOn";
+        if (mode === "off") modeKey = "reactionModeOff";
+        else if (mode === "auto") modeKey = "reactionModeAuto";
+        reactionModeLabelEl.textContent = `${t("reactions")}: ${t(modeKey)}`;
+    }
+
+    /**
+     * Syncs the header control from the server snapshot (per-player reactionMode).
+     * @param {object} snapshot
+     */
+    function syncReactionModeFromSnapshot(snapshot) {
+        if (!reactionModeSelectEl || !snapshot?.players) return;
+        const selfId = playerEl.value;
+        const row = snapshot.players.find((p) => p.playerId === selfId);
+        const raw = (row?.reactionMode || "on").toLowerCase();
+        const m = raw === "off" || raw === "auto" || raw === "on" ? raw : "on";
+        if (reactionModeSelectEl.value !== m) {
+            reactionModeSelectEl.value = m;
+            updateReactionModeLabel();
+        }
     }
 
     function updateCoordsToggleLabel() {
@@ -1205,7 +1240,7 @@ import {
                     renderPlaymat(nextSnap);
                     pmPrevSnapshot = nextSnap;
                     syncPlayerRoleLabels(nextSnap);
-                    handleAutoSkipReaction(nextSnap);
+                    syncReactionModeFromSnapshot(nextSnap);
                     renderTurnClocks();
                     maybeApplyMatchTestFixture(nextSnap);
                 });
@@ -3436,16 +3471,6 @@ import {
         return Math.round(v);
     }
 
-    function handleAutoSkipReaction(snapshot) {
-        if (!reactionToggleEl || reactionToggleEl.checked) return;
-        const rw = snapshot?.reactionWindow;
-        if (!rw?.open) return;
-        const localPlayer = playerEl.value;
-        if (rw.stackSize === 0 && rw.actor && rw.actor !== localPlayer) {
-            send("resolve_reactions", {});
-        }
-    }
-
     function sendMove(from, to) {
         send("submit_move", {
             fromRow: from.row,
@@ -4192,7 +4217,12 @@ import {
             }
         });
     }
-    if (reactionToggleEl) reactionToggleEl.addEventListener("change", updateReactionToggleLabel);
+    if (reactionModeSelectEl) {
+        reactionModeSelectEl.addEventListener("change", () => {
+            updateReactionModeLabel();
+            if (joinedRoom) send("set_reaction_mode", { mode: reactionModeSelectEl.value });
+        });
+    }
     if (coordsInSquaresEl) {
         coordsInSquaresEl.addEventListener("change", () => {
             updateCoordsToggleLabel();
