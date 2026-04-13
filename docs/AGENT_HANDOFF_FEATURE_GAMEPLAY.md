@@ -1,0 +1,46 @@
+# Handoff — feature/gameplay (reações, tempo, desconexão)
+
+Use este arquivo quando o contexto da conversa se perder. A fonte canônica detalhada é **[PROJECT.md](../PROJECT.md)** (seções de reações, termos, desconexão).
+
+## Toggle Reactions (header): OFF / ON / AUTO
+
+- Qualquer jogador pode mudar o toggle **a qualquer momento**; o **servidor** passa a respeitar o novo estado **a partir desse instante** (não só UI).
+- **OFF**: **não abrir** janelas de reação só para dar pass — o jogador da vez segue sem micro-interrupções; equivalência conceitual ao oponente não poder reagir naquele trecho.
+- **ON**: oponente recebe direito de reação nas ações elegíveis **mesmo** sem carta/mana útil.
+- **AUTO**: direito de reação só se houver **caminho plausível** de resposta: cartas na mão, **mana atual**, **não haver cópia da mesma carta na recarga** (bloqueia ignição da cópia na mão), tipo de carta permitido na janela. **Primeira entrega:** não validar ainda **condições textuais de Counter Cards** (só na próxima feature) — ver `TODO` em `internal/match/reactions.go`.
+
+## Tempo (30s + 30s)
+
+- Turno principal do jogador da vez: **30s** (ou valor do servidor); fim → **+1 strike**, passa a vez.
+- Ao abrir direito de reação: **pausa** o timer do jogador da vez; **inicia** timer de reação do oponente (**30s**).
+- Fim da reação (passou / jogou carta / chain fechou): pausa timer de reação; **retoma** timer do jogador da vez.
+- **Cap** prático ~**60s** por “volta” (30 ativo + 30 reação), salvo chain.
+- Timeout da **reação**: oponente **não pode mais reagir** naquele turno às demais jogadas (efeito similar a OFF para o restante do turno), **sem** strike por isso.
+- **Durante resolução de chain (stack)**: timers dos **dois** pausados.
+
+## Termos (ignição × ativação) e Retribution
+
+- **Ignição**: mover carta para o slot de ignição **com intenção** de ativar o efeito (custo pago conforme regras).
+- **Ativação**: executar o efeito da carta **no slot**, após o tempo (**ignição** em turnos) indicado na carta.
+- **Retribution**: só em resposta à **ignição** de uma carta. **Sem** janela só porque a carta **permanece** no slot; **sem** janela em cima da **ativação da própria Retribution** (não concede nova janela genérica ao oponente por esse fato).
+- Carta **negada na ignição**: permanece **negada** enquanto estiver no slot; ao resolver, efeito falha e vai à **recarga**. **Continuous** negada na ignição: permanece negada **todo** o tempo no slot.
+
+## Captura (UX + janela)
+
+- **Arrastar** peça sobre a captura **ou** **clicar** na peça alvo com intenção de capturar → abre janela de reação ao oponente.
+- Quem ataca **não** confirma de novo; quem **responde** (oponente) confirma **passar** ou **reagir** (cartas).
+
+## Desconexão
+
+- Servidor detecta desconexão **na hora**; **pausa** a partida (nada de jogada válida para o outro enquanto pausado).
+- Banner **verde** na área do oponente: mensagem tipo **“Jogador desconectado (60s)”** com **contagem**.
+- **60s** é **orçamento total por jogador por partida** para ficar desconectado: **não reinicia** a cada queda; continua de onde parou se cair de novo.
+- Vitória por esgotar o orçamento ou regra equivalente no protocolo; ao reconectar, **retoma** o processo pausado.
+
+## i18n
+
+- Traduzir textos de jogo (EN + pt-BR) salvo exceções que o designer especificar.
+
+## Cartas / efeitos
+
+- Foco inicial: **tipo** de carta e **abertura correta de janelas**; efeitos finos das cartas depois.

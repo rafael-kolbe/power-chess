@@ -6,6 +6,11 @@ import (
 	"power-chess/internal/gameplay"
 )
 
+// TODO(feature/gameplay-next): For reaction mode AUTO, eligibility must eventually include
+// Counter card activation conditions (e.g. capture context) in addition to hand, mana,
+// cooldown duplicate rule, and card type. First delivery may omit Counter condition checks;
+// see PROJECT.md ("Modo AUTO" / entregas) and docs/AGENT_HANDOFF_FEATURE_GAMEPLAY.md.
+
 // ReactionWindow defines an open response window (Counter/Retribution) for the current trigger.
 type ReactionWindow struct {
 	Open          bool

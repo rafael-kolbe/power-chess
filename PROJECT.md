@@ -18,27 +18,52 @@
 ## Regras de tabuleiro e turno
 
 - Movimento e xeque/xeque-mate seguem o xadrez tradicional.
-- **Tempo por jogada** (padrão): configurável no servidor (ex.: 20–30 s no snapshot).
-- Se o jogador não agir a tempo: **+1 strike** e passa o turno.
+- **Tempo por jogada** (padrão): configurável no servidor (referência de produto: **30 s** por segmento ativo do jogador da vez; ver abaixo **alternância com reação**).
+- Se o jogador **da vez** não agir a tempo do seu timer principal: **+1 strike** e passa o turno.
 - **3 strikes** → derrota imediata.
 - Vitória por **checkmate** (ou condições de fim expostas no protocolo).
 - Poderes podem causar xeque-mate, salvo se o texto da carta proibir.
 - O **rei nunca é capturado** diretamente; jogadas que “capturam” o rei são ilegais.
 - Peças capturadas vão para o **cemitério** (graveyard); alguns efeitos podem interagir com isso.
 
-### Ordem de turno (referência canônica)
+### Termos: ignição, ativação e negação (canônico)
 
-1. **Início do turno** — +1 mana ao pool do jogador ativo.
-2. **Tick de ignição** — contador da carta no slot de ignição −1 (animação); se chegar a 0, o efeito ativa.
-3. **Tick de recarga** — contador de cada carta na pilha de recarga −1 (animação); ao chegar a 0, a carta volta ao fundo do deck com movimento fluído.
-4. **Janela de ação** (opcional, durante o próprio turno): o jogador pode comprar cartas (2 mana/carta, mão < 5) e/ou colocar uma carta **Power** ou **Continuous** na ignição (slot deve estar vazio, salvo `save-it-for-later`).
-5. **Janela de Retribution**: se o jogador ativou uma carta, o oponente tem **10 s** para responder com uma carta **Retribution**. Efeitos resolvem em cadeia LIFO.
-6. **Movimento de peça**: jogador executa a jogada de xadrez.
-7. **Tentativa de captura**: se a jogada capturaria uma peça, abre **janela de Counter** (10 s). O oponente pode responder com carta **Counter**. Efeitos resolvem em cadeia LIFO.
-8. **Peça capturada** (ou não, dependendo dos efeitos) — vai ao cemitério do capturado.
+- **Ignição**: ação de **mover uma carta para a zona de ignição** com a **intenção de ativar** seu efeito (custo e validações conforme regras do servidor).
+- **Ativação**: ação de **resolver o efeito** de uma carta que está na zona de ignição **após** o tempo indicado na carta (contador de ignição em turnos), quando o servidor aplica o efeito.
+- **Retribution Card**: só pode ser usada **em resposta à ignição** de uma carta (gatilho: colocar carta no slot com intenção de ativar). **Não** se abre janela de resposta: enquanto uma carta **apenas permanece** na zona de ignição (sem novo ato de ignição); nem em decorrência da **ativação da própria Retribution** (essa ativação não concede, por si, nova janela genérica ao oponente).
+- **Carta negada na ignição**: permanece **negada** durante **todos** os turnos em que continuar na zona de ignição; ao resolver, o efeito conclui **em falha** e a carta vai à **recarga**. **Continuous**: como o efeito se aplica ao longo dos turnos, se for **negada no momento da ignição**, permanece **negada durante todo** o período em que estiver no slot (efeito não “reativa” enquanto lá estiver).
+
+### Toggle “Reactions” no header: OFF / ON / AUTO
+
+- Qualquer jogador pode alterar o toggle **a qualquer momento**; a partir desse instante o **servidor** deve respeitar o **novo** estado (autoridade no backend, não só preferência de UI).
+- **OFF**: enquanto o oponente age, **não** conceder direito de reação — e **não abrir** janelas só para o oponente “dar pass”. O jogador da vez joga **sem micro-interrupções** por reação.
+- **ON**: oponente recebe direito de reação nas ações elegíveis **mesmo** que não tenha resposta viável (mana/cartas/condições).
+- **AUTO**: direito de reação só se for **identificável** que o jogador pode responder: cartas na **mão**, **mana atual**, **regra de cópia na recarga** (não pode **ignitar** uma carta se já existir **cópia** dela na zona de recarga), e **tipo** de carta permitido na janela. **Primeira entrega (feature/gameplay):** **não** é obrigatório validar ainda as **condições textuais** das **Counter Cards** (isso fica para a **próxima** feature); anotado em `internal/match/reactions.go` e em `docs/AGENT_HANDOFF_FEATURE_GAMEPLAY.md`.
+
+### Tempo: turno principal e tempo de reação (30s + 30s)
+
+- Timer **principal** do jogador da vez: em torno de **30 s** corridos (valor final no snapshot/servidor).
+- Ao **abrir** direito de reação ao oponente: o timer do jogador da vez **pausa**; inicia o timer de **reação** do oponente (**30 s** corridos).
+- Ao **encerrar** a reação (passou, jogou carta, chain resolvida conforme regras): timer de reação **pausa**; o timer principal do jogador da vez **retoma**.
+- Referência de orçamento por “volta” do jogador da vez: até **~60 s** no total (30 s de ação + até 30 s de reação do oponente), salvo pausas de **chain**.
+- Se o **tempo principal** do jogador da vez **acabar**: **+1 strike** e passa o turno.
+- Se o **tempo de reação** do oponente **acabar**: ele **não pode mais reagir** a **nenhuma** outra jogada **naquele turno** (efeito equivalente, para o restante do turno, a ter reações **OFF**).
+- Ao **iniciar um novo turno**, cada lado volta a ter o seu bloco de **30 s** principal (e reações conforme toggle).
+- **Durante a resolução de uma chain** (pilha de efeitos/reações): os timers dos **dois** jogadores permanecem **pausados** até a chain concluir (animações no cliente podem continuar localmente se não dependerem de tick do servidor).
+
+### Ordem de turno (referência — alinhar ao motor)
+
+1. **Início do turno** — +1 mana ao pool do jogador ativo (e demais ticks do servidor).
+2. **Tick de ignição** — contador da carta no slot de ignição −1 (quando aplicável); se chegar a 0, **ativação** do efeito conforme regras.
+3. **Tick de recarga** — contador de cada carta na pilha de recarga −1; ao chegar a 0, a carta volta ao fundo do deck.
+4. **Janela de ação** (turno do jogador ativo): comprar cartas, **ignição** de **Power** / **Continuous** (e demais tipos permitidos), etc., conforme slot e regras.
+5. **Reação a ignição** (se toggle e elegibilidade permitirem): oponente pode **Retribution** / **Counter** conforme o **tipo** da carta ignitada e a regra (ex.: **Continuous**: janela de Retribution **só no turno em que entrou** no slot, não a cada turno enquanto permanecer lá). Cadeia **LIFO** onde aplicável.
+6. **Movimento de peça** no xadrez.
+7. **Tentativa de captura**: ao **soltar** a peça sobre a captura **ou** ao **clicar** na peça alvo com intenção de capturar, abre-se a janela ao oponente (Counter onde aplicável). O jogador que **ataca** **não** precisa de um segundo “confirmar ataque”; quem **confirma passar ou reagir** é o **oponente**.
+8. **Peça capturada** (ou não, após efeitos) — graveyard, etc.
 9. **Fim de turno**.
 
-> Efeitos completos das cartas e resolução de cadeia detalhada estão em `Cards.md`. O motor é a fonte da verdade.
+> Efeitos completos das cartas estão em `Cards.md`. O motor e o protocolo são a fonte da verdade; números de tempo podem divergir do legado “10 s” até o snapshot unificar em **30 s**.
 
 ---
 
@@ -72,15 +97,13 @@ Fluxo típico de ativação:
 
 **Ticks no início de turno (servidor):** +1 mana do jogador da vez (até o máximo); **−1** no contador de **ignição** da carta no slot de ignição (compartilhado, uma vez por início de turno de qualquer lado); **−1** em cada entrada de **cooldown** do jogador que está começando o turno (entradas que chegam a 0 voltam ao deck).
 
-### Janelas de reação e Counter
+### Janelas de reação e Counter (tipos)
 
-- **Power** e **Continuous**: no turno do jogador.  
-- **Retribution** e **Counter**: em **reaction windows** (cadeias).  
-- Tentativa de **captura** válida abre janela `capture_attempt` (inclui en passant).  
-- Na cadeia de captura, a primeira resposta do oponente costuma ser **Counter**; **Counter** responde a **Counter** onde aplicável.  
-- **Counterattack** / **Blockade**: ver texto em [Cards.md](Cards.md) e regras no servidor.  
-- **Ignition 0**: resolve no mesmo turno; múltiplas ativações possíveis se houver mana e slot livre.  
-- Slot de ignição ocupado bloqueia novas ativações, exceto comportamentos especiais (ex.: **Save It For Later**).
+- **Power** e **Continuous**: ignição no turno do ativador; **Retribution** só em resposta à **ignição** (com exceções de toggle OFF / AUTO / tempo esgotado). **Continuous**: oponente só tem janela de Retribution **no turno em que a carta entra** no slot, **não** a cada turno seguinte enquanto ela permanecer lá.
+- **Counter**: em **reaction windows** para **ignição de Counter** (onde a condição existir — condições finas podem ser fase posterior) e para **tentativa de captura**.
+- Tentativa de **captura** válida abre janela `capture_attempt` (inclui en passant); primeiro passo da cadeia costuma ser **Counter** pelo oponente; **Counter** responde a **Counter** onde aplicável (ex.: **Counterattack** / **Blockade** — ver [Cards.md](Cards.md)).
+- **Ignition 0**: resolve no mesmo snapshot/turno conforme servidor; múltiplas ignições possíveis se houver mana e slot livre.
+- Slot de ignição ocupado bloqueia novas ignições, exceto comportamentos especiais (ex.: **Save It For Later**).
 
 ---
 
@@ -97,10 +120,17 @@ Fluxo típico de ativação:
 
 ## Desconexão e fim de partida
 
-- Ambos offline → partida cancelada sem vencedor (conforme `endReason`).  
-- Um jogador offline → janela de reconexão (ex.: 60 s); após isso, vitória do outro por timeout de desconexão.  
+- O **servidor** deve detectar desconexão (WebSocket fechado / perda de sessão) **de imediato** e **pausar** qualquer fluxo de partida que dependa daquele jogador (jogadas, timers de reação, chains — animações puramente locais no cliente podem terminar, mas estado autoritativo fica **pausado** até retomada).
+- Enquanto a partida estiver **pausada por desconexão**, o jogador **ainda conectado não pode avançar** a partida (nada de novo lance válido que dependa do outro lado).
+- **Orçamento de desconexão por jogador por partida: 60 s no total** (não reinicia a cada queda: se o jogador cair de novo na mesma partida, o contador **continua de onde parou**). Exibir na UI do oponente um **banner verde** com texto do tipo **“Jogador desconectado (60s)”** e **contagem regressiva** do tempo restante desse orçamento (ou do que o protocolo expuser).
+- Esgotado o orçamento (ou regra equivalente no servidor): vitória do conectado por desconexão / fim de partida (detalhar em [PROTOCOL.md](PROTOCOL.md)).
+- Ambos offline → partida cancelada sem vencedor (conforme `endReason`), salvo regra futura explícita.
 - `leave_match` com oponente conectado pode encerrar com vitória do outro.  
 - Detalhes em [PROTOCOL.md](PROTOCOL.md) (`matchEnded`, `winner`, `endReason`, rematch).
+
+### Idiomas (UI)
+
+- Textos voltados ao jogador devem existir em **inglês** e **português (pt-BR)** no jogo, salvo exceções que o designer listar explicitamente.
 
 ---
 
