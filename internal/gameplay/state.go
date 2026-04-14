@@ -245,13 +245,8 @@ func (s *MatchState) ActivateCard(pid PlayerID, handIndex int) error {
 		return errors.New("invalid hand index")
 	}
 	card := p.Hand[handIndex]
-	if s.IgnitionSlot.Occupied && card.CardID != "save-it-for-later" {
+	if s.IgnitionSlot.Occupied {
 		return errors.New("ignition slot occupied")
-	}
-	if card.CardID == "save-it-for-later" {
-		if err := s.handleSaveItForLater(pid); err != nil {
-			return err
-		}
 	}
 	if p.Mana < card.ManaCost {
 		return errors.New("not enough mana")
@@ -265,9 +260,6 @@ func (s *MatchState) ActivateCard(pid PlayerID, handIndex int) error {
 		TurnsRemaining:  card.Ignition,
 		Occupied:        true,
 		ActivationOwner: pid,
-	}
-	if card.Ignition == 0 {
-		return s.ResolveIgnition(true)
 	}
 	return nil
 }
@@ -288,29 +280,41 @@ func (s *MatchState) ConsumeCardFromHand(pid PlayerID, handIndex int) (CardInsta
 	return card, nil
 }
 
-// SendCardToCooldown pushes a card into cooldown tracking.
+// SendCardToCooldown pushes a card into cooldown tracking, or routes it immediately when
+// Cooldown is zero: Continuous cards are banished; other types return to the deck (see PROJECT.md).
 func (s *MatchState) SendCardToCooldown(pid PlayerID, card CardInstance) {
 	p := s.Players[pid]
+	if card.Cooldown <= 0 {
+		s.routeCardFinishedCooldown(pid, card)
+		return
+	}
 	p.Cooldowns = append(p.Cooldowns, CooldownEntry{
 		Card:           card,
 		TurnsRemaining: card.Cooldown,
 	})
 }
 
-// ResolveIgnition finalizes ignition and moves card to cooldown.
+// routeCardFinishedCooldown moves a card whose cooldown timer has reached zero: Continuous cards
+// go to banish; all other types are appended to the deck.
+func (s *MatchState) routeCardFinishedCooldown(pid PlayerID, card CardInstance) {
+	p := s.Players[pid]
+	def, ok := CardDefinitionByID(card.CardID)
+	if ok && def.Type == CardTypeContinuous {
+		p.Banished = append(p.Banished, card)
+		return
+	}
+	p.Deck = append(p.Deck, card)
+}
+
+// ResolveIgnition finalizes ignition and appends a success/failure event to the activation queue.
 func (s *MatchState) ResolveIgnition(success bool) error {
 	if !s.IgnitionSlot.Occupied {
 		return errors.New("ignition slot is empty")
 	}
 	owner := s.IgnitionSlot.ActivationOwner
-	p := s.Players[owner]
 
 	// Effect application is owned by power resolvers later.
 	_ = success
-	p.Cooldowns = append(p.Cooldowns, CooldownEntry{
-		Card:           s.IgnitionSlot.Card,
-		TurnsRemaining: s.IgnitionSlot.Card.Cooldown,
-	})
 	s.ResolvedQueue = append(s.ResolvedQueue, ResolvedIgnitionEvent{
 		Owner:   owner,
 		Card:    s.IgnitionSlot.Card,
@@ -352,7 +356,7 @@ func (s *MatchState) tickCooldowns(pid PlayerID) {
 			cd.TurnsRemaining--
 		}
 		if cd.TurnsRemaining == 0 {
-			p.Deck = append(p.Deck, cd.Card)
+			s.routeCardFinishedCooldown(pid, cd.Card)
 			continue
 		}
 		next = append(next, cd)
@@ -392,18 +396,6 @@ func (s *MatchState) ActivateSpecialAbility(pid PlayerID) error {
 	p.EnergizedMana = 0
 	p.MaxEnergizedMana += 10
 	return s.EndTurn(pid)
-}
-
-func (s *MatchState) handleSaveItForLater(pid PlayerID) error {
-	if !s.IgnitionSlot.Occupied {
-		return errors.New("save-it-for-later requires occupied ignition slot")
-	}
-	targetOwner := s.IgnitionSlot.ActivationOwner
-	targetCard := s.IgnitionSlot.Card
-	s.IgnitionSlot = IgnitionSlot{}
-	s.Players[targetOwner].Hand = append(s.Players[targetOwner].Hand, targetCard)
-	s.addMana(pid, targetCard.ManaCost)
-	return nil
 }
 
 func hasSkill(id PlayerSkillID) bool {

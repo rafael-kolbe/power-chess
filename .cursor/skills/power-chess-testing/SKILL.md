@@ -83,6 +83,7 @@ Configuration: `playwright.config.js`
 - Server health URL: `http://127.0.0.1:8080/healthz`
 - `reuseExistingServer: false` — always fresh server per run
 - Test timeout: 60 s per test
+- Browser binaries: `playwright.config.js` sets `PLAYWRIGHT_BROWSERS_PATH` to `./.pw-browsers` (gitignored). After cloning or upgrading `@playwright/test`, run **`npx playwright install chromium`** from the repo root so E2E can launch.
 
 ### Test files
 
@@ -92,6 +93,7 @@ Configuration: `playwright.config.js`
 | `tests/e2e/lobby-flow.spec.js` | Room list polling, joining via lobby |
 | `tests/e2e/playmat-zones.spec.js` | Playmat zones visible, draw button state, pile view modal |
 | `tests/e2e/rematch-modal.spec.js` | End-of-match overlay, rematch flow (uses MockWebSocket) |
+| `tests/e2e/animation-effects.spec.js` | `ADMIN_DEBUG_MATCH` fixture via `__powerChessMatchTest`; ignition flash; ignite→retaliate/backstab cooldown chain |
 
 ### joinViaRoomList helper
 

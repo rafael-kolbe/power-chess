@@ -24,7 +24,9 @@ const (
 	MessageRequestRematch    MessageType = "request_rematch"
 	MessageConfirmMulligan   MessageType = "confirm_mulligan"
 	MessageSetReactionMode   MessageType = "set_reaction_mode"
+	MessageSetDebugPause     MessageType = "set_debug_pause"
 	MessageDebugMatchFixture MessageType = "debug_match_fixture"
+	MessageClientTrace       MessageType = "client_trace"
 	// Server -> Client
 	MessageHello         MessageType = "hello"
 	MessageAck           MessageType = "ack"
@@ -110,6 +112,16 @@ type ConfirmMulliganPayload struct {
 // Mode is "off", "on", or "auto" (case-insensitive; unknown values become "on").
 type SetReactionModePayload struct {
 	Mode string `json:"mode"`
+}
+
+// SetDebugPausePayload toggles room-wide debug pause (ADMIN_DEBUG_MATCH only).
+type SetDebugPausePayload struct {
+	Paused bool `json:"paused"`
+}
+
+// ClientTracePayload carries a browser-side debug line batch for server session logs (ADMIN_DEBUG_MATCH only).
+type ClientTracePayload struct {
+	Text string `json:"text"`
 }
 
 // DebugSideFixture lists full deck order (20 legal constructed cards) and hand card IDs to draw from that deck.
@@ -214,6 +226,19 @@ type ReactionWindowState struct {
 	Actor         string   `json:"actor,omitempty"`
 	EligibleTypes []string `json:"eligibleTypes,omitempty"`
 	StackSize     int      `json:"stackSize"`
+	// StagedCardID is the top of the in-memory reaction stack (last queued card), if any.
+	StagedCardID string `json:"stagedCardId,omitempty"`
+	// StagedOwner is the seat that played StagedCardID onto the stack.
+	StagedOwner string `json:"stagedOwner,omitempty"`
+	// StackCards lists queued reaction cards bottom-first (first queued first). Resolution is LIFO
+	// (last entry resolves first); clients use this for ordered resolve animations.
+	StackCards []ReactionStackPreviewEntry `json:"stackCards,omitempty"`
+}
+
+// ReactionStackPreviewEntry is one card on the reaction stack for client animations.
+type ReactionStackPreviewEntry struct {
+	CardID string `json:"cardId"`
+	Owner  string `json:"owner"`
 }
 
 // PendingCaptureState describes a deferred capture move awaiting reaction resolution.
@@ -263,32 +288,37 @@ type StateSnapshotPayload struct {
 	// ReconnectPendingFor is "A" or "B" while that seat's socket is gone but the grace timer has not fired yet.
 	ReconnectPendingFor     string `json:"reconnectPendingFor,omitempty"`
 	ReconnectDeadlineUnixMs int64  `json:"reconnectDeadlineUnixMs,omitempty"`
+	AdminDebugMatch         bool   `json:"adminDebugMatch,omitempty"`
+	DebugPauseActive        bool   `json:"debugPauseActive,omitempty"`
 	TurnPlayer              string `json:"turnPlayer"`
 	TurnSeconds             int    `json:"turnSeconds"`
 	TurnNumber              int    `json:"turnNumber"`
 	// TurnMainDeadlineUnixMs is the wall-clock instant when the main turn timer expires (0 if paused for reaction).
 	TurnMainDeadlineUnixMs int64 `json:"turnMainDeadlineUnixMs,omitempty"`
 	// TurnMainPausedRemainingMs is remaining main-turn budget while the first reaction response is pending (0 if not paused).
-	TurnMainPausedRemainingMs int64                  `json:"turnMainPausedRemainingMs,omitempty"`
-	IgnitionOn                bool                   `json:"ignitionOn"`
-	IgnitionCard              string                 `json:"ignitionCard,omitempty"`
-	IgnitionOwner             string                 `json:"ignitionOwner,omitempty"`
-	IgnitionTurnsRemaining    int                    `json:"ignitionTurnsRemaining"`
-	Board                     [8][8]string           `json:"board"`
-	EnPassant                 EnPassantStateSnapshot `json:"enPassant"`
-	CastlingRights            CastlingRightsSnapshot `json:"castlingRights"`
+	TurnMainPausedRemainingMs int64 `json:"turnMainPausedRemainingMs,omitempty"`
+	// ReactionDeadlineUnixMs is the responder timer deadline while waiting first response in reaction window.
+	ReactionDeadlineUnixMs int64                  `json:"reactionDeadlineUnixMs,omitempty"`
+	IgnitionOn             bool                   `json:"ignitionOn"`
+	IgnitionCard           string                 `json:"ignitionCard,omitempty"`
+	IgnitionOwner          string                 `json:"ignitionOwner,omitempty"`
+	IgnitionTurnsRemaining int                    `json:"ignitionTurnsRemaining"`
+	Board                  [8][8]string           `json:"board"`
+	EnPassant              EnPassantStateSnapshot `json:"enPassant"`
+	CastlingRights         CastlingRightsSnapshot `json:"castlingRights"`
 	// ViewerPlayerID identifies whose perspective this snapshot is for (drives hand visibility).
-	ViewerPlayerID  string               `json:"viewerPlayerId,omitempty"`
-	Players         []PlayerHUDState     `json:"players"`
-	PendingEffects  []PendingEffectState `json:"pendingEffects"`
-	ReactionWindow  ReactionWindowState  `json:"reactionWindow"`
-	PendingCapture  PendingCaptureState  `json:"pendingCapture"`
-	MatchEnded      bool                 `json:"matchEnded"`
-	Winner          string               `json:"winner,omitempty"`
-	EndReason       string               `json:"endReason,omitempty"`
-	RematchA        bool                 `json:"rematchA"`
-	RematchB        bool                 `json:"rematchB"`
-	PostMatchMsLeft int64                `json:"postMatchMsLeft,omitempty"`
+	ViewerPlayerID      string               `json:"viewerPlayerId,omitempty"`
+	Players             []PlayerHUDState     `json:"players"`
+	PendingEffects      []PendingEffectState `json:"pendingEffects"`
+	ActivationQueueSize int                  `json:"activationQueueSize"`
+	ReactionWindow      ReactionWindowState  `json:"reactionWindow"`
+	PendingCapture      PendingCaptureState  `json:"pendingCapture"`
+	MatchEnded          bool                 `json:"matchEnded"`
+	Winner              string               `json:"winner,omitempty"`
+	EndReason           string               `json:"endReason,omitempty"`
+	RematchA            bool                 `json:"rematchA"`
+	RematchB            bool                 `json:"rematchB"`
+	PostMatchMsLeft     int64                `json:"postMatchMsLeft,omitempty"`
 }
 
 // DecodeEnvelope validates and decodes a raw websocket frame into Envelope.

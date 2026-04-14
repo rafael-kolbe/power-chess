@@ -116,7 +116,8 @@ Broadcast do estado da sala. Campos principais:
 | Perspectiva | `viewerPlayerId` — identifica o destinatário deste snapshot (determina visibilidade da mão) |
 | Tabuleiro | `board` 8×8 (códigos `wK`, `bP`, `""` vazio), `enPassant`, `castlingRights` |
 | Jogadores | `players[]`: `mana`, `maxMana`, `energizedMana`, `maxEnergized`, `handCount`, `cooldownCount`, `graveyardCount`, `strikes`, `deckCount`, `sleeveColor`, `reactionMode` (`off` / `on` / `auto`), `hand` (privado — só no snapshot do próprio jogador), `banishedCards[]`, `graveyardPieces[]` (ordenado Q>R>B>N>P), `cooldownPreview[]` (até 4), `cooldownHiddenCount` |
-| Efeitos | `pendingEffects`, `pendingCapture`, `reactionWindow` |
+| Efeitos | `pendingEffects`, `activationQueueSize`, `pendingCapture`, `reactionWindow` |
+| Debug (admin) | `adminDebugMatch` (capability), `debugPauseActive` (pausa global ativa) |
 | Fim | `matchEnded`, `winner`, `endReason`, `rematchA/B`, `postMatchMsLeft` |
 
 **Privacidade**: o servidor envia um snapshot por cliente via `BroadcastSnapshot()`; apenas o campo `hand` do próprio jogador é populado; oponentes recebem `hand: null`.
@@ -210,7 +211,9 @@ Broadcast do estado da sala. Campos principais:
       "trigger": "on-ignite",
       "actor": "A",
       "eligibleTypes": ["Retribution", "Power"],
-      "stackSize": 1
+      "stackSize": 1,
+      "stagedCardId": "retribution",
+      "stagedOwner": "B"
     },
     "matchEnded": false,
     "winner": "",
@@ -227,6 +230,8 @@ Broadcast do estado da sala. Campos principais:
 - `enPassant`: quando `valid` é true, o cliente pode usar para highlight; o servidor decide legalidade.  
 - `castlingRights`: evita sugerir roque após revogação.  
 - `turnSeconds`: duração autoritativa do timer de turno.  
+- `reactionWindow.stagedCardId` / `stagedOwner`: carta no topo da pilha de reações e o assento que a jogou (para HUD enquanto a janela está aberta).
+- `reactionWindow.stackCards`: lista opcional `{ cardId, owner }` na ordem **fundo → topo** da pilha (a primeira resposta enfileirada vem primeiro). A resolução no servidor é **LIFO** (última entrada resolve primeiro); o cliente pode usar essa lista para animar efeitos em sequência.  
 - Após fim de partida: `rematchA` / `rematchB` e `postMatchMsLeft` para a janela pós-partida.
 
 ---
@@ -311,6 +316,25 @@ Atualiza a preferência do jogador para **reações em captura** (e futuras jane
 - **`auto`**: o servidor só mantém a janela se o oponente tiver pelo menos um **Counter** na mão com mana suficiente e sem cópia do mesmo `cardId` na recarga (condições textuais das Counter cards podem ser fase posterior).
 
 O estado atual vem em cada entrada de `players[].reactionMode` no `state_snapshot`.
+
+### `set_debug_pause` (apenas com `ADMIN_DEBUG_MATCH` ativo)
+
+Ativa/desativa **pausa global da sala** para depuração. Enquanto ativo:
+
+- ações de gameplay são recusadas com `action_failed: "debug_pause_active"`;
+- timers de turno/reação/mulligan não avançam;
+- o cliente deve tratar `debugPauseActive: true` no `state_snapshot` como estado fechado.
+
+```json
+{ "id": "req-dbg-pause-1", "type": "set_debug_pause", "payload": { "paused": true } }
+```
+
+- disponível apenas quando `adminDebugMatch` estiver ativo no snapshot;
+- se `ADMIN_DEBUG_MATCH` estiver desligado no servidor, retorna `error` com `code: "debug_disabled"`.
+
+### `client_trace` (apenas com `ADMIN_DEBUG_MATCH` ativo)
+
+Envia texto JSON (por exemplo um lote de eventos do navegador) para o **log do processo** no servidor (`log.Printf` com prefixo `client_trace`), útil com sessão Docker em `tee`. Exige `join_match` prévio. Payload: `{ "text": "..." }` (o servidor trunca entradas muito longas).
 
 ### `resolve_pending_effect`
 

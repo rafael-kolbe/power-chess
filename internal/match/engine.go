@@ -2,7 +2,6 @@ package match
 
 import (
 	"errors"
-	"fmt"
 
 	"power-chess/internal/chess"
 	"power-chess/internal/gameplay"
@@ -37,10 +36,6 @@ type Engine struct {
 	Chess *chess.Game
 	State *gameplay.MatchState
 
-	moveBuffTarget map[gameplay.PlayerID]*chess.Pos
-	moveBuffKind   map[gameplay.PlayerID]MoveBuffKind
-	extraMoveLeft  map[gameplay.PlayerID]int
-	movesThisTurn  map[gameplay.PlayerID]int
 	pendingEffects map[gameplay.PlayerID][]PendingEffect
 	resolvers      map[gameplay.CardID]EffectResolver
 	ReactionWindow *ReactionWindow
@@ -53,10 +48,6 @@ func NewEngine(state *gameplay.MatchState, board *chess.Game) *Engine {
 	return &Engine{
 		State:          state,
 		Chess:          board,
-		moveBuffTarget: map[gameplay.PlayerID]*chess.Pos{},
-		moveBuffKind:   map[gameplay.PlayerID]MoveBuffKind{},
-		extraMoveLeft:  map[gameplay.PlayerID]int{},
-		movesThisTurn:  map[gameplay.PlayerID]int{},
 		pendingEffects: map[gameplay.PlayerID][]PendingEffect{},
 		resolvers:      DefaultResolvers(),
 		reactionStack:  []ReactionAction{},
@@ -69,27 +60,15 @@ func (e *Engine) StartTurn(pid gameplay.PlayerID) error {
 	if err := e.State.StartTurn(pid); err != nil {
 		return err
 	}
-	e.movesThisTurn[pid] = 0
 	return e.processResolvedIgnitions()
 }
 
-// EndTurn clears turn-scoped buffs and advances the active player.
+// EndTurn advances the active player in gameplay state.
 func (e *Engine) EndTurn(pid gameplay.PlayerID) error {
-	delete(e.moveBuffTarget, pid)
-	delete(e.moveBuffKind, pid)
-	e.extraMoveLeft[pid] = 0
-	e.movesThisTurn[pid] = 0
 	return e.State.EndTurn(pid)
 }
 
-// SetMoveBuffTarget stores a one-turn movement buff target for the given player.
-func (e *Engine) SetMoveBuffTarget(pid gameplay.PlayerID, kind MoveBuffKind, pos chess.Pos) {
-	cp := pos
-	e.moveBuffTarget[pid] = &cp
-	e.moveBuffKind[pid] = kind
-}
-
-// DrawCard pays the draw-mana cost and moves one card from the player's deck to their hand.
+// DrawCard pays the draw-mana cost and moves a card from the player's deck to their hand.
 // Drawing is only permitted on the player's own turn and outside an open reaction window.
 func (e *Engine) DrawCard(pid gameplay.PlayerID) error {
 	if err := e.errIfOpeningBlocksGameplay(); err != nil {
@@ -117,21 +96,14 @@ func (e *Engine) ActivateCard(pid gameplay.PlayerID, handIndex int) error {
 	if !ok {
 		return errors.New("unknown card definition")
 	}
+	// While a reaction window is open, plays resolve through the reaction stack (including the
+	// actor's opponent on ignite_reaction), never through ignition activation — ActivateCard on
+	// MatchState requires CurrentTurn == pid, which is false for the responder.
 	if e.ReactionWindow != nil && e.ReactionWindow.Open {
-		allowed := false
-		for _, t := range e.ReactionWindow.EligibleTypes {
-			if def.Type == t {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return errors.New("card type not allowed in current reaction window")
-		}
-	} else {
-		if def.Type != gameplay.CardTypePower && def.Type != gameplay.CardTypeContinuous && def.ID != "save-it-for-later" {
-			return errors.New("only Power and Continuous cards can be activated in normal turn flow")
-		}
+		return e.QueueReactionCard(pid, handIndex, EffectTarget{})
+	}
+	if def.Type != gameplay.CardTypePower && def.Type != gameplay.CardTypeContinuous {
+		return errors.New("only Power and Continuous cards can be activated in normal turn flow")
 	}
 	if err := e.State.ActivateCard(pid, handIndex); err != nil {
 		return err
@@ -144,20 +116,20 @@ func (e *Engine) ActivateCard(pid gameplay.PlayerID, handIndex int) error {
 }
 
 // maybeOpenIgniteReactionWindow opens ignite_reaction for the opponent when a Power or Continuous
-// card remains in the ignition slot with ignition turns remaining (same-turn retribution window).
+// card enters ignition (including ignition=0 cards, which now wait for response before resolving).
 func (e *Engine) maybeOpenIgniteReactionWindow(activator gameplay.PlayerID) {
 	if e.ReactionWindow != nil && e.ReactionWindow.Open {
 		return
 	}
-	if !e.State.IgnitionSlot.Occupied || e.State.IgnitionSlot.TurnsRemaining <= 0 {
+	if !e.State.IgnitionSlot.Occupied {
 		return
 	}
 	card := e.State.IgnitionSlot.Card
-	def, ok := gameplay.CardDefinitionByID(card.CardID)
+	cardDef, ok := gameplay.CardDefinitionByID(card.CardID)
 	if !ok {
 		return
 	}
-	if def.Type != gameplay.CardTypePower && def.Type != gameplay.CardTypeContinuous {
+	if cardDef.Type != gameplay.CardTypePower && cardDef.Type != gameplay.CardTypeContinuous {
 		return
 	}
 	e.OpenReactionWindow("ignite_reaction", activator, []gameplay.CardType{gameplay.CardTypeRetribution, gameplay.CardTypePower})
@@ -177,7 +149,7 @@ func (e *Engine) ResolvePendingEffect(pid gameplay.PlayerID, target EffectTarget
 	return pe.Resolver.Apply(e, pe.Owner, target)
 }
 
-// SubmitMove executes a move, including temporary movement buffs and extra-move rules.
+// SubmitMove executes a legal chess move, or defers it when a capture reaction window opens.
 func (e *Engine) SubmitMove(pid gameplay.PlayerID, m chess.Move) error {
 	if err := e.errIfOpeningBlocksGameplay(); err != nil {
 		return err
@@ -213,40 +185,6 @@ func (e *Engine) reconcileTurnState() {
 	}
 }
 
-func (e *Engine) applyMoveWithBuffIfAny(board *chess.Game, pid gameplay.PlayerID, m chess.Move) error {
-	target := e.moveBuffTarget[pid]
-	if target == nil || *target != m.From {
-		return board.ApplyMove(m)
-	}
-	switch e.moveBuffKind[pid] {
-	case MoveBuffKnight:
-		if !isKnightDelta(m.From, m.To) {
-			return fmt.Errorf("knight buff only allows knight pattern from buffed piece")
-		}
-	case MoveBuffRook:
-		if !isRookLikeDelta(m.From, m.To) {
-			return fmt.Errorf("rook buff only allows rook-like movement from buffed piece")
-		}
-		if pc := board.PieceAt(m.From); pc.Type == chess.Pawn {
-			if !isSingleOrthogonalStep(m.From, m.To) {
-				return fmt.Errorf("rook touch on a pawn allows only one square")
-			}
-		}
-	case MoveBuffBishop:
-		if !isBishopLikeDelta(m.From, m.To) {
-			return fmt.Errorf("bishop buff only allows bishop-like movement from buffed piece")
-		}
-		if pc := board.PieceAt(m.From); pc.Type == chess.Pawn {
-			if !isSingleDiagonalStep(m.From, m.To) {
-				return fmt.Errorf("bishop touch on a pawn allows only one square")
-			}
-		}
-	default:
-		return board.ApplyMove(m)
-	}
-	return board.ApplyPseudoLegalMove(m)
-}
-
 func (e *Engine) handleResolvedEffect(ev *gameplay.ResolvedIgnitionEvent) error {
 	if !ev.Success {
 		return nil
@@ -272,6 +210,7 @@ func (e *Engine) processResolvedIgnitions() error {
 		if err := e.handleResolvedEffect(&evCopy); err != nil {
 			return err
 		}
+		e.State.SendCardToCooldown(evCopy.Owner, evCopy.Card)
 	}
 	return nil
 }
@@ -295,33 +234,19 @@ func (e *Engine) ActivatePlayerSkill(pid gameplay.PlayerID) error {
 // applyMoveCore applies a validated move without opening capture trigger windows.
 // It is used by normal non-capture flow and pending-move finalization.
 func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
-	color := toColor(pid)
-	isPowerSecondMove := e.movesThisTurn[pid] >= 1 && e.extraMoveLeft[pid] > 0
 	captureForMana := e.isCaptureAttempt(pid, m)
-	if err := e.applyMoveWithBuffIfAny(e.Chess, pid, m); err != nil {
+	if err := e.Chess.ApplyMove(m); err != nil {
 		return err
 	}
 	if captureForMana {
 		e.State.GrantManaForChessCapture(pid)
 	}
-	e.movesThisTurn[pid]++
-	keepTurn := false
-	if isPowerSecondMove {
-		e.extraMoveLeft[pid]--
-	} else if e.movesThisTurn[pid] == 1 && e.extraMoveLeft[pid] > 0 {
-		e.Chess.Turn = color
-		keepTurn = true
+	if err := e.State.EndTurn(pid); err != nil {
+		return err
 	}
-	if !keepTurn {
-		if err := e.State.EndTurn(pid); err != nil {
-			return err
-		}
-		if err := e.StartTurn(e.State.CurrentTurn); err != nil {
-			return err
-		}
+	if err := e.StartTurn(e.State.CurrentTurn); err != nil {
+		return err
 	}
-	delete(e.moveBuffTarget, pid)
-	delete(e.moveBuffKind, pid)
 	return nil
 }
 
@@ -354,49 +279,6 @@ func (e *Engine) PendingMove() (PendingMoveAction, bool) {
 		return PendingMoveAction{}, false
 	}
 	return *e.pendingMove, true
-}
-
-// IsPendingCaptureFromBuffedAttacker reports whether pending capture is initiated by a power-buffed piece.
-func (e *Engine) IsPendingCaptureFromBuffedAttacker() bool {
-	if e.pendingMove == nil || e.ReactionWindow == nil || e.ReactionWindow.Trigger != "capture_attempt" {
-		return false
-	}
-	pm := *e.pendingMove
-	target := e.moveBuffTarget[pm.PlayerID]
-	if target == nil {
-		return false
-	}
-	return *target == pm.Move.From
-}
-
-// CancelPendingCaptureAndCaptureAttacker cancels pending capture and removes attacking piece from board.
-func (e *Engine) CancelPendingCaptureAndCaptureAttacker() error {
-	if e.pendingMove == nil {
-		return errors.New("no pending capture to counter")
-	}
-	pm := *e.pendingMove
-	attacker := e.Chess.PieceAt(pm.Move.From)
-	if attacker.IsEmpty() {
-		return errors.New("attacker piece is missing")
-	}
-	e.Chess.SetPiece(pm.Move.From, chess.Piece{})
-	delete(e.moveBuffTarget, pm.PlayerID)
-	delete(e.moveBuffKind, pm.PlayerID)
-	e.pendingMove = nil
-	return nil
-}
-
-func isKnightDelta(from, to chess.Pos) bool {
-	dr := abs(from.Row - to.Row)
-	dc := abs(from.Col - to.Col)
-	return (dr == 1 && dc == 2) || (dr == 2 && dc == 1)
-}
-
-func abs(v int) int {
-	if v < 0 {
-		return -v
-	}
-	return v
 }
 
 func toColor(pid gameplay.PlayerID) chess.Color {
@@ -433,36 +315,4 @@ type PendingEffect struct {
 type EffectResolver interface {
 	RequiresTarget() bool
 	Apply(e *Engine, owner gameplay.PlayerID, target EffectTarget) error
-}
-
-type MoveBuffKind string
-
-const (
-	MoveBuffKnight MoveBuffKind = "knight"
-	MoveBuffRook   MoveBuffKind = "rook"
-	MoveBuffBishop MoveBuffKind = "bishop"
-)
-
-func isRookLikeDelta(from, to chess.Pos) bool {
-	return from.Row == to.Row || from.Col == to.Col
-}
-
-func isBishopLikeDelta(from, to chess.Pos) bool {
-	dr := abs(from.Row - to.Row)
-	dc := abs(from.Col - to.Col)
-	return dr == dc
-}
-
-// isSingleOrthogonalStep reports a move of exactly one square along a rank or file.
-func isSingleOrthogonalStep(from, to chess.Pos) bool {
-	dr := abs(from.Row - to.Row)
-	dc := abs(from.Col - to.Col)
-	return dr+dc == 1
-}
-
-// isSingleDiagonalStep reports a move of exactly one square diagonally.
-func isSingleDiagonalStep(from, to chess.Pos) bool {
-	dr := abs(from.Row - to.Row)
-	dc := abs(from.Col - to.Col)
-	return dr == 1 && dc == 1
 }

@@ -1,5 +1,11 @@
 node_modules/
 
+# Playwright browser binaries (see playwright.config.js PLAYWRIGHT_BROWSERS_PATH)
+.pw-browsers/
+
+# Match debug file logs (ADMIN_DEBUG_MATCH)
+logs/
+
 # Local secrets (compose / env)
 .env
 .env.local

@@ -174,6 +174,8 @@
           <option value="auto">Auto</option>
         </select>
       </label>
+      <button id="reactionPassBtn" type="button" class="match-end-btn-secondary hidden">OK</button>
+      <button id="debugPauseBtn" type="button" class="match-end-btn-secondary hidden">Pause</button>
     </div>
     <div id="boardArea" class="playmat-area">
 
@@ -324,7 +326,10 @@
       <pre id="status"></pre>
       <h4 id="snapshotTitle" class="match-debug-sub">Snapshot</h4>
       <pre id="snapshot"></pre>
-      <h4 id="eventsTitle" class="match-debug-sub">Events</h4>
+      <div class="match-debug-events-head">
+        <h4 id="eventsTitle" class="match-debug-sub">Events</h4>
+        <button type="button" id="exportClientTraceBtn" class="match-end-btn-secondary">Download client trace (JSON)</button>
+      </div>
       <pre id="events"></pre>
     </section>
   </div>

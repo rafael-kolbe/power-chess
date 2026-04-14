@@ -132,6 +132,68 @@ func TestSendCardToCooldownAppendsToCooldowns(t *testing.T) {
 	}
 }
 
+func TestSendCardToCooldownZeroCooldownContinuousBanishes(t *testing.T) {
+	s, _ := NewMatchState(StarterDeck(), StarterDeck())
+	card := CardInstance{InstanceID: "c1", CardID: "clairvoyance", ManaCost: 7, Ignition: 3, Cooldown: 0}
+	s.SendCardToCooldown(PlayerA, card)
+	p := s.Players[PlayerA]
+	if len(p.Cooldowns) != 0 {
+		t.Fatalf("expected no cooldown row entry for 0-duration continuous, got %d", len(p.Cooldowns))
+	}
+	if len(p.Banished) != 1 || p.Banished[0].CardID != "clairvoyance" {
+		t.Fatalf("expected clairvoyance banished, banished=%v", p.Banished)
+	}
+}
+
+func TestSendCardToCooldownZeroCooldownPowerReturnsToDeck(t *testing.T) {
+	s, _ := NewMatchState(StarterDeck(), StarterDeck())
+	before := len(s.Players[PlayerA].Deck)
+	card := CardInstance{InstanceID: "c1", CardID: "extinguish", ManaCost: 2, Ignition: 0, Cooldown: 0}
+	s.SendCardToCooldown(PlayerA, card)
+	p := s.Players[PlayerA]
+	if len(p.Cooldowns) != 0 {
+		t.Fatalf("expected no cooldown entry, got %d", len(p.Cooldowns))
+	}
+	if len(p.Deck) != before+1 {
+		t.Fatalf("expected card appended to deck")
+	}
+	if p.Deck[len(p.Deck)-1].CardID != "extinguish" {
+		t.Fatal("expected extinguish at deck tail")
+	}
+}
+
+func TestTickCooldownsRoutesContinuousToBanish(t *testing.T) {
+	s, _ := NewMatchState(StarterDeck(), StarterDeck())
+	card := CardInstance{InstanceID: "c1", CardID: "life-drain", ManaCost: 3, Ignition: 5, Cooldown: 2}
+	s.Players[PlayerA].Cooldowns = []CooldownEntry{{Card: card, TurnsRemaining: 1}}
+	_ = s.StartTurn(PlayerA)
+	p := s.Players[PlayerA]
+	if len(p.Cooldowns) != 0 {
+		t.Fatalf("expected cooldown empty after tick, got %d", len(p.Cooldowns))
+	}
+	if len(p.Banished) != 1 || p.Banished[0].CardID != "life-drain" {
+		t.Fatalf("expected life-drain banished, got %v", p.Banished)
+	}
+}
+
+func TestTickCooldownsRoutesPowerToDeck(t *testing.T) {
+	s, _ := NewMatchState(StarterDeck(), StarterDeck())
+	card := CardInstance{InstanceID: "c1", CardID: "knight-touch", ManaCost: 3, Ignition: 0, Cooldown: 2}
+	s.Players[PlayerA].Cooldowns = []CooldownEntry{{Card: card, TurnsRemaining: 1}}
+	deckLen := len(s.Players[PlayerA].Deck)
+	_ = s.StartTurn(PlayerA)
+	p := s.Players[PlayerA]
+	if len(p.Cooldowns) != 0 {
+		t.Fatalf("expected cooldown empty, got %d", len(p.Cooldowns))
+	}
+	if len(p.Banished) != 0 {
+		t.Fatalf("power card should not banish")
+	}
+	if len(p.Deck) != deckLen+1 {
+		t.Fatalf("expected deck grew by 1")
+	}
+}
+
 // --- ResolveIgnition ---
 
 func TestResolveIgnitionClearsSlotAndQueuesEvent(t *testing.T) {
@@ -155,8 +217,8 @@ func TestResolveIgnitionClearsSlotAndQueuesEvent(t *testing.T) {
 	if !ev.Success {
 		t.Fatal("expected success=true")
 	}
-	if len(s.Players[PlayerA].Cooldowns) != 1 {
-		t.Fatalf("expected card sent to cooldown, got %d entries", len(s.Players[PlayerA].Cooldowns))
+	if len(s.Players[PlayerA].Cooldowns) != 0 {
+		t.Fatalf("resolve ignition must not send to cooldown directly, got %d entries", len(s.Players[PlayerA].Cooldowns))
 	}
 }
 
@@ -201,49 +263,6 @@ func TestPopResolvedIgnitionsOnEmptyQueueReturnsEmpty(t *testing.T) {
 	events := s.PopResolvedIgnitions()
 	if events != nil && len(events) != 0 {
 		t.Fatalf("expected empty slice, got %v", events)
-	}
-}
-
-// --- handleSaveItForLater (via ActivateCard) ---
-
-func TestSaveItForLaterClearsIgnitionAndReturnsCardToHand(t *testing.T) {
-	s, _ := NewMatchState(StarterDeck(), StarterDeck())
-	// Put a different card in ignition.
-	blocked := CardInstance{InstanceID: "b1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}
-	s.IgnitionSlot = IgnitionSlot{Card: blocked, TurnsRemaining: 1, Occupied: true, ActivationOwner: PlayerA}
-	p := s.Players[PlayerA]
-	sil := CardInstance{InstanceID: "sil1", CardID: "save-it-for-later", ManaCost: 0, Ignition: 0, Cooldown: 1}
-	p.Hand = []CardInstance{sil}
-	p.Mana = 10
-	s.Started = true
-
-	if err := s.ActivateCard(PlayerA, 0); err != nil {
-		t.Fatalf("save-it-for-later activation failed: %v", err)
-	}
-	// Slot should be cleared.
-	if s.IgnitionSlot.Occupied {
-		t.Fatal("ignition slot should be cleared by save-it-for-later")
-	}
-	// Blocked card should be returned to the owner's hand.
-	if len(p.Hand) != 1 || p.Hand[0].CardID != "double-turn" {
-		t.Fatalf("expected blocked card returned to hand, got %v", p.Hand)
-	}
-	// Mana was refunded (blocked card's ManaCost 4 granted back).
-	if p.Mana != 10+4 && p.Mana != p.MaxMana {
-		t.Fatalf("unexpected mana after save-it-for-later: %d", p.Mana)
-	}
-}
-
-func TestSaveItForLaterRequiresOccupiedSlot(t *testing.T) {
-	s, _ := NewMatchState(StarterDeck(), StarterDeck())
-	p := s.Players[PlayerA]
-	sil := CardInstance{InstanceID: "sil1", CardID: "save-it-for-later", ManaCost: 0, Ignition: 0, Cooldown: 1}
-	p.Hand = []CardInstance{sil}
-	p.Mana = 10
-	s.Started = true
-
-	if err := s.ActivateCard(PlayerA, 0); err == nil {
-		t.Fatal("expected error when ignition slot is empty")
 	}
 }
 

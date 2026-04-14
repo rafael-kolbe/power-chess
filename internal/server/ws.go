@@ -228,20 +228,34 @@ func (c *Client) readLoop() {
 			continue
 		}
 		if err := c.handle(env); err != nil {
+			rid := clientDebugLogRoomID(c)
 			if errors.Is(err, errClientLeaveMatch) {
+				c.server.matchDebugLogLine(rid, fmt.Sprintf("handler_leave type=%s id=%s player=%s", env.Type, env.ID, c.playerID))
 				c.closeReason = errClientLeaveMatch
 				return
 			}
 			var pErr protocolError
 			if errors.As(err, &pErr) {
 				c.server.telemetry.ObserveError(pErr.code)
+				c.server.matchDebugLogLine(rid, fmt.Sprintf("protocol_err type=%s id=%s player=%s code=%s msg=%q", env.Type, env.ID, c.playerID, pErr.code, pErr.message))
 				c.sendError(pErr.code, pErr.message)
 				continue
 			}
 			c.server.telemetry.ObserveError(ErrorActionFailed)
+			c.server.matchDebugLogLine(rid, fmt.Sprintf("handler_err type=%s id=%s player=%s msg=%q", env.Type, env.ID, c.playerID, err.Error()))
 			c.sendError(ErrorActionFailed, err.Error())
+			continue
 		}
+		c.server.matchDebugLogLine(clientDebugLogRoomID(c), fmt.Sprintf("ok type=%s id=%s player=%s", env.Type, env.ID, c.playerID))
 	}
+}
+
+// clientDebugLogRoomID returns the room id for debug file logging, or empty before join.
+func clientDebugLogRoomID(c *Client) string {
+	if c == nil || c.room == nil {
+		return ""
+	}
+	return c.room.RoomID
 }
 
 // handle routes one protocol envelope to its corresponding action.
@@ -267,6 +281,8 @@ func (c *Client) handle(env Envelope) error {
 		return c.handleConfirmMulligan(env)
 	case MessageSetReactionMode:
 		return c.handleSetReactionMode(env)
+	case MessageSetDebugPause:
+		return c.handleSetDebugPause(env)
 	case MessageResolvePending:
 		return c.handleResolvePending(env)
 	case MessageQueueReaction:
@@ -279,9 +295,36 @@ func (c *Client) handle(env Envelope) error {
 		return c.handleRequestRematch(env)
 	case MessageDebugMatchFixture:
 		return c.handleDebugMatchFixture(env)
+	case MessageClientTrace:
+		return c.handleClientTrace(env)
 	default:
 		return protocolError{code: ErrorUnknownMessageType, message: "unknown message type"}
 	}
+}
+
+// handleClientTrace appends browser debug text to the server process log when ADMIN_DEBUG_MATCH is enabled.
+func (c *Client) handleClientTrace(env Envelope) error {
+	if !c.server.adminDebugMatch {
+		return protocolError{code: ErrorDebugDisabled, message: "admin_debug_match_disabled"}
+	}
+	if c.room == nil {
+		return protocolError{code: ErrorJoinRequired, message: "join_match is required before client_trace"}
+	}
+	var p ClientTracePayload
+	if err := json.Unmarshal(env.Payload, &p); err != nil {
+		return err
+	}
+	text := strings.TrimSpace(p.Text)
+	if text == "" {
+		return c.sendAck(env, "ok", "", "")
+	}
+	const maxRunes = 12000
+	r := []rune(text)
+	if len(r) > maxRunes {
+		text = string(r[:maxRunes]) + "...(truncated)"
+	}
+	log.Printf("client_trace room=%s player=%s %s", c.room.RoomID, c.playerID, text)
+	return c.sendAck(env, "ok", "", "")
 }
 
 func (c *Client) handleStayInRoom(env Envelope) error {
@@ -481,6 +524,9 @@ func (c *Client) handleSubmitMove(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
+		if c.room.debugPauseActive {
+			return protocolError{code: ErrorActionFailed, message: "debug_pause_active"}
+		}
 		if err := c.room.Engine.SubmitMove(c.playerID, mv); err != nil {
 			return err
 		}
@@ -488,6 +534,7 @@ func (c *Client) handleSubmitMove(env Envelope) error {
 			return err
 		}
 		c.room.pauseMainTurnIfReactionWindowOpenUnsafe(time.Now())
+		c.room.syncTurnDeadlineAfterActionUnsafe(time.Now())
 		return nil
 	}); err != nil {
 		if errors.Is(err, errDuplicateRequest) {
@@ -520,13 +567,24 @@ func (c *Client) handleActivateCard(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
+		if c.room.debugPauseActive {
+			return protocolError{code: ErrorActionFailed, message: "debug_pause_active"}
+		}
+		_, prevStack, hadOpenWindow := c.room.Engine.ReactionWindowSnapshot()
 		if err := c.room.Engine.ActivateCard(c.playerID, p.HandIndex); err != nil {
 			return err
+		}
+		if hadOpenWindow && prevStack == 0 {
+			_, newStack, ok := c.room.Engine.ReactionWindowSnapshot()
+			if ok && newStack > 0 {
+				c.room.noteReactionChainStartedUnsafe()
+			}
 		}
 		if err := c.room.maybeAutoResolveIgniteReactionUnsafe(); err != nil {
 			return err
 		}
 		c.room.pauseMainTurnIfReactionWindowOpenUnsafe(time.Now())
+		c.room.syncTurnDeadlineAfterActionUnsafe(time.Now())
 		return nil
 	}); err != nil {
 		if errors.Is(err, errDuplicateRequest) {
@@ -555,7 +613,14 @@ func (c *Client) handleDrawCard(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
-		return c.room.Engine.DrawCard(c.playerID)
+		if c.room.debugPauseActive {
+			return protocolError{code: ErrorActionFailed, message: "debug_pause_active"}
+		}
+		if err := c.room.Engine.DrawCard(c.playerID); err != nil {
+			return err
+		}
+		c.room.syncTurnDeadlineAfterActionUnsafe(time.Now())
+		return nil
 	}); err != nil {
 		if errors.Is(err, errDuplicateRequest) {
 			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
@@ -591,7 +656,14 @@ func (c *Client) handleResolvePending(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
-		return c.room.Engine.ResolvePendingEffect(c.playerID, target)
+		if c.room.debugPauseActive {
+			return protocolError{code: ErrorActionFailed, message: "debug_pause_active"}
+		}
+		if err := c.room.Engine.ResolvePendingEffect(c.playerID, target); err != nil {
+			return err
+		}
+		c.room.syncTurnDeadlineAfterActionUnsafe(time.Now())
+		return nil
 	}); err != nil {
 		if errors.Is(err, errDuplicateRequest) {
 			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
@@ -628,6 +700,9 @@ func (c *Client) handleQueueReaction(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
+		if c.room.debugPauseActive {
+			return protocolError{code: ErrorActionFailed, message: "debug_pause_active"}
+		}
 		_, prevStack, _ := c.room.Engine.ReactionWindowSnapshot()
 		if err := c.room.Engine.QueueReactionCard(c.playerID, p.HandIndex, target); err != nil {
 			return err
@@ -635,6 +710,10 @@ func (c *Client) handleQueueReaction(env Envelope) error {
 		if prevStack == 0 {
 			c.room.noteReactionChainStartedUnsafe()
 		}
+		if err := c.room.maybeAutoFinalizeIgniteChainIfStuckUnsafe(); err != nil {
+			return err
+		}
+		c.room.syncTurnDeadlineAfterActionUnsafe(time.Now())
 		return nil
 	}); err != nil {
 		if errors.Is(err, errDuplicateRequest) {
@@ -645,7 +724,11 @@ func (c *Client) handleQueueReaction(env Envelope) error {
 	c.room.EvaluateMatchOutcome()
 	_ = c.server.persistRoom(context.Background(), c.room)
 	c.room.TouchActivity()
-	return c.sendAck(env, "queued", "", "reaction card queued")
+	if err := c.sendAck(env, "queued", "", "reaction card queued"); err != nil {
+		return err
+	}
+	c.room.BroadcastSnapshot()
+	return nil
 }
 
 // handleResolveReactions resolves queued reactions and broadcasts state updates.
@@ -660,6 +743,9 @@ func (c *Client) handleResolveReactions(env Envelope) error {
 		requestKey := c.requestKey(env)
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
+		}
+		if c.room.debugPauseActive {
+			return protocolError{code: ErrorActionFailed, message: "debug_pause_active"}
 		}
 		if err := c.room.Engine.ResolveReactionStack(); err != nil {
 			return err
@@ -739,13 +825,20 @@ func (c *Client) handleConfirmMulligan(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
+		if c.room.debugPauseActive {
+			return protocolError{code: ErrorActionFailed, message: "debug_pause_active"}
+		}
 		done, err := c.room.Engine.State.ConfirmMulligan(c.playerID, p.HandIndices)
 		if err != nil {
 			return err
 		}
 		if done {
 			c.room.mulliganDeadline = time.Time{}
-			return c.room.Engine.StartTurn(gameplay.PlayerA)
+			if err := c.room.Engine.StartTurn(gameplay.PlayerA); err != nil {
+				return err
+			}
+			c.room.resetTurnDeadlineUnsafe(time.Now())
+			return nil
 		}
 		return nil
 	}); err != nil {
@@ -753,6 +846,38 @@ func (c *Client) handleConfirmMulligan(env Envelope) error {
 			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
 		}
 		return protocolError{code: ErrorActionFailed, message: err.Error()}
+	}
+	_ = c.sendAck(env, "ok", "", "")
+	_ = c.server.persistRoom(context.Background(), c.room)
+	c.room.TouchActivity()
+	c.room.BroadcastSnapshot()
+	return nil
+}
+
+// handleSetDebugPause toggles room-wide debug pause (ADMIN_DEBUG_MATCH only).
+func (c *Client) handleSetDebugPause(env Envelope) error {
+	if !c.server.adminDebugMatch {
+		return protocolError{code: ErrorDebugDisabled, message: "admin_debug_match_disabled"}
+	}
+	if c.room == nil {
+		return protocolError{code: ErrorJoinRequired, message: "join_match is required before set_debug_pause"}
+	}
+	var p SetDebugPausePayload
+	if err := json.Unmarshal(env.Payload, &p); err != nil {
+		return err
+	}
+	if err := c.room.Execute(func() error {
+		requestKey := c.requestKey(env)
+		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
+			return errDuplicateRequest
+		}
+		c.room.setDebugPauseUnsafe(p.Paused, time.Now())
+		return nil
+	}); err != nil {
+		if errors.Is(err, errDuplicateRequest) {
+			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
+		}
+		return err
 	}
 	_ = c.sendAck(env, "ok", "", "")
 	_ = c.server.persistRoom(context.Background(), c.room)
@@ -838,11 +963,13 @@ func (s *Server) getOrCreateRoom(roomID, roomName string, isPrivate bool, passwo
 	room, ok := s.rooms[roomID]
 	s.roomsM.RUnlock()
 	if ok {
+		room.adminDebugMatch = s.adminDebugMatch
 		return room, nil
 	}
 	s.roomsM.Lock()
 	defer s.roomsM.Unlock()
 	if room, ok = s.rooms[roomID]; ok {
+		room.adminDebugMatch = s.adminDebugMatch
 		return room, nil
 	}
 	if s.store != nil {
@@ -852,6 +979,7 @@ func (s *Server) getOrCreateRoom(roomID, roomName string, isPrivate bool, passwo
 		}
 		if ok {
 			loaded.parent = s
+			loaded.adminDebugMatch = s.adminDebugMatch
 			s.rooms[roomID] = loaded
 			return loaded, nil
 		}
@@ -864,6 +992,7 @@ func (s *Server) getOrCreateRoom(roomID, roomName string, isPrivate bool, passwo
 		return nil, err
 	}
 	created.parent = s
+	created.adminDebugMatch = s.adminDebugMatch
 	created.RoomPrivate = isPrivate
 	created.RoomPassword = strings.TrimSpace(password)
 	s.rooms[roomID] = created

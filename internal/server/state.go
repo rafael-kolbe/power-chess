@@ -69,6 +69,12 @@ type RoomSession struct {
 	deckMatchInitialized bool
 	// reactionModeByPlayer stores each seat's preference: off / on / auto (see NormalizeReactionMode).
 	reactionModeByPlayer map[gameplay.PlayerID]string
+	// debugPauseActive blocks gameplay actions and timeout countdowns while admin debugging is enabled.
+	debugPauseActive bool
+	// debugPauseStartedAt is when debug pause was enabled (used to shift deadlines on resume).
+	debugPauseStartedAt time.Time
+	// adminDebugMatch mirrors server-level ADMIN_DEBUG_MATCH for snapshot/UI capabilities.
+	adminDebugMatch bool
 }
 
 const defaultRoomName = "Let's Play!"
@@ -259,6 +265,33 @@ func (r *RoomSession) maybeAutoResolveIgniteReactionUnsafe() error {
 	return nil
 }
 
+// maybeAutoFinalizeIgniteChainIfStuckUnsafe resolves a non-empty ignite_reaction stack when the
+// seat that must respond cannot legally extend the chain, or has reaction mode off, or (auto)
+// has no eligible follow-up. Caller must hold r.stateM.
+func (r *RoomSession) maybeAutoFinalizeIgniteChainIfStuckUnsafe() error {
+	rw, stackSize, ok := r.Engine.ReactionWindowSnapshot()
+	if !ok || !rw.Open || rw.Trigger != "ignite_reaction" || stackSize == 0 {
+		return nil
+	}
+	top, ok := r.Engine.ReactionStackTopSnapshot()
+	if !ok {
+		return nil
+	}
+	next := oppositePlayer(top.Owner)
+	mode := r.reactionModeUnsafe(next)
+	if mode == ReactionModeOn || mode == ReactionModeAuto {
+		if r.Engine.CanPlayerExtendIgniteChain(next) {
+			return nil
+		}
+	}
+	if err := r.Engine.ResolveReactionStack(); err != nil {
+		return err
+	}
+	r.reactionDeadline = time.Time{}
+	r.resumeMainTurnAfterReactionUnsafe(time.Now())
+	return nil
+}
+
 // pauseMainTurnIfReactionWindowOpenUnsafe freezes the main turn deadline when a reaction window
 // is waiting for the first response. Caller must hold r.stateM.
 func (r *RoomSession) pauseMainTurnIfReactionWindowOpenUnsafe(now time.Time) {
@@ -275,11 +308,38 @@ func (r *RoomSession) pauseMainTurnIfReactionWindowOpenUnsafe(now time.Time) {
 	if r.turnDeadline.IsZero() || r.turnDeadlineFor != rw.Actor {
 		return
 	}
+	if r.reactionDeadline.IsZero() {
+		r.reactionDeadline = now.Add(r.reactionTimeout)
+	}
 	r.pausedTurnRemaining = r.turnDeadline.Sub(now)
 	if r.pausedTurnRemaining < 0 {
 		r.pausedTurnRemaining = 0
 	}
 	r.turnDeadline = time.Time{}
+}
+
+// syncTurnDeadlineAfterActionUnsafe keeps turn deadline aligned with the current turn right after
+// gameplay actions that may advance the turn, without waiting for timeout loop ticks.
+// Caller must hold r.stateM.
+func (r *RoomSession) syncTurnDeadlineAfterActionUnsafe(now time.Time) {
+	if r.debugPauseActive {
+		return
+	}
+	if r.matchEnded || r.Engine.State.MulliganPhaseActive {
+		r.turnDeadline = time.Time{}
+		return
+	}
+	if r.connectedByPlayer[gameplay.PlayerA] == 0 || r.connectedByPlayer[gameplay.PlayerB] == 0 {
+		r.turnDeadline = time.Time{}
+		return
+	}
+	if r.pausedTurnRemaining > 0 {
+		return
+	}
+	cur := r.Engine.State.CurrentTurn
+	if r.turnDeadline.IsZero() || r.turnDeadlineFor != cur {
+		r.resetTurnDeadlineUnsafe(now)
+	}
 }
 
 // resumeMainTurnAfterReactionUnsafe restores the main turn deadline after the reaction window closes.
@@ -297,6 +357,39 @@ func (r *RoomSession) resumeMainTurnAfterReactionUnsafe(now time.Time) {
 // Caller must hold r.stateM.
 func (r *RoomSession) noteReactionChainStartedUnsafe() {
 	r.reactionDeadline = time.Time{}
+}
+
+// setDebugPauseUnsafe toggles room-wide debug pause and shifts active deadlines on resume.
+// Caller must hold r.stateM.
+func (r *RoomSession) setDebugPauseUnsafe(paused bool, now time.Time) {
+	if paused {
+		if r.debugPauseActive {
+			return
+		}
+		r.debugPauseActive = true
+		r.debugPauseStartedAt = now
+		return
+	}
+	if !r.debugPauseActive {
+		return
+	}
+	elapsed := now.Sub(r.debugPauseStartedAt)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	if !r.turnDeadline.IsZero() {
+		r.turnDeadline = r.turnDeadline.Add(elapsed)
+	}
+	if !r.reactionDeadline.IsZero() {
+		r.reactionDeadline = r.reactionDeadline.Add(elapsed)
+	}
+	if !r.mulliganDeadline.IsZero() {
+		r.mulliganDeadline = r.mulliganDeadline.Add(elapsed)
+	}
+	// Frozen main-turn slice during reactions is wall-time paused too; do not add elapsed here or
+	// the UI can show more than TurnSeconds remaining (e.g. 30s + pause duration).
+	r.debugPauseActive = false
+	r.debugPauseStartedAt = time.Time{}
 }
 
 // Snapshot builds a compact state payload for UI synchronization.
@@ -348,6 +441,8 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 		GameStarted:         (cA > 0 && cB > 0) || reconnectGrace,
 		MulliganPhaseActive: s.MulliganPhaseActive,
 		MulliganReturned:    mulliganReturned,
+		AdminDebugMatch:     r.adminDebugMatch,
+		DebugPauseActive:    r.debugPauseActive,
 		TurnPlayer:          string(s.CurrentTurn),
 		TurnSeconds:         s.TurnSeconds,
 		TurnNumber:          s.TurnNumber,
@@ -388,17 +483,32 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 			CardID: string(pe.CardID),
 		})
 	}
+	payload.ActivationQueueSize = len(s.ResolvedQueue)
 	if rw, stackSize, ok := r.Engine.ReactionWindowSnapshot(); ok {
 		eligible := make([]string, 0, len(rw.EligibleTypes))
 		for _, t := range rw.EligibleTypes {
 			eligible = append(eligible, string(t))
 		}
-		payload.ReactionWindow = ReactionWindowState{
+		rwPayload := ReactionWindowState{
 			Open:          rw.Open,
 			Trigger:       rw.Trigger,
 			Actor:         string(rw.Actor),
 			EligibleTypes: eligible,
 			StackSize:     stackSize,
+		}
+		if top, ok := r.Engine.ReactionStackTopSnapshot(); ok {
+			rwPayload.StagedCardID = string(top.Card.CardID)
+			rwPayload.StagedOwner = string(top.Owner)
+		}
+		for _, ent := range r.Engine.ReactionStackEntries() {
+			rwPayload.StackCards = append(rwPayload.StackCards, ReactionStackPreviewEntry{
+				CardID: string(ent.CardID),
+				Owner:  string(ent.Owner),
+			})
+		}
+		payload.ReactionWindow = rwPayload
+		if !r.reactionDeadline.IsZero() {
+			payload.ReactionDeadlineUnixMs = r.reactionDeadline.UnixMilli()
 		}
 	}
 	if pm, ok := r.Engine.PendingMove(); ok {
@@ -494,16 +604,34 @@ func (r *RoomSession) EvaluateMatchOutcome() {
 func (r *RoomSession) ResolveReactionTimeoutIfExpired(now time.Time) (bool, error) {
 	r.stateM.Lock()
 	defer r.stateM.Unlock()
+	if r.debugPauseActive {
+		return false, nil
+	}
 	if r.connectedByPlayer[gameplay.PlayerA] == 0 || r.connectedByPlayer[gameplay.PlayerB] == 0 {
 		r.reactionDeadline = time.Time{}
 		return false, nil
 	}
-	rw, _, ok := r.Engine.ReactionWindowSnapshot()
+	rw, stackSize, ok := r.Engine.ReactionWindowSnapshot()
 	if !ok || !rw.Open {
 		r.reactionDeadline = time.Time{}
 		return false, nil
 	}
 	if r.reactionDeadline.IsZero() {
+		// noteReactionChainStartedUnsafe clears the deadline when the first reaction is queued.
+		// If we only arm reactionTimeout here, the room waits a full cycle even when the ignite
+		// chain cannot be extended and ResolveReactionStack should run immediately (same as
+		// maybeAutoFinalizeIgniteChainIfStuckUnsafe after queue_reaction).
+		if stackSize > 0 && rw.Trigger == "ignite_reaction" {
+			if err := r.maybeAutoFinalizeIgniteChainIfStuckUnsafe(); err != nil {
+				return false, err
+			}
+			rw2, _, ok2 := r.Engine.ReactionWindowSnapshot()
+			if !ok2 || !rw2.Open {
+				r.reactionDeadline = time.Time{}
+				r.evaluateMatchOutcomeUnsafe()
+				return true, nil
+			}
+		}
 		r.reactionDeadline = now.Add(r.reactionTimeout)
 		return false, nil
 	}
@@ -835,6 +963,9 @@ func (r *RoomSession) startMulliganDeadlineUnsafe(now time.Time) {
 func (r *RoomSession) ResolveMulliganTimeoutIfExpired(now time.Time) (bool, error) {
 	r.stateM.Lock()
 	defer r.stateM.Unlock()
+	if r.debugPauseActive {
+		return false, nil
+	}
 	if r.matchEnded || !r.Engine.State.MulliganPhaseActive {
 		r.mulliganDeadline = time.Time{}
 		return false, nil
@@ -859,6 +990,9 @@ func (r *RoomSession) ResolveMulliganTimeoutIfExpired(now time.Time) (bool, erro
 		}
 	}
 	r.mulliganDeadline = time.Time{}
+	if !r.Engine.State.MulliganPhaseActive {
+		r.resetTurnDeadlineUnsafe(now)
+	}
 	r.lastActivity = now.UTC()
 	return true, nil
 }
@@ -867,6 +1001,9 @@ func (r *RoomSession) ResolveMulliganTimeoutIfExpired(now time.Time) (bool, erro
 func (r *RoomSession) ResolveTurnTimeoutIfExpired(now time.Time) (bool, error) {
 	r.stateM.Lock()
 	defer r.stateM.Unlock()
+	if r.debugPauseActive {
+		return false, nil
+	}
 	if r.matchEnded {
 		r.turnDeadline = time.Time{}
 		return false, nil

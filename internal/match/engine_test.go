@@ -27,149 +27,30 @@ func markInPlayForTest(s *gameplay.MatchState) {
 	s.Started = true
 }
 
-func TestKnightBuffAllowsKnightMoveForOwnedPiece(t *testing.T) {
-	card := gameplay.CardInstance{InstanceID: "k1", CardID: CardKnightTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
-	state, err := gameplay.NewMatchState(testDeckWith(card), testDeckWith(card))
+func TestDeliverCheckmateWithSingleLegalMove(t *testing.T) {
+	state, err := gameplay.NewMatchState(
+		testDeckWith(gameplay.CardInstance{InstanceID: "a", CardID: CardDoubleTurn, ManaCost: 1, Ignition: 1, Cooldown: 1}),
+		testDeckWith(gameplay.CardInstance{InstanceID: "b", CardID: CardDoubleTurn, ManaCost: 1, Ignition: 1, Cooldown: 1}),
+	)
 	if err != nil {
-		t.Fatalf("state create error: %v", err)
-	}
-	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{card}
-	state.Players[gameplay.PlayerA].Mana = 10
-
-	board := chess.NewEmptyGame(chess.White)
-	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
-	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
-	board.SetPiece(chess.Pos{Row: 6, Col: 0}, chess.Piece{Type: chess.Pawn, Color: chess.White})
-	board.SetPiece(chess.Pos{Row: 3, Col: 3}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
-
-	e := NewEngine(state, board)
-	if err := e.StartTurn(gameplay.PlayerA); err != nil {
-		t.Fatalf("start turn error: %v", err)
-	}
-	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
-		t.Fatalf("activate card error: %v", err)
-	}
-	_ = state.ResolveIgnition(true)
-	if err := e.StartTurn(gameplay.PlayerA); err != nil {
-		t.Fatalf("start turn error: %v", err)
-	}
-	target := chess.Pos{Row: 6, Col: 0}
-	if err := e.ResolvePendingEffect(gameplay.PlayerA, EffectTarget{PiecePos: &target}); err != nil {
-		t.Fatalf("resolve pending effect error: %v", err)
-	}
-	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 0}, To: chess.Pos{4, 1}}); err != nil {
-		t.Fatalf("knight buff move should be legal: %v", err)
-	}
-}
-
-func TestDoubleTurnPowerMoveCanCheckmate(t *testing.T) {
-	card := gameplay.CardInstance{InstanceID: "d1", CardID: CardDoubleTurn, ManaCost: 4, Ignition: 1, Cooldown: 3}
-	state, err := gameplay.NewMatchState(testDeckWith(card), testDeckWith(card))
-	if err != nil {
-		t.Fatalf("state create error: %v", err)
+		t.Fatal(err)
 	}
 	state.CurrentTurn = gameplay.PlayerB
 
 	board := chess.NewEmptyGame(chess.Black)
-	board.SetPiece(chess.Pos{Row: 7, Col: 0}, chess.Piece{Type: chess.King, Color: chess.White})   // a1
-	board.SetPiece(chess.Pos{Row: 5, Col: 2}, chess.Piece{Type: chess.King, Color: chess.Black})   // c3
-	board.SetPiece(chess.Pos{Row: 6, Col: 1}, chess.Piece{Type: chess.Queen, Color: chess.Black})  // b2
-	board.SetPiece(chess.Pos{Row: 5, Col: 0}, chess.Piece{Type: chess.Rook, Color: chess.Black})   // a3
-	board.SetPiece(chess.Pos{Row: 0, Col: 7}, chess.Piece{Type: chess.Bishop, Color: chess.Black}) // h8
+	board.SetPiece(chess.Pos{Row: 7, Col: 0}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 5, Col: 2}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 1}, chess.Piece{Type: chess.Queen, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 5, Col: 0}, chess.Piece{Type: chess.Rook, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 0, Col: 7}, chess.Piece{Type: chess.Bishop, Color: chess.Black})
 
 	e := NewEngine(state, board)
 	markInPlayForTest(state)
-	e.extraMoveLeft[gameplay.PlayerB] = 1
-	e.movesThisTurn[gameplay.PlayerB] = 1
-
-	// Power-granted extra move that causes checkmate is allowed.
-	err = e.SubmitMove(gameplay.PlayerB, chess.Move{From: chess.Pos{5, 0}, To: chess.Pos{6, 0}})
-	if err != nil {
-		t.Fatalf("expected power move to be allowed, got: %v", err)
+	if err := e.SubmitMove(gameplay.PlayerB, chess.Move{From: chess.Pos{Row: 5, Col: 0}, To: chess.Pos{Row: 6, Col: 0}}); err != nil {
+		t.Fatalf("mate move: %v", err)
 	}
 	if !e.Chess.IsCheckmate(chess.White) {
-		t.Fatalf("expected white to be in checkmate after power move")
-	}
-}
-
-func TestRookTouchBuffAllowsRookMovementPattern(t *testing.T) {
-	card := gameplay.CardInstance{InstanceID: "r1", CardID: CardRookTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
-	state, _ := gameplay.NewMatchState(testDeckWith(card), testDeckWith(card))
-	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{card}
-	state.Players[gameplay.PlayerA].Mana = 10
-
-	board := chess.NewEmptyGame(chess.White)
-	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
-	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
-	board.SetPiece(chess.Pos{Row: 6, Col: 1}, chess.Piece{Type: chess.Knight, Color: chess.White})
-
-	e := NewEngine(state, board)
-	_ = e.StartTurn(gameplay.PlayerA)
-	_ = e.ActivateCard(gameplay.PlayerA, 0)
-	_ = state.ResolveIgnition(true)
-	_ = e.StartTurn(gameplay.PlayerA)
-	target := chess.Pos{Row: 6, Col: 1}
-	if err := e.ResolvePendingEffect(gameplay.PlayerA, EffectTarget{PiecePos: &target}); err != nil {
-		t.Fatalf("resolve pending effect error: %v", err)
-	}
-	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 1}, To: chess.Pos{3, 1}}); err != nil {
-		t.Fatalf("rook-touch movement should be legal: %v", err)
-	}
-}
-
-func TestRookTouchOnPawnAllowsOnlyOneSquare(t *testing.T) {
-	card := gameplay.CardInstance{InstanceID: "r2", CardID: CardRookTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
-	state, _ := gameplay.NewMatchState(testDeckWith(card), testDeckWith(card))
-	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{card}
-	state.Players[gameplay.PlayerA].Mana = 10
-
-	board := chess.NewEmptyGame(chess.White)
-	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
-	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
-	board.SetPiece(chess.Pos{Row: 6, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
-
-	e := NewEngine(state, board)
-	_ = e.StartTurn(gameplay.PlayerA)
-	_ = e.ActivateCard(gameplay.PlayerA, 0)
-	_ = state.ResolveIgnition(true)
-	_ = e.StartTurn(gameplay.PlayerA)
-	target := chess.Pos{Row: 6, Col: 4}
-	if err := e.ResolvePendingEffect(gameplay.PlayerA, EffectTarget{PiecePos: &target}); err != nil {
-		t.Fatalf("resolve pending effect: %v", err)
-	}
-	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 4}, To: chess.Pos{4, 4}}); err == nil {
-		t.Fatalf("rook-touch on pawn should reject multi-square rook move")
-	}
-	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 4}, To: chess.Pos{5, 4}}); err != nil {
-		t.Fatalf("rook-touch on pawn should allow one square: %v", err)
-	}
-}
-
-func TestBishopTouchOnPawnAllowsOnlyOneSquare(t *testing.T) {
-	card := gameplay.CardInstance{InstanceID: "b2", CardID: CardBishopTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
-	state, _ := gameplay.NewMatchState(testDeckWith(card), testDeckWith(card))
-	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{card}
-	state.Players[gameplay.PlayerA].Mana = 10
-
-	board := chess.NewEmptyGame(chess.White)
-	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
-	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
-	board.SetPiece(chess.Pos{Row: 6, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
-
-	e := NewEngine(state, board)
-	_ = e.StartTurn(gameplay.PlayerA)
-	_ = e.ActivateCard(gameplay.PlayerA, 0)
-	_ = state.ResolveIgnition(true)
-	_ = e.StartTurn(gameplay.PlayerA)
-	target := chess.Pos{Row: 6, Col: 4}
-	if err := e.ResolvePendingEffect(gameplay.PlayerA, EffectTarget{PiecePos: &target}); err != nil {
-		t.Fatalf("resolve pending effect: %v", err)
-	}
-	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 4}, To: chess.Pos{4, 6}}); err == nil {
-		t.Fatalf("bishop-touch on pawn should reject multi-square diagonal")
-	}
-	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 4}, To: chess.Pos{5, 5}}); err != nil {
-		t.Fatalf("bishop-touch on pawn should allow one diagonal step: %v", err)
+		t.Fatal("expected checkmate on white")
 	}
 }
 
@@ -213,27 +94,6 @@ func TestSubmitMoveReconcilesPersistedTurnMismatch(t *testing.T) {
 	}
 }
 
-func TestKnightTouchRejectsKingAsTarget(t *testing.T) {
-	card := gameplay.CardInstance{InstanceID: "k2", CardID: CardKnightTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
-	state, _ := gameplay.NewMatchState(testDeckWith(card), testDeckWith(card))
-	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{card}
-	state.Players[gameplay.PlayerA].Mana = 10
-
-	board := chess.NewEmptyGame(chess.White)
-	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
-	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
-	e := NewEngine(state, board)
-
-	_ = e.StartTurn(gameplay.PlayerA)
-	_ = e.ActivateCard(gameplay.PlayerA, 0)
-	_ = state.ResolveIgnition(true)
-	_ = e.StartTurn(gameplay.PlayerA)
-	kingPos := chess.Pos{Row: 7, Col: 4}
-	if err := e.ResolvePendingEffect(gameplay.PlayerA, EffectTarget{PiecePos: &kingPos}); err == nil {
-		t.Fatalf("expected king target rejection")
-	}
-}
-
 func TestReactionWindowRestrictsCardTypeActivation(t *testing.T) {
 	counterCard := gameplay.CardInstance{InstanceID: "ct1", CardID: "counterattack", ManaCost: 1, Ignition: 0, Cooldown: 6}
 	powerCard := gameplay.CardInstance{InstanceID: "pw1", CardID: CardKnightTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
@@ -253,13 +113,13 @@ func TestReactionWindowRestrictsCardTypeActivation(t *testing.T) {
 	}
 }
 
-func TestExtinguishNegatesOpponentIgnition(t *testing.T) {
+func TestIgniteReactionResolveClearsIgnitionAfterOpponentPowerResponse(t *testing.T) {
 	extinguish := gameplay.CardInstance{InstanceID: "ex1", CardID: CardExtinguish, ManaCost: 2, Ignition: 0, Cooldown: 2}
-	doubleTurn := gameplay.CardInstance{InstanceID: "dt1", CardID: CardDoubleTurn, ManaCost: 4, Ignition: 1, Cooldown: 5}
+	knight := gameplay.CardInstance{InstanceID: "k1", CardID: CardKnightTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
 
-	state, _ := gameplay.NewMatchState(testDeckWith(doubleTurn), testDeckWith(extinguish))
+	state, _ := gameplay.NewMatchState(testDeckWith(knight), testDeckWith(extinguish))
 	state.CurrentTurn = gameplay.PlayerA
-	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{doubleTurn}
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{knight}
 	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{extinguish}
 	state.Players[gameplay.PlayerA].Mana = 10
 	state.Players[gameplay.PlayerB].Mana = 10
@@ -267,7 +127,7 @@ func TestExtinguishNegatesOpponentIgnition(t *testing.T) {
 	markInPlayForTest(state)
 
 	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
-		t.Fatalf("activate double-turn failed: %v", err)
+		t.Fatalf("activate knight-touch failed: %v", err)
 	}
 	if !state.IgnitionSlot.Occupied {
 		t.Fatalf("expected ignition slot occupied")
@@ -278,21 +138,41 @@ func TestExtinguishNegatesOpponentIgnition(t *testing.T) {
 	}
 
 	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
-		t.Fatalf("queue extinguish failed: %v", err)
+		t.Fatalf("queue opponent Power response failed: %v", err)
 	}
 	if err := e.ResolveReactionStack(); err != nil {
 		t.Fatalf("resolve reaction stack failed: %v", err)
 	}
 	if state.IgnitionSlot.Occupied {
-		t.Fatalf("ignition should be cleared after extinguish")
-	}
-	events := state.PopResolvedIgnitions()
-	if len(events) == 0 || events[len(events)-1].Success {
-		t.Fatalf("expected resolved ignition with success=false")
+		t.Fatalf("ignition-0 card should finish after ignite chain resolves")
 	}
 }
 
-func TestIgnitionZeroAllowsMultipleActivationsSameTurnWhenSlotFree(t *testing.T) {
+func TestIgniteReactionKeepsDelayedCardInSlotAfterChain(t *testing.T) {
+	eg := gameplay.CardInstance{InstanceID: "e1", CardID: "energy-gain", ManaCost: 0, Ignition: 1, Cooldown: 2}
+	state, _ := gameplay.NewMatchState(testDeckWith(eg), testDeckWith(eg))
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{eg}
+	state.Players[gameplay.PlayerA].Mana = 10
+	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	markInPlayForTest(state)
+	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+	if err := e.ResolveReactionStack(); err != nil {
+		t.Fatalf("resolve empty ignite chain: %v", err)
+	}
+	if !state.IgnitionSlot.Occupied {
+		t.Fatal("energy-gain should stay in ignition until burn completes")
+	}
+	if state.IgnitionSlot.TurnsRemaining != 1 {
+		t.Fatalf("expected 1 turn remaining on slot, got %d", state.IgnitionSlot.TurnsRemaining)
+	}
+	if len(state.Players[gameplay.PlayerA].Cooldowns) != 0 {
+		t.Fatal("card must not go to cooldown before ignition resolves")
+	}
+}
+
+func TestIgnitionZeroNeedsReactionResolveBeforeNextActivation(t *testing.T) {
 	k1 := gameplay.CardInstance{InstanceID: "k1", CardID: CardKnightTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
 	k2 := gameplay.CardInstance{InstanceID: "k2", CardID: CardRookTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
 	state, _ := gameplay.NewMatchState(testDeckWith(k1), testDeckWith(k2))
@@ -307,8 +187,14 @@ func TestIgnitionZeroAllowsMultipleActivationsSameTurnWhenSlotFree(t *testing.T)
 	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
 		t.Fatalf("first ignition-0 activate failed: %v", err)
 	}
-	if state.IgnitionSlot.Occupied {
-		t.Fatalf("ignition slot should be free after ignition-0 resolution")
+	if !state.IgnitionSlot.Occupied {
+		t.Fatalf("ignition slot should stay occupied while ignite reaction window is open")
+	}
+	if err := e.ActivateCard(gameplay.PlayerA, 0); err == nil {
+		t.Fatalf("second activation must be blocked while first card awaits response")
+	}
+	if err := e.ResolveReactionStack(); err != nil {
+		t.Fatalf("resolving empty ignite chain failed: %v", err)
 	}
 	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
 		t.Fatalf("second ignition-0 activate failed: %v", err)
@@ -358,6 +244,80 @@ func TestRetributionCannotActivateInNormalTurnFlow(t *testing.T) {
 
 	if err := e.ActivateCard(gameplay.PlayerA, 0); err == nil {
 		t.Fatalf("retribution should not be activatable in normal turn flow")
+	}
+}
+
+// TestActivateCardDuringIgniteReactionQueuesLikeQueueReaction ensures clients that send
+// activate_card while a reaction window is open still enqueue the stack (responder is off-turn).
+func TestActivateCardDuringIgniteReactionQueuesLikeQueueReaction(t *testing.T) {
+	stopThere := gameplay.CardInstance{InstanceID: "s1", CardID: CardStopRightThere, ManaCost: 3, Ignition: 0, Cooldown: 5}
+	state, _ := gameplay.NewMatchState(testDeckWith(stopThere), testDeckWith(stopThere))
+	state.CurrentTurn = gameplay.PlayerA
+	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{stopThere}
+	state.Players[gameplay.PlayerB].Mana = 10
+	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	markInPlayForTest(state)
+	e.OpenReactionWindow("ignite_reaction", gameplay.PlayerA, []gameplay.CardType{gameplay.CardTypeRetribution, gameplay.CardTypePower})
+	if err := e.ActivateCard(gameplay.PlayerB, 0); err != nil {
+		t.Fatalf("activate_card during ignite_reaction should queue retribution: %v", err)
+	}
+	_, sz, ok := e.ReactionWindowSnapshot()
+	if !ok || sz != 1 {
+		t.Fatalf("expected one queued reaction, ok=%v sz=%d", ok, sz)
+	}
+}
+
+func TestCanPlayerExtendIgniteChain(t *testing.T) {
+	stopThere := gameplay.CardInstance{InstanceID: "s1", CardID: CardStopRightThere, ManaCost: 3, Ignition: 0, Cooldown: 5}
+	ext := gameplay.CardInstance{InstanceID: "e1", CardID: CardExtinguish, ManaCost: 2, Ignition: 0, Cooldown: 2}
+	state, _ := gameplay.NewMatchState(testDeckWith(stopThere), testDeckWith(ext))
+	state.CurrentTurn = gameplay.PlayerA
+	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{stopThere}
+	state.Players[gameplay.PlayerB].Mana = 10
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{ext}
+	state.Players[gameplay.PlayerA].Mana = 10
+	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	markInPlayForTest(state)
+	e.OpenReactionWindow("ignite_reaction", gameplay.PlayerA, []gameplay.CardType{gameplay.CardTypeRetribution, gameplay.CardTypePower})
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	if e.CanPlayerExtendIgniteChain(gameplay.PlayerA) {
+		t.Fatal("expected A cannot extend after Retribution with only Power in hand")
+	}
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{stopThere}
+	if !e.CanPlayerExtendIgniteChain(gameplay.PlayerA) {
+		t.Fatal("expected A can extend with Retribution")
+	}
+}
+
+func TestReactionStackEntriesBottomFirstOrder(t *testing.T) {
+	power := gameplay.CardInstance{InstanceID: "p1", CardID: CardDoubleTurn, ManaCost: 1, Ignition: 1, Cooldown: 1}
+	ret := gameplay.CardInstance{InstanceID: "r1", CardID: CardStopRightThere, ManaCost: 3, Ignition: 0, Cooldown: 5}
+	state, _ := gameplay.NewMatchState(testDeckWith(power), testDeckWith(ret))
+	state.CurrentTurn = gameplay.PlayerA
+	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{power}
+	state.Players[gameplay.PlayerB].Mana = 10
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{ret}
+	state.Players[gameplay.PlayerA].Mana = 10
+	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	markInPlayForTest(state)
+	e.OpenReactionWindow("ignite_reaction", gameplay.PlayerA, []gameplay.CardType{gameplay.CardTypeRetribution, gameplay.CardTypePower})
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
+		t.Fatalf("queue B: %v", err)
+	}
+	if err := e.QueueReactionCard(gameplay.PlayerA, 0, EffectTarget{}); err != nil {
+		t.Fatalf("queue A: %v", err)
+	}
+	ents := e.ReactionStackEntries()
+	if len(ents) != 2 {
+		t.Fatalf("expected 2 stack entries, got %d", len(ents))
+	}
+	if ents[0].Owner != gameplay.PlayerB || ents[0].CardID != CardDoubleTurn {
+		t.Fatalf("expected bottom Power from B, got %+v", ents[0])
+	}
+	if ents[1].Owner != gameplay.PlayerA || ents[1].CardID != CardStopRightThere {
+		t.Fatalf("expected top Retribution from A, got %+v", ents[1])
 	}
 }
 
@@ -419,49 +379,8 @@ func TestEnPassantCaptureOpensCaptureTriggerWindow(t *testing.T) {
 	}
 }
 
-func TestCounterattackCancelsPendingCaptureWhenAttackerIsBuffed(t *testing.T) {
-	knightTouch := gameplay.CardInstance{InstanceID: "k1", CardID: CardKnightTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
+func TestCounterChainNoOpThenCaptureStillApplies(t *testing.T) {
 	counterattack := gameplay.CardInstance{InstanceID: "c1", CardID: CardCounterattack, ManaCost: 1, Ignition: 0, Cooldown: 6}
-	state, _ := gameplay.NewMatchState(testDeckWith(knightTouch), testDeckWith(counterattack))
-	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{knightTouch}
-	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{counterattack}
-	state.Players[gameplay.PlayerA].Mana = 10
-	state.Players[gameplay.PlayerB].Mana = 10
-
-	board := chess.NewEmptyGame(chess.White)
-	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
-	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
-	board.SetPiece(chess.Pos{Row: 6, Col: 0}, chess.Piece{Type: chess.Pawn, Color: chess.White})
-	board.SetPiece(chess.Pos{Row: 4, Col: 1}, chess.Piece{Type: chess.Rook, Color: chess.Black})
-	e := NewEngine(state, board)
-	markInPlayForTest(state)
-
-	// Apply knight-touch to white pawn.
-	_ = e.ActivateCard(gameplay.PlayerA, 0)
-	target := chess.Pos{Row: 6, Col: 0}
-	_ = e.ResolvePendingEffect(gameplay.PlayerA, EffectTarget{PiecePos: &target})
-	// Attempt capture with buffed piece -> opens capture window.
-	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 0}, To: chess.Pos{4, 1}}); err != nil {
-		t.Fatalf("expected capture attempt to open reaction window: %v", err)
-	}
-
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
-		t.Fatalf("counterattack should be queueable: %v", err)
-	}
-	if err := e.ResolveReactionStack(); err != nil {
-		t.Fatalf("counterattack resolution failed: %v", err)
-	}
-	// Attacker removed, target still alive.
-	if !board.PieceAt(chess.Pos{6, 0}).IsEmpty() {
-		t.Fatalf("attacker should be captured by counterattack")
-	}
-	if board.PieceAt(chess.Pos{4, 1}).Type != chess.Rook {
-		t.Fatalf("defending rook should remain on board")
-	}
-}
-
-func TestCounterattackRejectedWhenAttackerNotBuffed(t *testing.T) {
-	counterattack := gameplay.CardInstance{InstanceID: "c2", CardID: CardCounterattack, ManaCost: 1, Ignition: 0, Cooldown: 6}
 	state, _ := gameplay.NewMatchState(testDeckWith(counterattack), testDeckWith(counterattack))
 	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{}
 	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{counterattack}
@@ -474,51 +393,50 @@ func TestCounterattackRejectedWhenAttackerNotBuffed(t *testing.T) {
 	e := NewEngine(state, board)
 	markInPlayForTest(state)
 
-	_ = e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 4}, To: chess.Pos{5, 5}})
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
-		t.Fatalf("queue should succeed before resolver validation: %v", err)
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 4}, To: chess.Pos{5, 5}}); err != nil {
+		t.Fatalf("capture attempt: %v", err)
 	}
-	if err := e.ResolveReactionStack(); err == nil {
-		t.Fatalf("counterattack should fail when attacker is not buffed by power")
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
+		t.Fatalf("counter should queue on any capture attempt: %v", err)
+	}
+	if err := e.ResolveReactionStack(); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if board.PieceAt(chess.Pos{5, 5}).Type != chess.Pawn || board.PieceAt(chess.Pos{5, 5}).Color != chess.White {
+		t.Fatal("capture should complete after noop Counter effects")
 	}
 }
 
-func TestBlockadeNegatesCounterattackAndCancelsPendingCapture(t *testing.T) {
-	knightTouch := gameplay.CardInstance{InstanceID: "k1", CardID: CardKnightTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
+func TestCounterChainTwoCountersThenCaptureCompletes(t *testing.T) {
 	counterattack := gameplay.CardInstance{InstanceID: "c1", CardID: CardCounterattack, ManaCost: 1, Ignition: 0, Cooldown: 6}
 	blockade := gameplay.CardInstance{InstanceID: "b1", CardID: CardBlockade, ManaCost: 0, Ignition: 0, Cooldown: 3}
-	state, _ := gameplay.NewMatchState(testDeckWith(knightTouch), testDeckWith(counterattack))
-	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{knightTouch, blockade}
+	state, _ := gameplay.NewMatchState(testDeckWith(counterattack), testDeckWith(counterattack))
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{blockade}
 	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{counterattack}
 	state.Players[gameplay.PlayerA].Mana = 10
 	state.Players[gameplay.PlayerB].Mana = 10
 	board := chess.NewEmptyGame(chess.White)
 	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
 	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
-	board.SetPiece(chess.Pos{Row: 6, Col: 0}, chess.Piece{Type: chess.Pawn, Color: chess.White})
-	board.SetPiece(chess.Pos{Row: 4, Col: 1}, chess.Piece{Type: chess.Rook, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 5, Col: 5}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
 	e := NewEngine(state, board)
 	markInPlayForTest(state)
 
-	_ = e.ActivateCard(gameplay.PlayerA, 0)
-	target := chess.Pos{Row: 6, Col: 0}
-	_ = e.ResolvePendingEffect(gameplay.PlayerA, EffectTarget{PiecePos: &target})
-	_ = e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 0}, To: chess.Pos{4, 1}})
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{6, 4}, To: chess.Pos{5, 5}}); err != nil {
+		t.Fatalf("capture attempt: %v", err)
+	}
 	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
-		t.Fatalf("counterattack should queue: %v", err)
+		t.Fatalf("defender counter: %v", err)
 	}
 	if err := e.QueueReactionCard(gameplay.PlayerA, 0, EffectTarget{}); err != nil {
-		t.Fatalf("blockade should queue in response to counterattack: %v", err)
+		t.Fatalf("attacker second counter: %v", err)
 	}
 	if err := e.ResolveReactionStack(); err != nil {
-		t.Fatalf("reaction stack should resolve with blockade negation: %v", err)
+		t.Fatalf("resolve stack: %v", err)
 	}
-	// Pending capture canceled, attacker remains on original square.
-	if board.PieceAt(chess.Pos{6, 0}).Type != chess.Pawn {
-		t.Fatalf("attacker should remain on original square after blockade")
-	}
-	if board.PieceAt(chess.Pos{4, 1}).Type != chess.Rook {
-		t.Fatalf("target piece should remain after blockade canceled capture")
+	if board.PieceAt(chess.Pos{5, 5}).Type != chess.Pawn || board.PieceAt(chess.Pos{5, 5}).Color != chess.White {
+		t.Fatal("pending capture should still apply after counter chain")
 	}
 }
 

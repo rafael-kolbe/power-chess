@@ -58,6 +58,8 @@ Subir stack:
 docker compose up --build
 ```
 
+Cada arranque grava **stdout/stderr** em ficheiros novos (append) em `logs/docker/server/` e `logs/docker/postgres/` (bind mount no repositório, visível no IDE; pasta `logs/` está no `.gitignore`). Nome do ficheiro: `YYYY-MM-DD:HH:MM:SS.log`. Por defeito mantêm-se só os **5 ficheiros mais recentes** em cada pasta (`POWER_CHESS_SESSION_LOG_KEEP` no `.env` / `docker-compose`; `0` desativa a limpeza).
+
 - Servidor em `:8080`  
 - Postgres: host `localhost:5433` → container `:5432` (ver `docker-compose.yml`)  
 - Copia `.env.example` → `.env` e ajusta. O serviço `server` usa `env_file: .env`; `JWT_SECRET`, `SERVER_ADDR`, `ADMIN_DEBUG_MATCH`, etc. vêm dali. O `DATABASE_URL` **dentro do container** é fixo no `docker-compose.yml` para apontar ao serviço `postgres` (o `.env` continua a poder usar `localhost:5433` para correr o binário Go no host).

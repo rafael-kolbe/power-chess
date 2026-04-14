@@ -1,4 +1,9 @@
+const path = require("path");
 const { defineConfig } = require("@playwright/test");
+
+// Force browser cache under the repo. Some agent/CI environments pre-set PLAYWRIGHT_BROWSERS_PATH
+// to an empty sandbox path; always override so `npx playwright install` matches test runs.
+process.env.PLAYWRIGHT_BROWSERS_PATH = path.join(__dirname, ".pw-browsers");
 
 module.exports = defineConfig({
   testDir: "./tests/e2e",
