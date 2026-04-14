@@ -4,6 +4,7 @@ import {
     matchTestAutoConfirmMulliganEnabled,
     buildMatchDebugFixturePayload,
 } from "/match-test-config.js";
+import { computeClockDisplay, getReactionState, isOpenGameState } from "/clock-context.js";
 
 (function () {
     let ws = null;
@@ -19,6 +20,10 @@ import {
     let turnResourceAnimBlocking = false;
     /** @type {{ active: string, secLeft: number } | null} */
     let frozenTurnClockDisplay = null;
+    /** @type {{ values: { A: number, B: number }, modes: { A: string, B: string } } | null} */
+    let chainPausedClockDisplay = null;
+    let effectAnimBlocking = false;
+    let effectAnimBlockTimeout = null;
     /** @type {boolean} */
     let gameStarted = false;
     let joinedRoom = false;
@@ -30,6 +35,12 @@ import {
     let pendingJoinAttempt = null;
     /** @type {string} Room name shown in the private-join modal (for i18n refresh). */
     let privateJoinPendingRoomName = "";
+    /** @type {object[]} Recent WebSocket traffic and UI events (export + optional server mirror). */
+    let clientTraceBuffer = [];
+    /** @type {ReturnType<typeof setInterval> | null} */
+    let clientTraceMirrorTimerId = null;
+    const CLIENT_TRACE_CAP = 600;
+
     /** @type {Set<number>} Hand indices selected to return to the deck during mulligan (local UI only). */
     let mulliganPick = new Set();
     /** Updates mulligan countdown text while the opening phase is active. */
@@ -70,10 +81,13 @@ import {
     const captureThreatOverlayEl = document.getElementById("captureThreatOverlay");
     const snapshotEl = document.getElementById("snapshot");
     const eventsEl = document.getElementById("events");
+    const exportClientTraceBtnEl = document.getElementById("exportClientTraceBtn");
     const statusEl = document.getElementById("status");
     const playerEl = document.getElementById("playerId");
     const reactionModeSelectEl = document.getElementById("reactionModeSelect");
     const reactionModeLabelEl = document.getElementById("reactionModeLabel");
+    const reactionPassBtnEl = document.getElementById("reactionPassBtn");
+    const debugPauseBtnEl = document.getElementById("debugPauseBtn");
     const coordsInSquaresEl = document.getElementById("coordsInSquares");
     const coordsInSquaresTextEl = document.getElementById("coordsInSquaresText");
     const clockAEl = document.getElementById("clockA");
@@ -177,6 +191,9 @@ import {
             reactionModeOff: "Off",
             reactionModeOn: "On",
             reactionModeAuto: "Auto",
+            reactionPassOk: "OK",
+            debugPause: "Pause",
+            debugResume: "Resume",
             toggleOn: "On",
             toggleOff: "Off",
             coordsLabel: "Coords",
@@ -186,9 +203,11 @@ import {
             resolvePending: "Resolve pending effect",
             queueReaction: "Queue reaction",
             resolveReactions: "Resolve reactions",
+            resolvingEffects: "Resolving Effects",
             reactionPendingTitle: "Reaction/Pending status",
             snapshotTitle: "Snapshot",
             eventsTitle: "Events",
+            exportClientTrace: "Download client trace (JSON)",
             clock: "Clock",
             strikes: "Strikes",
             fromPlaceholder: "from row,col",
@@ -306,6 +325,9 @@ import {
             reactionModeOff: "Desligado",
             reactionModeOn: "Ligado",
             reactionModeAuto: "Automático",
+            reactionPassOk: "OK",
+            debugPause: "Pausar",
+            debugResume: "Retomar",
             toggleOn: "Ligado",
             toggleOff: "Desligado",
             coordsLabel: "Coords",
@@ -315,9 +337,11 @@ import {
             resolvePending: "Resolver efeito pendente",
             queueReaction: "Enfileirar reação",
             resolveReactions: "Resolver reações",
+            resolvingEffects: "Resolvendo Efeitos",
             reactionPendingTitle: "Status de reação/pendente",
             snapshotTitle: "Snapshot",
             eventsTitle: "Eventos",
+            exportClientTrace: "Baixar trace do cliente (JSON)",
             clock: "Relógio",
             strikes: "Strikes",
             fromPlaceholder: "origem linha,col",
@@ -770,6 +794,9 @@ import {
         updateCoordsToggleLabel();
         updateReactionModeOptions();
         updateReactionModeLabel();
+        if (reactionPassBtnEl) reactionPassBtnEl.textContent = t("reactionPassOk");
+        if (exportClientTraceBtnEl) exportClientTraceBtnEl.textContent = t("exportClientTrace");
+        updateDebugPauseButton(lastSnapshot);
         s("clockLabelA", "clock");
         s("clockLabelB", "clock");
         s("strikesLabelA", "strikes");
@@ -1164,6 +1191,10 @@ import {
             });
         };
         ws.onclose = () => {
+            if (clientTraceMirrorTimerId) {
+                clearInterval(clientTraceMirrorTimerId);
+                clientTraceMirrorTimerId = null;
+            }
             logEvent({ event: "socket_close" });
             stopRoomListPolling();
             resetToLobbyUi();
@@ -1206,6 +1237,17 @@ import {
                 syncTurnFromSnapshot(nextSnap);
                 updateOpponentDisconnectOverlay(nextSnap);
                 maybeShowMatchEndModal(nextSnap);
+                updateReactionPassButton(nextSnap);
+                updateDebugPauseButton(nextSnap);
+
+                if (nextSnap.adminDebugMatch) {
+                    if (!clientTraceMirrorTimerId) {
+                        clientTraceMirrorTimerId = setInterval(flushClientTraceToServer, 8000);
+                    }
+                } else if (clientTraceMirrorTimerId) {
+                    clearInterval(clientTraceMirrorTimerId);
+                    clientTraceMirrorTimerId = null;
+                }
 
                 if (snapshotEl) snapshotEl.textContent = JSON.stringify(nextSnap, null, 2);
                 renderBoard(nextSnap.board);
@@ -1223,6 +1265,25 @@ import {
 
                     /** True if ignition→cooldown fly already ran after 1t→0t in {@link runTurnStartResourceSequence}. */
                     let skipIgnitionResolveFly = false;
+                    /** Card ids already animated during {@link runReactionStackResolveSequence}. */
+                    let reactionResolveFlownIds = [];
+                    const doReactionResolve = shouldRunReactionStackResolve(prevSnap, nextSnap);
+                    if (doReactionResolve) {
+                        const steps = reactionStackResolveOrderFromPrev(prevSnap);
+                        const reactionBlockMs =
+                            (steps.length > 1 ? 1500 : 0) + steps.length * 1520 + 300;
+                        try {
+                            reactionResolveFlownIds = await runReactionStackResolveSequence(prevSnap, nextSnap);
+                        } catch (_) {
+                            reactionResolveFlownIds = [];
+                        }
+                        let effectBlockMs = reactionBlockMs;
+                        if (hasEffectAnimationDelta(prevSnap, nextSnap)) {
+                            effectBlockMs = Math.max(effectBlockMs, 900);
+                        }
+                        blockClocksForEffects(effectBlockMs);
+                    }
+
                     if (turnChanged) {
                         turnResourceAnimBlocking = true;
                         beginTurnResourceAnimFreeze();
@@ -1235,7 +1296,10 @@ import {
                         }
                     }
 
-                    runSnapshotAnimations(prevSnap, nextSnap, skipIgnitionResolveFly);
+                    runSnapshotAnimations(prevSnap, nextSnap, skipIgnitionResolveFly, reactionResolveFlownIds);
+                    if (!doReactionResolve && hasEffectAnimationDelta(prevSnap, nextSnap)) {
+                        blockClocksForEffects(900);
+                    }
                     renderPlaymat(nextSnap);
                     pmPrevSnapshot = nextSnap;
                     syncPlayerRoleLabels(nextSnap);
@@ -2083,6 +2147,43 @@ import {
     }
 
     /**
+     * Flies a card from the cooldown row to the deck or banished pile after its counter hits 0t.
+     * @param {string} cardId
+     * @param {string} turnStarter
+     * @param {object} nextSnap
+     * @returns {Promise<void>}
+     */
+    function flyCooldownResolvedExit(cardId, turnStarter, nextSnap) {
+        return new Promise((resolve) => {
+            const localPID = playerEl.value;
+            const isSelf = turnStarter === localPID;
+            const container = isSelf ? pmEl.cooldownCardsSelf : pmEl.cooldownCardsOpp;
+            const wrap = container?.querySelector(
+                `[data-card-id="${escapeCardIdForSelector(String(cardId))}"]`,
+            );
+            const fr = zoneRect(wrap) || zoneRect(container);
+            const def = getCardDef(cardId);
+            const toBanish = String(def?.type || "").toLowerCase() === "continuous";
+            const toEl = toBanish
+                ? isSelf
+                    ? pmEl.banishTopSelf
+                    : pmEl.banishTopOpp
+                : isSelf
+                  ? pmEl.deckSleeveSelf || pmEl.deckSelf
+                  : pmEl.deckSleeveOpp || pmEl.deckOpp;
+            const tr = zoneRect(toEl);
+            const starter = nextSnap.players?.find((p) => p.playerId === turnStarter);
+            if (!fr || !tr) {
+                resolve();
+                return;
+            }
+            flyCard(fr, tr, null, starter?.sleeveColor || "blue", 420, () => resolve(), {
+                fitDestination: false,
+            });
+        });
+    }
+
+    /**
      * Animates ignition (activator turn only), then on resolve (0t) flies the card to cooldown,
      * then animates other cooldown turn badges for that player. All before playmat DOM is replaced.
      * @param {object | null} prevSnap
@@ -2098,6 +2199,14 @@ import {
         const delayMs = 200;
         const animMs = 700;
         let didIgnitionResolveFly = false;
+
+        const ignitionResolvedForTurnStarter =
+            prevSnap.ignitionOn &&
+            !nextSnap.ignitionOn &&
+            prevSnap.ignitionOwner === turnStarter;
+        const arrivingIgnitionCardId = ignitionResolvedForTurnStarter
+            ? String(prevSnap.ignitionCard || "")
+            : "";
 
         /** @type {{ el: HTMLElement, from: string, to: string } | null} */
         let ignitionOdometer = null;
@@ -2118,7 +2227,7 @@ import {
             }
         }
 
-        /** @type {{ el: HTMLElement, from: string, to: string }[]} */
+        /** @type {{ el: HTMLElement, from: string, to: string, cardId: string }[]} */
         const cooldownTasks = [];
         const prevStarter = prevSnap.players?.find((p) => p.playerId === turnStarter);
         const nextStarter = nextSnap.players?.find((p) => p.playerId === turnStarter);
@@ -2128,6 +2237,7 @@ import {
             const container =
                 turnStarter === localPID ? pmEl.cooldownCardsSelf : pmEl.cooldownCardsOpp;
             for (const nEntry of nextCD) {
+                if (arrivingIgnitionCardId && nEntry.cardId === arrivingIgnitionCardId) continue;
                 const pEntry = prevCD.find((p) => p.cardId === nEntry.cardId);
                 if (!pEntry || nEntry.turnsRemaining >= pEntry.turnsRemaining) continue;
                 const wrap = container?.querySelector(
@@ -2139,6 +2249,7 @@ import {
                         el: turnsEl,
                         from: `${pEntry.turnsRemaining}t`,
                         to: `${nEntry.turnsRemaining}t`,
+                        cardId: nEntry.cardId,
                     });
                 }
             }
@@ -2146,6 +2257,7 @@ import {
             // The server removes them from cooldownPreview atomically, so nextCD never contains
             // them; we must detect their absence and animate the final N→0 tick.
             for (const pEntry of prevCD) {
+                if (arrivingIgnitionCardId && pEntry.cardId === arrivingIgnitionCardId) continue;
                 if (nextCD.find((n) => n.cardId === pEntry.cardId)) continue;
                 if (pEntry.turnsRemaining <= 0) continue;
                 const wrap = container?.querySelector(
@@ -2157,6 +2269,7 @@ import {
                         el: turnsEl,
                         from: `${pEntry.turnsRemaining}t`,
                         to: "0t",
+                        cardId: pEntry.cardId,
                     });
                 }
             }
@@ -2171,12 +2284,19 @@ import {
             if (resolved && ignitionOdometer.to === "0t") {
                 await flyIgnitionResolvedToCooldown(prevSnap);
                 didIgnitionResolveFly = true;
+                const arrDef = arrivingIgnitionCardId ? getCardDef(arrivingIgnitionCardId) : null;
+                if (arrDef && Number(arrDef.cooldown) === 0) {
+                    await flyCooldownResolvedExit(arrivingIgnitionCardId, turnStarter, nextSnap);
+                }
             }
-            if (cooldownTasks.length > 0) await sleep(delayMs);
         }
 
         for (let i = 0; i < cooldownTasks.length; i++) {
-            await odometerFlip(cooldownTasks[i].el, cooldownTasks[i].from, cooldownTasks[i].to, animMs);
+            const task = cooldownTasks[i];
+            await odometerFlip(task.el, task.from, task.to, animMs);
+            if (task.to === "0t" && task.cardId) {
+                await flyCooldownResolvedExit(task.cardId, turnStarter, nextSnap);
+            }
             if (i < cooldownTasks.length - 1) await sleep(delayMs);
         }
 
@@ -2187,10 +2307,12 @@ import {
      * Runs all animations needed when transitioning from prevSnap to nextSnap.
      * Animations are fire-and-forget; the DOM update happens normally after.
      * @param {boolean} [skipIgnitionResolveFly] when true, ignition→cooldown fly already ran after 1t→0t odômetro
+     * @param {string[]} [reactionResolveFlownIds] card ids already flown during reaction stack resolve (skip duplicate flies)
      */
-    function runSnapshotAnimations(prevSnap, nextSnap, skipIgnitionResolveFly) {
+    function runSnapshotAnimations(prevSnap, nextSnap, skipIgnitionResolveFly, reactionResolveFlownIds) {
         if (!prevSnap || !nextSnap) return;
         const localPID = playerEl.value;
+        const skipReactionFly = new Set((reactionResolveFlownIds || []).map((id) => String(id)));
 
         const prevSelf = prevSnap.players?.find((p) => p.playerId === localPID);
         const nextSelf = nextSnap.players?.find((p) => p.playerId === localPID);
@@ -2238,14 +2360,17 @@ import {
             flyIgnitionResolvedToCooldown(prevSnap);
         }
 
-        // 3c. Card with ignition=0 activated: the server resolves it atomically so the ignition
-        // slot is never "occupied" in any snapshot the client sees.  Detect a new cooldown entry
-        // whose card definition has ignition=0 and show a brief glow + fly from the ignition zone.
+        // 3c. Fallback animation: if an ignition->cooldown transition was not visible in snapshots,
+        // infer it from a new ignition=0 cooldown entry and show a brief glow + fly.
         if (!prevSnap.ignitionOn && !nextSnap.ignitionOn) {
             const prevSelfCD = prevSelf?.cooldownPreview || [];
             const nextSelfCD = nextSelf?.cooldownPreview || [];
             const newSelfEntry = nextSelfCD.find((e) => !prevSelfCD.some((p) => p.cardId === e.cardId));
-            if (newSelfEntry && (getCardDef(newSelfEntry.cardId)?.ignition ?? -1) === 0) {
+            if (
+                newSelfEntry &&
+                (getCardDef(newSelfEntry.cardId)?.ignition ?? -1) === 0 &&
+                !skipReactionFly.has(String(newSelfEntry.cardId))
+            ) {
                 const slotEl = pmEl.ignitionSelf;
                 if (slotEl) {
                     slotEl.classList.remove("pm-ignition-activating");
@@ -2266,7 +2391,11 @@ import {
                 const prevOppCD = prevOpp?.cooldownPreview || [];
                 const nextOppCD = nextOpp?.cooldownPreview || [];
                 const newOppEntry = nextOppCD.find((e) => !prevOppCD.some((p) => p.cardId === e.cardId));
-                if (newOppEntry && (getCardDef(newOppEntry.cardId)?.ignition ?? -1) === 0) {
+                if (
+                    newOppEntry &&
+                    (getCardDef(newOppEntry.cardId)?.ignition ?? -1) === 0 &&
+                    !skipReactionFly.has(String(newOppEntry.cardId))
+                ) {
                     const slotEl = pmEl.ignitionOpp;
                     if (slotEl) {
                         slotEl.classList.remove("pm-ignition-activating");
@@ -2288,18 +2417,24 @@ import {
 
         // 4. Card banished: banishedCards length increased → fly from deck or ignition area to banish zone.
         if (nextSelf.banishedCards.length > prevSelf.banishedCards.length) {
-            const toEl = pmEl.banishTopSelf;
-            const fromEl = pmEl.ignitionCardSelf;
-            const fr = zoneRect(fromEl) || zoneRect(pmEl.deckSelf);
-            const tr = zoneRect(toEl);
-            if (fr && tr) flyCard(fr, tr, null, nextSelf.sleeveColor || "blue", 500);
+            const newBanishId = findFirstNewBanishedCardId(prevSelf.banishedCards, nextSelf.banishedCards);
+            if (newBanishId && !skipReactionFly.has(String(newBanishId))) {
+                const toEl = pmEl.banishTopSelf;
+                const fromEl = pmEl.ignitionCardSelf;
+                const fr = zoneRect(fromEl) || zoneRect(pmEl.deckSelf);
+                const tr = zoneRect(toEl);
+                if (fr && tr) flyCard(fr, tr, null, nextSelf.sleeveColor || "blue", 500);
+            }
         }
         if (nextOpp && prevOpp && nextOpp.banishedCards.length > prevOpp.banishedCards.length) {
-            const toEl = pmEl.banishTopOpp;
-            const fromEl = pmEl.ignitionCardOpp;
-            const fr = zoneRect(fromEl) || zoneRect(pmEl.deckOpp);
-            const tr = zoneRect(toEl);
-            if (fr && tr) flyCard(fr, tr, null, nextOpp?.sleeveColor || "blue", 500);
+            const newBanishOppId = findFirstNewBanishedCardId(prevOpp.banishedCards, nextOpp.banishedCards);
+            if (newBanishOppId && !skipReactionFly.has(String(newBanishOppId))) {
+                const toEl = pmEl.banishTopOpp;
+                const fromEl = pmEl.ignitionCardOpp;
+                const fr = zoneRect(fromEl) || zoneRect(pmEl.deckOpp);
+                const tr = zoneRect(toEl);
+                if (fr && tr) flyCard(fr, tr, null, nextOpp?.sleeveColor || "blue", 500);
+            }
         }
 
         // 5. Card returned from cooldown to deck (same idea as deck → hand).
@@ -2332,6 +2467,20 @@ import {
 
     /** Stagger between multiple opening-draw flies (deck → hand). */
     const OPENING_DRAW_STAGGER_MS = 130;
+
+    /**
+     * Returns the first card id newly present in banished (vs previous list), if any.
+     * @param {Array<{ cardId: string }>|undefined} prevList
+     * @param {Array<{ cardId: string }>|undefined} nextList
+     * @returns {string | null}
+     */
+    function findFirstNewBanishedCardId(prevList, nextList) {
+        const prevS = new Set((prevList || []).map((c) => c.cardId));
+        for (const c of nextList || []) {
+            if (!prevS.has(c.cardId)) return c.cardId;
+        }
+        return null;
+    }
 
     /**
      * Returns the card id that left cooldown between two preview snapshots, if any.
@@ -2415,6 +2564,7 @@ import {
     /** @param {object} snapshot */
     function renderPlaymat(snapshot) {
         if (!snapshot || !snapshot.players) return;
+        clearDanglingHandDragCards();
         const view = isPlaymatUiTestEnabled() ? applyPlaymatUiTestOverlay(snapshot) : snapshot;
         const localPID = String(playerEl.value || "").trim();
         if (localPID !== "A" && localPID !== "B") return;
@@ -2662,6 +2812,321 @@ import {
         });
     }
 
+    /**
+     * Picks which ignition card node should display the reaction stack top (last queued card).
+     * The global ignition card stays on ignitionOwner's side; the staged reaction belongs to
+     * stagedOwner and must appear on that seat's side without covering the global slot.
+     */
+    function pickReactionStagedSlot(snapshot, localPID, stagedOwner) {
+        if (!snapshot || !localPID || !stagedOwner) return null;
+        const occ = !!snapshot.ignitionOn;
+        const own = snapshot.ignitionOwner || "";
+        const globalOnSelf = occ && own === localPID;
+        const globalOnOpp = occ && own && own !== localPID;
+        const stagedOnSelf = stagedOwner === localPID;
+
+        if (!occ) {
+            return stagedOnSelf ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
+        }
+        if (stagedOnSelf && !globalOnSelf) {
+            return pmEl.ignitionCardSelf;
+        }
+        if (!stagedOnSelf && !globalOnOpp) {
+            return pmEl.ignitionCardOpp;
+        }
+        // Same seat holds global ignition and the staged stack top (ignite chain back to activator):
+        // use the empty ignition slot on the playmat (see renderIgnitionZone emptyCardEl).
+        if (stagedOnSelf && globalOnSelf) {
+            return pmEl.ignitionCardOpp;
+        }
+        if (!stagedOnSelf && globalOnOpp) {
+            return pmEl.ignitionCardSelf;
+        }
+        return null;
+    }
+
+    /**
+     * Returns the ignition card wrap element used to show a given stack card during resolve animations.
+     * @param {object} snapshot
+     * @param {string} localPID
+     * @param {string} cardId
+     * @param {string} cardOwner seat "A" | "B"
+     * @returns {HTMLElement | null}
+     */
+    function reactionStackCardWrap(snapshot, localPID, cardId, cardOwner) {
+        const fakeSnap = {
+            ...snapshot,
+            reactionWindow: {
+                ...(snapshot.reactionWindow || {}),
+                open: true,
+                stagedCardId: String(cardId),
+                stagedOwner: String(cardOwner),
+            },
+        };
+        let wrap = pickReactionStagedSlot(fakeSnap, localPID, cardOwner);
+        if (!wrap) {
+            wrap = cardOwner === localPID ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
+        }
+        return wrap || null;
+    }
+
+    /**
+     * RGBA color for resolve glow from catalog card type (lowercase).
+     * @param {string} typeLower
+     * @returns {string}
+     */
+    function reactionResolveGlowColor(typeLower) {
+        switch (typeLower) {
+            case "retribution":
+                return "rgba(220, 85, 105, 0.85)";
+            case "power":
+                return "rgba(85, 210, 130, 0.85)";
+            case "continuous":
+                return "rgba(110, 175, 255, 0.88)";
+            case "counter":
+                return "rgba(245, 205, 95, 0.88)";
+            default:
+                return "rgba(200, 210, 230, 0.75)";
+        }
+    }
+
+    /**
+     * Soft expanding glow around an ignition-slot card for ~1s (reaction stack resolution).
+     * @param {HTMLElement | null} wrapEl
+     * @param {string} typeLower
+     * @returns {Promise<void>}
+     */
+    async function playReactionResolveGlow(wrapEl, typeLower) {
+        if (!wrapEl) return;
+        const rect = zoneRect(wrapEl);
+        if (!rect || rect.width < 2 || rect.height < 2) return;
+        const pad = 10;
+        const el = document.createElement("div");
+        el.className = "pm-ignition-resolve-glow-overlay";
+        el.setAttribute("aria-hidden", "true");
+        const c = reactionResolveGlowColor(typeLower);
+        el.style.left = `${rect.left - pad}px`;
+        el.style.top = `${rect.top - pad}px`;
+        el.style.width = `${rect.width + pad * 2}px`;
+        el.style.height = `${rect.height + pad * 2}px`;
+        document.body.appendChild(el);
+        const anim = el.animate(
+            [
+                {
+                    boxShadow: `0 0 0 2px ${c}`,
+                    opacity: 0.95,
+                },
+                {
+                    boxShadow: `0 0 48px 26px ${c}`,
+                    opacity: 0,
+                },
+            ],
+            { duration: 1000, easing: "ease-out", fill: "forwards" },
+        );
+        await anim.finished.catch(() => {});
+        el.remove();
+    }
+
+    /**
+     * Full-width "Resolving Effects" banner: width immediate, height grows from center in 0.5s; total ~1.5s.
+     * @returns {Promise<void>}
+     */
+    function showResolvingEffectsBanner() {
+        return new Promise((resolve) => {
+            const mount = gameShellEl || document.body;
+            let el = document.getElementById("pmResolvingEffectsBanner");
+            if (!el) {
+                el = document.createElement("div");
+                el.id = "pmResolvingEffectsBanner";
+                el.className = "pm-resolving-effects-banner";
+                el.setAttribute("role", "status");
+                mount.appendChild(el);
+            }
+            el.textContent = t("resolvingEffects");
+            el.classList.remove("pm-resolving-effects-banner--in", "pm-resolving-effects-banner--out");
+            void el.offsetWidth;
+            el.classList.add("pm-resolving-effects-banner--in");
+            setTimeout(() => {
+                el.classList.remove("pm-resolving-effects-banner--in");
+                el.classList.add("pm-resolving-effects-banner--out");
+                setTimeout(() => {
+                    el.classList.remove("pm-resolving-effects-banner--out");
+                    resolve();
+                }, 340);
+            }, 1500);
+        });
+    }
+
+    /**
+     * @param {object | null} prevSnap
+     * @param {object} nextSnap
+     * @returns {boolean}
+     */
+    function shouldRunReactionStackResolve(prevSnap, nextSnap) {
+        if (!prevSnap || !nextSnap) return false;
+        const p = prevSnap.reactionWindow || {};
+        const n = nextSnap.reactionWindow || {};
+        const trig = String(p.trigger || "");
+        if (
+            trig !== "" &&
+            trig !== "ignite_reaction" &&
+            trig !== "capture_attempt"
+        ) {
+            return false;
+        }
+        // Authoritative signal is stackSize (queued cards), not open: snapshots may omit or vary open.
+        const hadStack = Number(p.stackSize || 0) > 0;
+        const nextOpen = !!n.open;
+        const nextSz = Number(n.stackSize || 0);
+        const stackCleared = !nextOpen || nextSz === 0;
+        return hadStack && stackCleared;
+    }
+
+    /**
+     * Builds ordered resolve steps (LIFO) from the previous snapshot's reaction stack preview.
+     * @param {object} prevSnap
+     * @returns {{ cardId: string, owner: string }[]}
+     */
+    function reactionStackResolveOrderFromPrev(prevSnap) {
+        const rw = prevSnap?.reactionWindow || {};
+        const raw = Array.isArray(rw.stackCards) ? rw.stackCards : [];
+        if (raw.length > 0) {
+            return [...raw].reverse().map((e) => ({
+                cardId: String(e.cardId || ""),
+                owner: String(e.owner || ""),
+            }));
+        }
+        const stagedId = String(rw.stagedCardId || "");
+        const stagedOwner = String(rw.stagedOwner || "");
+        const sz = Number(rw.stackSize || 0);
+        if (!stagedId || !stagedOwner || sz <= 0) return [];
+        // Without stackCards we only know the visible top; animating the same id N times is wrong.
+        return [{ cardId: stagedId, owner: stagedOwner }];
+    }
+
+    /**
+     * Banner + per-card glow and fly to cooldown (or deck/banish when catalog cooldown is 0).
+     * @param {object} prevSnap
+     * @param {object} nextSnap
+     * @returns {Promise<string[]>} card ids that were animated (to skip duplicate flies)
+     */
+    async function runReactionStackResolveSequence(prevSnap, nextSnap) {
+        const localPID = playerEl.value;
+        const steps = reactionStackResolveOrderFromPrev(prevSnap);
+        if (steps.length === 0) {
+            return [];
+        }
+        // Ensure playmat DOM matches the snapshot we diff from (glow/fly use getBoundingClientRect).
+        renderPlaymat(prevSnap);
+        await new Promise((r) => requestAnimationFrame(() => r()));
+        // Full-width banner only when multiple queued reactions resolve in one shot.
+        if (steps.length > 1) {
+            await showResolvingEffectsBanner();
+        }
+        const flown = [];
+        const flyMs = 460;
+        for (let i = 0; i < steps.length; i++) {
+            const { cardId, owner } = steps[i];
+            if (!cardId || !owner) continue;
+            const def = getCardDef(cardId);
+            const typeLower = String(def?.type || "").toLowerCase();
+            const wrap = reactionStackCardWrap(prevSnap, localPID, cardId, owner);
+            await playReactionResolveGlow(wrap, typeLower);
+            const isSelf = owner === localPID;
+            const fr = zoneRect(wrap);
+            const cd = Number(def?.cooldown ?? -1);
+            let toEl = null;
+            if (cd <= 0) {
+                const toBanish = typeLower === "continuous";
+                toEl = toBanish
+                    ? isSelf
+                        ? pmEl.banishTopSelf
+                        : pmEl.banishTopOpp
+                    : isSelf
+                      ? pmEl.deckSleeveSelf || pmEl.deckSelf
+                      : pmEl.deckSleeveOpp || pmEl.deckOpp;
+            } else {
+                toEl = isSelf ? pmEl.cooldownCardsSelf : pmEl.cooldownCardsOpp;
+            }
+            const tr = zoneRect(toEl);
+            if (fr && tr) {
+                const face = def
+                    ? (() => {
+                          const el = createPowerCard({
+                              type: def.type,
+                              name: def.name,
+                              description: def.description,
+                              example: def.example,
+                              mana: def.mana,
+                              ignition: def.ignition,
+                              cooldown: def.cooldown,
+                              cardWidth: "86px",
+                          });
+                          el.style.cssText = "width:100%;height:100%";
+                          return el;
+                      })()
+                    : null;
+                const sleevePid = nextSnap.players?.find((p) => p.playerId === owner);
+                await new Promise((res) => {
+                    flyCard(fr, tr, face, sleevePid?.sleeveColor || "blue", flyMs, () => res(), {
+                        fitDestination: false,
+                    });
+                });
+            }
+            flown.push(cardId);
+        }
+        return flown;
+    }
+
+    /**
+     * Renders the top queued reaction on the correct side of the playmat for the current viewer.
+     */
+    function renderReactionStagedIfAny(snapshot, localPID) {
+        const rw = snapshot?.reactionWindow;
+        const sid = rw?.stagedCardId;
+        const sor = rw?.stagedOwner;
+        const clearStagedDecor = () => {
+            if (pmEl.ignitionCardSelf) pmEl.ignitionCardSelf.classList.remove("pm-ignition-staged");
+            if (pmEl.ignitionCardOpp) pmEl.ignitionCardOpp.classList.remove("pm-ignition-staged");
+        };
+        if (!sid || !sor) {
+            clearStagedDecor();
+            return;
+        }
+        const slot = pickReactionStagedSlot(snapshot, localPID, sor);
+        if (!slot) {
+            clearStagedDecor();
+            return;
+        }
+        clearStagedDecor();
+        slot.classList.add("pm-ignition-staged");
+        slot.innerHTML = "";
+        slot.dataset.cardId = String(sid);
+        const counterEl = slot === pmEl.ignitionCardSelf ? pmEl.ignitionCounterSelf : pmEl.ignitionCounterOpp;
+        if (counterEl) counterEl.classList.add("hidden");
+        const def = getCardDef(sid);
+        if (def) {
+            const cid = String(sid);
+            const card = createPowerCard({
+                type: def.type,
+                name: def.name,
+                description: def.description,
+                example: def.example,
+                mana: def.mana,
+                ignition: def.ignition,
+                cooldown: def.cooldown,
+                cardWidth: "220px",
+                showExampleInitially: matchHandExampleMode.get(cid) === true,
+                onExampleToggle: (showing) => {
+                    matchHandExampleMode.set(cid, showing);
+                    syncAllMatchPowerCardMinis(cid, showing);
+                },
+            });
+            slot.appendChild(card);
+            attachCardHover(slot, { ...def, id: cid, manaCost: def.mana });
+        }
+    }
+
     function renderIgnitionZone(snapshot) {
         const localPID = playerEl.value;
         const occupied = snapshot.ignitionOn;
@@ -2673,6 +3138,7 @@ import {
             if (pmEl.ignitionCardSelf) {
                 pmEl.ignitionCardSelf.innerHTML = "";
                 delete pmEl.ignitionCardSelf.dataset.cardId;
+                pmEl.ignitionCardSelf.classList.remove("pm-ignition-staged");
             }
             if (pmEl.ignitionCardOpp) {
                 pmEl.ignitionCardOpp.innerHTML = "";
@@ -2680,6 +3146,7 @@ import {
             }
             if (pmEl.ignitionCounterSelf) pmEl.ignitionCounterSelf.classList.add("hidden");
             if (pmEl.ignitionCounterOpp) pmEl.ignitionCounterOpp.classList.add("hidden");
+            renderReactionStagedIfAny(snapshot, localPID);
             return;
         }
 
@@ -2693,6 +3160,7 @@ import {
         if (emptyCardEl) {
             emptyCardEl.innerHTML = "";
             delete emptyCardEl.dataset.cardId;
+            emptyCardEl.classList.remove("pm-ignition-staged");
         }
         if (emptyCounterEl) emptyCounterEl.classList.add("hidden");
 
@@ -2726,6 +3194,7 @@ import {
             cardEl.appendChild(card);
             attachCardHover(cardEl, { ...def, id: cid, manaCost: def.mana });
         }
+        renderReactionStagedIfAny(snapshot, localPID);
     }
 
     function renderCooldownZone(self, opp) {
@@ -2839,8 +3308,6 @@ import {
             if (idx < 0 || idx >= hand.length) mulliganPick.delete(idx);
         }
         const snap = lastSnapshot;
-        const isMyTurn = snap && snap.turnPlayer === playerEl.value;
-        const ignitionOccupied = snap && snap.ignitionOn;
         const mr = snap?.mulliganReturned || {};
         const myPid = playerEl.value;
         const myMulliganDone = mr[myPid] !== undefined && mr[myPid] >= 0;
@@ -2887,8 +3354,7 @@ import {
                 wrap.appendChild(card);
             }
             wrap.style.setProperty("--i", String(i));
-            const canActivate =
-                !mulliganChoose && isMyTurn && (!ignitionOccupied || entry.cardId === "save-it-for-later");
+            const canActivate = !mulliganChoose && canActivateHandCard(snap, myPid, entry);
             wrap.classList.toggle("pm-hand-card-wrap--inactive", !canActivate);
             wrap.classList.toggle("pm-hand-card-wrap--mulligan-return", mulliganChoose && mulliganPick.has(i));
             if (mulliganChoose) {
@@ -2912,6 +3378,95 @@ import {
         if (!mulliganChoose) {
             wireHandStackPointerDrag(stack);
         }
+    }
+
+    function isReactionFirstResponseTurn(snapshot, pid) {
+        const rw = snapshot?.reactionWindow || {};
+        if (!rw.open) return false;
+        if (!rw.actor || rw.actor === pid) return false;
+        const stackSize = Number(rw.stackSize || 0);
+        return Number.isFinite(stackSize) && stackSize === 0;
+    }
+
+    function isReactionWindowOpen(snapshot) {
+        return !!snapshot?.reactionWindow?.open;
+    }
+
+    /**
+     * Attacker may pass the optional Blockade step after the defender queues Counterattack (capture_attempt).
+     */
+    function canAttackerPassAfterCounterQueued(snapshot, pid) {
+        const rw = snapshot?.reactionWindow || {};
+        if (!rw.open || rw.trigger !== "capture_attempt") return false;
+        if (!rw.actor || rw.actor !== pid) return false;
+        const stackSize = Number(rw.stackSize || 0);
+        if (stackSize !== 1) return false;
+        if ((rw.stagedCardId || "") !== "counterattack") return false;
+        if ((rw.stagedOwner || "") === pid) return false;
+        return true;
+    }
+
+    function canPassReactionPriority(snapshot, pid) {
+        return isReactionFirstResponseTurn(snapshot, pid) || canAttackerPassAfterCounterQueued(snapshot, pid);
+    }
+
+    function isOwnIgnitionOccupied(snapshot, pid) {
+        return !!(snapshot?.ignitionOn && snapshot?.ignitionOwner === pid);
+    }
+
+    /**
+     * Returns whether the hand card's type matches reactionWindow.eligibleTypes (case-insensitive).
+     * Server metadata uses title case ("Counter"); card-metadata may use lowercase ("counter").
+     */
+    function cardMatchesReactionEligibleTypes(snapshot, handEntry) {
+        const eligible = snapshot?.reactionWindow?.eligibleTypes;
+        if (!Array.isArray(eligible) || eligible.length === 0) return true;
+        const def = getCardDef(handEntry?.cardId);
+        if (!def?.type) return false;
+        const t = String(def.type).toLowerCase();
+        return eligible.some((e) => String(e).toLowerCase() === t);
+    }
+
+    function canActivateHandCard(snapshot, pid, handEntry) {
+        if (!snapshot || !pid || !handEntry) return false;
+        if (isReactionWindowOpen(snapshot)) {
+            return cardMatchesReactionEligibleTypes(snapshot, handEntry);
+        }
+        if (isReactionFirstResponseTurn(snapshot, pid)) {
+            return true;
+        }
+        const ownIgnitionOccupied = isOwnIgnitionOccupied(snapshot, pid);
+        const canByIgnition = !ownIgnitionOccupied;
+        if (!canByIgnition) return false;
+        const isMyTurn = snapshot.turnPlayer === pid;
+        if (!isMyTurn) return false;
+        return true;
+    }
+
+    function sendHandCardAction(snapshot, handIndex) {
+        if (!isGameplayInputOpen()) return;
+        if (isReactionWindowOpen(snapshot)) {
+            send("queue_reaction", { handIndex });
+            return;
+        }
+        send("activate_card", { handIndex });
+    }
+
+    function updateReactionPassButton(snapshot) {
+        if (!reactionPassBtnEl) return;
+        const canPass = canPassReactionPriority(snapshot, playerEl.value);
+        reactionPassBtnEl.classList.toggle("hidden", !canPass);
+        reactionPassBtnEl.disabled = !canPass || !isGameplayInputOpen();
+    }
+
+    function updateDebugPauseButton(snapshot = null) {
+        if (!debugPauseBtnEl) return;
+        const enabled = !!snapshot?.adminDebugMatch;
+        const paused = !!snapshot?.debugPauseActive;
+        debugPauseBtnEl.classList.toggle("hidden", !enabled);
+        debugPauseBtnEl.classList.toggle("debug-pause-active", paused);
+        debugPauseBtnEl.textContent = paused ? t("debugResume") : t("debugPause");
+        debugPauseBtnEl.disabled = !enabled || !joinedRoom;
     }
 
     function renderOppHand(container, opp) {
@@ -2957,7 +3512,7 @@ import {
         const gameOn = snapshot.gameStarted && !snapshot.matchEnded;
         const mulliganOn = !!snapshot.mulliganPhaseActive;
         btn.disabled =
-            mulliganOn || !(isMyTurn && hasMana && hasSpace && gameOn) || turnResourceAnimBlocking;
+            mulliganOn || !(isMyTurn && hasMana && hasSpace && gameOn) || !isGameplayInputOpen();
     }
 
     // ---------------------------------------------------------------------------
@@ -3009,6 +3564,12 @@ import {
         }
 
         function onMove(ev) {
+            if (draggingHandIndex !== null) {
+                if (lastIdx !== -1) hideCardPreview();
+                lastIdx = -1;
+                clearPeek();
+                return;
+            }
             const x = ev.clientX;
             const wraps = [...stack.querySelectorAll(wrapSelector)];
             let idx = overlapHitFirstWrapIndex(x, wraps);
@@ -3074,6 +3635,29 @@ import {
         });
     }
 
+    function clearDanglingHandDragCards() {
+        document.querySelectorAll(".power-card--hand-dragging").forEach((card) => {
+            if (!(card instanceof HTMLElement)) return;
+            card.classList.remove("power-card--hand-dragging");
+            card.style.position = "";
+            card.style.left = "";
+            card.style.top = "";
+            card.style.width = "";
+            card.style.zIndex = "";
+            card.style.margin = "";
+            card.style.pointerEvents = "";
+            card.style.transform = "";
+            card.style.transformOrigin = "";
+            card.style.boxShadow = "";
+            if (card.parentElement === document.body) {
+                card.remove();
+            }
+        });
+        draggingHandIndex = null;
+        draggingHandEntry = null;
+        hideCardPreview();
+    }
+
     /**
      * Pointer-based drag from hand stack to ignition (overlapping hand has pointer-events none on wraps).
      * Hides the large hover preview when a drag starts; lifts the real card (no ghost clone);
@@ -3123,7 +3707,8 @@ import {
 
         stack.addEventListener("pointerdown", (ev) => {
             if (ev.button !== 0) return;
-            if (turnResourceAnimBlocking) return;
+            if (!isGameplayInputOpen()) return;
+            clearDanglingHandDragCards();
             // Let the description/example toggle receive a normal click cycle; pointer capture
             // on the stack would steal pointerup/click from the button.
             const t = ev.target;
@@ -3141,9 +3726,7 @@ import {
             if (idx < 0 || idx >= hand.length) return;
 
             const entry = hand[idx];
-            const isMyTurn = snap && snap.turnPlayer === localPID;
-            const ignitionOccupied = snap && snap.ignitionOn;
-            const canActivate = isMyTurn && (!ignitionOccupied || entry.cardId === "save-it-for-later");
+            const canActivate = canActivateHandCard(snap, localPID, entry);
             if (!canActivate) return;
 
             pending = {
@@ -3234,8 +3817,8 @@ import {
                     droppedOnIgnition = true;
                 }
             }
-            if (droppedOnIgnition && !turnResourceAnimBlocking) {
-                send("activate_card", { handIndex: pending.idx });
+            if (droppedOnIgnition && isGameplayInputOpen()) {
+                sendHandCardAction(lastSnapshot, pending.idx);
             }
             // Always restore the hand card DOM (clear position:fixed). If we skipped this on
             // ignition drop, a rejected/late snapshot left the card floating forever.
@@ -3259,7 +3842,7 @@ import {
 
         slot.addEventListener("dragover", (ev) => {
             // Only allow drop when a hand card is being dragged.
-            if (draggingHandIndex === null || turnResourceAnimBlocking) return;
+            if (draggingHandIndex === null || !isGameplayInputOpen()) return;
             ev.preventDefault();
             ev.dataTransfer.dropEffect = "move";
         });
@@ -3271,21 +3854,21 @@ import {
         });
 
         slot.addEventListener("dragenter", (ev) => {
-            if (draggingHandIndex === null || turnResourceAnimBlocking) return;
+            if (draggingHandIndex === null || !isGameplayInputOpen()) return;
             ev.preventDefault();
             slot.classList.add("pm-drop-hover");
         });
 
         slot.addEventListener("drop", (ev) => {
             ev.preventDefault();
-            if (turnResourceAnimBlocking) return;
+            if (!isGameplayInputOpen()) return;
             slot.classList.remove("pm-drop-hover");
             slot.classList.remove("pm-drop-active");
             const idx = draggingHandIndex;
             draggingHandIndex = null;
             draggingHandEntry = null;
             if (idx === null) return;
-            send("activate_card", { handIndex: idx });
+            sendHandCardAction(lastSnapshot, idx);
         });
     }
 
@@ -3390,6 +3973,7 @@ import {
     // DRAW button
     if (pmEl.drawBtn) {
         pmEl.drawBtn.addEventListener("click", () => {
+            if (!isGameplayInputOpen()) return;
             send("draw_card", {});
         });
     }
@@ -3434,12 +4018,70 @@ import {
         frozenTurnClockDisplay = null;
     }
 
+    function blockClocksForEffects(ms) {
+        effectAnimBlocking = true;
+        if (effectAnimBlockTimeout) clearTimeout(effectAnimBlockTimeout);
+        effectAnimBlockTimeout = setTimeout(() => {
+            effectAnimBlocking = false;
+            effectAnimBlockTimeout = null;
+        }, ms);
+    }
+
+    /**
+     * Returns true when snapshot delta likely triggers card/effect visual transitions.
+     * This prevents locking gameplay input on every periodic snapshot tick.
+     * @param {object|null} prevSnap
+     * @param {object} nextSnap
+     * @returns {boolean}
+     */
+    function hasEffectAnimationDelta(prevSnap, nextSnap) {
+        if (!prevSnap || !nextSnap) return false;
+        if (!!prevSnap.ignitionOn !== !!nextSnap.ignitionOn) return true;
+        if ((prevSnap.ignitionCard || "") !== (nextSnap.ignitionCard || "")) return true;
+        if ((prevSnap.ignitionOwner || "") !== (nextSnap.ignitionOwner || "")) return true;
+        if ((prevSnap.activationQueueSize || 0) !== (nextSnap.activationQueueSize || 0)) return true;
+        const prevPE = Array.isArray(prevSnap.pendingEffects) ? prevSnap.pendingEffects.length : 0;
+        const nextPE = Array.isArray(nextSnap.pendingEffects) ? nextSnap.pendingEffects.length : 0;
+        if (prevPE !== nextPE) return true;
+        const prevRW = prevSnap.reactionWindow || {};
+        const nextRW = nextSnap.reactionWindow || {};
+        if ((prevRW.stackSize || 0) !== (nextRW.stackSize || 0)) return true;
+        if ((prevRW.stagedCardId || "") !== (nextRW.stagedCardId || "")) return true;
+        if ((prevRW.stagedOwner || "") !== (nextRW.stagedOwner || "")) return true;
+        return false;
+    }
+
+    function isGameplayInputOpen() {
+        if (lastSnapshot?.debugPauseActive) return false;
+        return isOpenGameState(lastSnapshot, {
+            turnStartAnimation: turnResourceAnimBlocking,
+            effectAnimation: effectAnimBlocking,
+        });
+    }
+
+    /**
+     * Marks the clock display with the active timer mode.
+     * @param {HTMLElement} el
+     * @param {string} mode
+     */
+    function applyClockMode(el, mode) {
+        if (!el) return;
+        el.classList.remove("clock-mode-turn", "clock-mode-response");
+        if (mode === "turn") {
+            el.classList.add("clock-mode-turn");
+        } else {
+            el.classList.add("clock-mode-response");
+        }
+    }
+
     function renderTurnClocks() {
         if (!clockAEl || !clockBEl) return;
         const snap = lastSnapshot;
         if (!clocksActive(snap)) {
             clockAEl.textContent = "--";
             clockBEl.textContent = "--";
+            applyClockMode(clockAEl, "response");
+            applyClockMode(clockBEl, "response");
             return;
         }
         if (turnResourceAnimBlocking && frozenTurnClockDisplay) {
@@ -3454,14 +4096,46 @@ import {
             }
             return;
         }
-        const secLeft = Math.max(0, Math.ceil((turnDeadline - Date.now()) / 1000));
-        if (currentTurn === "A") {
-            clockAEl.textContent = String(secLeft);
-            clockBEl.textContent = String(turnSeconds);
-        } else {
-            clockAEl.textContent = String(turnSeconds);
-            clockBEl.textContent = String(secLeft);
+        const r = getReactionState(snap);
+        if (r.resolvingChain) {
+            // Live wall-clock each tick (interval ~250ms). Do not cache: a frozen snapshot made
+            // clocks and the capture UI feel "stuck" during counter / blockade chains.
+            chainPausedClockDisplay = null;
+            const d = computeClockDisplay(snap, {
+                currentTurn,
+                turnSeconds,
+                nowMs: Date.now(),
+            });
+            clockAEl.textContent = String(d.values.A);
+            clockBEl.textContent = String(d.values.B);
+            applyClockMode(clockAEl, d.modes.A);
+            applyClockMode(clockBEl, d.modes.B);
+            return;
         }
+        const gameOpen = isOpenGameState(snap, {
+            turnStartAnimation: turnResourceAnimBlocking,
+            effectAnimation: effectAnimBlocking,
+        });
+        if (!gameOpen) {
+            if (!chainPausedClockDisplay) {
+                chainPausedClockDisplay = computeClockDisplay(snap, {
+                    currentTurn,
+                    turnSeconds,
+                    nowMs: Date.now(),
+                });
+            }
+            clockAEl.textContent = String(chainPausedClockDisplay.values.A);
+            clockBEl.textContent = String(chainPausedClockDisplay.values.B);
+            applyClockMode(clockAEl, chainPausedClockDisplay.modes.A);
+            applyClockMode(clockBEl, chainPausedClockDisplay.modes.B);
+            return;
+        }
+        chainPausedClockDisplay = null;
+        const d = computeClockDisplay(snap, { currentTurn, turnSeconds, nowMs: Date.now() });
+        clockAEl.textContent = String(d.values.A);
+        clockBEl.textContent = String(d.values.B);
+        applyClockMode(clockAEl, d.modes.A);
+        applyClockMode(clockBEl, d.modes.B);
     }
 
     function turnSecondsFromSnapshot(payload) {
@@ -3471,6 +4145,7 @@ import {
     }
 
     function sendMove(from, to) {
+        if (!isGameplayInputOpen()) return;
         send("submit_move", {
             fromRow: from.row,
             fromCol: from.col,
@@ -3479,15 +4154,81 @@ import {
         });
     }
 
+    function pushClientTrace(entry) {
+        try {
+            clientTraceBuffer.push({ ts: new Date().toISOString(), ...entry });
+            if (clientTraceBuffer.length > CLIENT_TRACE_CAP) {
+                clientTraceBuffer.splice(0, clientTraceBuffer.length - CLIENT_TRACE_CAP);
+            }
+        } catch (_) {
+            /* ignore */
+        }
+    }
+
+    function flushClientTraceToServer() {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (!lastSnapshot?.adminDebugMatch || !joinedRoom) return;
+        if (clientTraceBuffer.length === 0) return;
+        const chunk = clientTraceBuffer.slice(-80);
+        let text;
+        try {
+            text = JSON.stringify(chunk);
+        } catch (_) {
+            text = `{"error":"serialize_failed"}`;
+        }
+        ws.send(JSON.stringify({ id: `req-${seq++}`, type: "client_trace", payload: { text } }));
+    }
+
+    function downloadClientTraceJson() {
+        let raw;
+        try {
+            raw = JSON.stringify(clientTraceBuffer, null, 2);
+        } catch (_) {
+            raw = "[]";
+        }
+        const blob = new Blob([raw], { type: "application/json" });
+        const a = document.createElement("a");
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        a.href = URL.createObjectURL(blob);
+        a.download = `power-chess-client-trace-${stamp}.json`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+
     function logEvent(obj) {
+        try {
+            pushClientTrace({ dir: "in", envelope: obj });
+        } catch (_) {
+            /* ignore */
+        }
         if (!eventsEl) return;
-        const line = JSON.stringify(obj);
-        eventsEl.textContent = `${line}\n${eventsEl.textContent}`.slice(0, 8000);
+        let line;
+        try {
+            line = JSON.stringify(obj, null, 2);
+        } catch (_) {
+            line = String(obj);
+        }
+        const cap = 32000;
+        const next = `${line}\n\n${eventsEl.textContent}`;
+        eventsEl.textContent = next.slice(0, cap);
     }
 
     function send(type, payload) {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        if (turnResourceAnimBlocking) return;
+        if (type !== "client_trace") {
+            try {
+                pushClientTrace({ dir: "out", type, payload: payload ?? null });
+            } catch (_) {
+                /* ignore */
+            }
+        }
+        const bypassTurnStartAnim =
+            type === "set_debug_pause" ||
+            type === "ping" ||
+            type === "pong" ||
+            type === "leave_match" ||
+            type === "client_trace";
+        if (turnResourceAnimBlocking && !bypassTurnStartAnim) return;
         ws.send(JSON.stringify({ id: `req-${seq++}`, type, payload }));
     }
 
@@ -3523,7 +4264,7 @@ import {
         const s = lastSnapshot;
         if (!s?.board || !gameStarted || s.matchEnded) return false;
         if (s.mulliganPhaseActive) return false;
-        if (turnResourceAnimBlocking) return false;
+        if (!isGameplayInputOpen()) return false;
         if (s.turnPlayer !== playerEl.value) return false;
         return true;
     }
@@ -3537,7 +4278,7 @@ import {
             svg.innerHTML = "";
             return;
         }
-        requestAnimationFrame(() => {
+        const paint = () => {
             if (!boardFrameEl || !captureThreatOverlayEl) return;
             const pcInner = lastSnapshot?.pendingCapture;
             if (!pcInner?.active) {
@@ -3554,6 +4295,7 @@ import {
                 svg.innerHTML = "";
                 return;
             }
+            void boardFrameEl.offsetWidth;
             const br = boardFrameEl.getBoundingClientRect();
             const w = Math.max(1, br.width);
             const h = Math.max(1, br.height);
@@ -3566,10 +4308,13 @@ import {
             const y1 = r1.top - br.top + r1.height / 2;
             const x2 = r2.left - br.left + r2.width / 2;
             const y2 = r2.top - br.top + r2.height / 2;
-            const mid = `capture-arrow-head`;
+            const mid = `capture-arrow-head-${Date.now()}`;
             const defs = `<defs><marker id="${mid}" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#dc2626"/></marker></defs>`;
             const line = `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#dc2626" stroke-width="3" stroke-linecap="round" marker-end="url(#${mid})" opacity="0.88"/>`;
             svg.innerHTML = defs + line;
+        };
+        requestAnimationFrame(() => {
+            requestAnimationFrame(paint);
         });
     }
 
@@ -4002,20 +4747,21 @@ import {
     function syncTurnFromSnapshot(payload) {
         if (!clocksActive(payload)) return;
         turnSeconds = turnSecondsFromSnapshot(payload);
+        if (payload.turnPlayer) currentTurn = payload.turnPlayer;
         const mainEnd = Number(payload?.turnMainDeadlineUnixMs);
-        const pausedMs = Number(payload?.turnMainPausedRemainingMs);
         if (Number.isFinite(mainEnd) && mainEnd > 0) {
             turnDeadline = mainEnd;
-            if (payload.turnPlayer) currentTurn = payload.turnPlayer;
             return;
         }
-        if (Number.isFinite(pausedMs) && pausedMs > 0) {
-            turnDeadline = Date.now() + pausedMs;
-            if (payload.turnPlayer) currentTurn = payload.turnPlayer;
-            return;
-        }
-        if (payload.turnPlayer && payload.turnPlayer !== currentTurn) {
+        const pausedMs = Number(payload?.turnMainPausedRemainingMs);
+        if (Number.isFinite(pausedMs) && pausedMs > 0 && payload.turnPlayer) {
             currentTurn = payload.turnPlayer;
+            // Keep local deadline aligned with the paused slice (avoids stale wall ms from
+            // before pause leaking into beginTurnResourceAnimFreeze or other turnDeadline readers).
+            turnDeadline = Date.now() + pausedMs;
+            return;
+        }
+        if (payload.turnPlayer) {
             turnDeadline = Date.now() + turnSeconds * 1000;
         }
     }
@@ -4062,6 +4808,10 @@ import {
     }
 
     function resetToLobbyUi() {
+        if (clientTraceMirrorTimerId) {
+            clearInterval(clientTraceMirrorTimerId);
+            clientTraceMirrorTimerId = null;
+        }
         joinedRoom = false;
         gameStarted = false;
         matchTestFixtureSent = false;
@@ -4092,6 +4842,8 @@ import {
         prevMatchEnded = false;
         hideMatchEndOverlay();
         hideOpponentDisconnectOverlay();
+        updateReactionPassButton(null);
+        updateDebugPauseButton(null);
         hideLobbyPrivatePasswordError();
         renderTurnClocks();
         startRoomListPolling();
@@ -4279,10 +5031,27 @@ import {
             }
         });
     }
+    if (exportClientTraceBtnEl) {
+        exportClientTraceBtnEl.addEventListener("click", () => downloadClientTraceJson());
+    }
     if (reactionModeSelectEl) {
         reactionModeSelectEl.addEventListener("change", () => {
             updateReactionModeLabel();
             if (joinedRoom) send("set_reaction_mode", { mode: reactionModeSelectEl.value });
+        });
+    }
+    if (reactionPassBtnEl) {
+        reactionPassBtnEl.addEventListener("click", () => {
+            if (!isGameplayInputOpen()) return;
+            if (!canPassReactionPriority(lastSnapshot, playerEl.value)) return;
+            send("resolve_reactions", {});
+        });
+    }
+    if (debugPauseBtnEl) {
+        debugPauseBtnEl.addEventListener("click", () => {
+            const snap = lastSnapshot;
+            if (!snap?.adminDebugMatch) return;
+            send("set_debug_pause", { paused: !snap.debugPauseActive });
         });
     }
     if (coordsInSquaresEl) {
