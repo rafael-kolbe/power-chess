@@ -1,0 +1,22 @@
+---
+description: Restrict git push to main/dev; only feature branches may be pushed without explicit approval
+alwaysApply: true
+---
+
+# Git — branches e push (autorização)
+
+## Regras obrigatórias
+
+1. **`main`**: **NUNCA** subir nada na branch `main` (`git push`, `--force`, merge com push, etc.) **sem autorização explícita por escrito** do mantenedor/usuário.
+2. **`dev`**: **Não** subir nada na branch `dev` **sem consentimento** explícito do usuário.
+3. **Branches de trabalho**: push automático/autónomo de código é **permitido apenas** em branches **`feature/<feature-name>`** (ou equivalente que o utilizador tenha indicado por escrito, por exemplo `fix/<nome>` se acordado).
+
+## O que fazer na prática
+
+- Preferir trabalhar e fazer push em `feature/<nome>`.
+- Se o utilizador pedir merge para `main` ou `dev`, **confirmar** que há autorização/consentimento por escrito antes de qualquer push a essas branches.
+- Se não houver certeza, **perguntar** em vez de assumir.
+
+## Rationale
+
+Evita alterações na linha principal ou na branch de integração sem alinhamento explícito com o dono do repositório.

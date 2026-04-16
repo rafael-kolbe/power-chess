@@ -27,7 +27,7 @@ func TestHandleAuthRegisterAndMe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("post register: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("register status %d", res.StatusCode)
 	}
@@ -73,7 +73,7 @@ func TestHandleAuthLoginReturnsToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("login status %d", res.StatusCode)
 	}
@@ -120,7 +120,7 @@ func TestHandleAuthRegisterConflictDuplicate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("post: %v", err)
 		}
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		return res.StatusCode
 	}
 	if c := reg("first@example.com"); c != http.StatusCreated {

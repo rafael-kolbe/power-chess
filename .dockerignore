@@ -37,6 +37,12 @@ coverage.out
 *.exe
 **/__debug_bin
 
+# Session + match debug logs under logs/ (e.g. logs/docker/server/*.log from compose bind mounts).
+# Excluded from *docker build context* only — image COPY steps never see these paths.
+# Compose still bind-mounts the repo: the server/postgres wrappers keep writing to the host tree at runtime.
+logs/
+logs/**
+
 # OS cruft
 .DS_Store
 Thumbs.db

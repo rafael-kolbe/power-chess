@@ -5,7 +5,7 @@
  * `go run ./cmd/export-card-metadata` or `go generate ./internal/gameplay`.
  *
  * PT uses fixed TCG terms: alvo, oponente, mana, ignição, recarga, slot de ignição, slot de recarga,
- * banir, mão, deck, cemitério.
+ * banir, mão, deck, captura (zona de peças capturadas).
  */
 
 /**
@@ -70,7 +70,7 @@ const PT = {
   "mind-control": {
     name: "Controle Mental",
     description:
-      "Alvo: uma peça que o oponente controla, exceto o rei ou uma dama, e assuma o controle dela por três turnos. Se a peça for capturada, mova-a para o cemitério do oponente.",
+      "Alvo: uma peça que o oponente controla, exceto o rei ou uma dama, e assuma o controle dela por três turnos. Se a peça for capturada, mova-a para a Captura do oponente.",
     example:
       "1. Você ativa \"Controle Mental\".\n2. A ignição resolve 2 turnos depois.\n3. O oponente controla uma torre em a1.\n4. Você assume o controle da torre em a1 por 3 turnos."
   },

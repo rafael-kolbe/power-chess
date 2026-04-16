@@ -134,14 +134,21 @@ func TestSnapshotIgnitionOwnerAndTurns(t *testing.T) {
 	}
 
 	snap := room.SnapshotForPlayer(gameplay.PlayerA)
-	if !snap.IgnitionOn {
-		t.Error("IgnitionOn should be true")
+	var hud *PlayerHUDState
+	for i := range snap.Players {
+		if snap.Players[i].PlayerID == "A" {
+			hud = &snap.Players[i]
+			break
+		}
 	}
-	if snap.IgnitionOwner != "A" {
-		t.Errorf("IgnitionOwner: want A, got %q", snap.IgnitionOwner)
+	if hud == nil {
+		t.Fatal("player A not in snapshot")
 	}
-	if snap.IgnitionTurnsRemaining <= 0 {
-		t.Errorf("IgnitionTurnsRemaining should be > 0, got %d", snap.IgnitionTurnsRemaining)
+	if !hud.IgnitionOn {
+		t.Error("player A IgnitionOn should be true")
+	}
+	if hud.IgnitionTurnsRemaining <= 0 {
+		t.Errorf("IgnitionTurnsRemaining should be > 0, got %d", hud.IgnitionTurnsRemaining)
 	}
 }
 
@@ -199,9 +206,9 @@ func TestDrawCardWebSocket(t *testing.T) {
 	}
 
 	cA := dial()
-	defer cA.Close()
+	defer func() { _ = cA.Close() }()
 	cB := dial()
-	defer cB.Close()
+	defer func() { _ = cB.Close() }()
 
 	send := func(c *websocket.Conn, env Envelope) {
 		raw, _ := EncodeEnvelope(env)

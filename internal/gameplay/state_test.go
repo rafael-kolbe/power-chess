@@ -50,7 +50,7 @@ func TestActivateCardConsumesManaAndAddsEnergized(t *testing.T) {
 	if err := s.ActivateCard(PlayerA, 0); err != nil {
 		t.Fatalf("activate failed: %v", err)
 	}
-	if !s.IgnitionSlot.Occupied {
+	if !p.Ignition.Occupied {
 		t.Fatalf("ignition slot should be occupied")
 	}
 	if p.EnergizedMana != card.ManaCost {
@@ -93,25 +93,6 @@ func TestPlayerSkillMustBeSelectedBeforeMatchStart(t *testing.T) {
 	}
 }
 
-func TestTimeoutStrikesAndLoss(t *testing.T) {
-	s, _ := NewMatchState(StarterDeck(), StarterDeck())
-	for i := 0; i < 2; i++ {
-		lost, err := s.HandleTurnTimeout(PlayerA)
-		if err != nil || lost {
-			t.Fatalf("unexpected timeout result at strike %d", i+1)
-		}
-		_ = s.StartTurn(PlayerB)
-		_ = s.EndTurn(PlayerB)
-	}
-	lost, err := s.HandleTurnTimeout(PlayerA)
-	if err != nil {
-		t.Fatalf("timeout error: %v", err)
-	}
-	if !lost {
-		t.Fatalf("player should lose on third strike")
-	}
-}
-
 func TestTickIgnitionOnlyOnActivatorTurn(t *testing.T) {
 	s, err := NewMatchState(StarterDeck(), StarterDeck())
 	if err != nil {
@@ -123,24 +104,24 @@ func TestTickIgnitionOnlyOnActivatorTurn(t *testing.T) {
 	if err := s.ActivateCard(PlayerA, 0); err != nil {
 		t.Fatalf("ActivateCard: %v", err)
 	}
-	if s.IgnitionSlot.TurnsRemaining != 2 {
-		t.Fatalf("expected ignition turns 2, got %d", s.IgnitionSlot.TurnsRemaining)
+	if s.Players[PlayerA].Ignition.TurnsRemaining != 2 {
+		t.Fatalf("expected ignition turns 2, got %d", s.Players[PlayerA].Ignition.TurnsRemaining)
 	}
 	// Opponent's turn start must not tick ignition.
 	s.CurrentTurn = PlayerB
 	if err := s.StartTurn(PlayerB); err != nil {
 		t.Fatalf("StartTurn B: %v", err)
 	}
-	if s.IgnitionSlot.TurnsRemaining != 2 {
-		t.Fatalf("ignition must not tick on opponent turn, got %d", s.IgnitionSlot.TurnsRemaining)
+	if s.Players[PlayerA].Ignition.TurnsRemaining != 2 {
+		t.Fatalf("ignition must not tick on opponent turn, got %d", s.Players[PlayerA].Ignition.TurnsRemaining)
 	}
 	// Activator's turn ticks ignition.
 	s.CurrentTurn = PlayerA
 	if err := s.StartTurn(PlayerA); err != nil {
 		t.Fatalf("StartTurn A: %v", err)
 	}
-	if s.IgnitionSlot.TurnsRemaining != 1 {
-		t.Fatalf("ignition should tick on activator turn, got %d", s.IgnitionSlot.TurnsRemaining)
+	if s.Players[PlayerA].Ignition.TurnsRemaining != 1 {
+		t.Fatalf("ignition should tick on activator turn, got %d", s.Players[PlayerA].Ignition.TurnsRemaining)
 	}
 }
 

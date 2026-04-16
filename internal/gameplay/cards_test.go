@@ -20,3 +20,22 @@ func TestStarterDeckHasDefaultDeckSize(t *testing.T) {
 		t.Fatalf("expected deck size %d, got %d", DefaultDeckSize, len(deck))
 	}
 }
+
+// TestMaybeCaptureAttemptOnIgnitionCatalogFalseUntilEffects asserts the catalog keeps
+// MaybeCaptureAttemptOnIgnition false until card resolvers apply ignition-driven captures.
+func TestMaybeCaptureAttemptOnIgnitionCatalogFalseUntilEffects(t *testing.T) {
+	for _, c := range InitialCardCatalog() {
+		if c.MaybeCaptureAttemptOnIgnition {
+			t.Fatalf("card %q: MaybeCaptureAttemptOnIgnition must remain false until ignition capture effects ship", c.ID)
+		}
+		if MaybeCaptureAttemptOnIgnition(c.ID) {
+			t.Fatalf("MaybeCaptureAttemptOnIgnition(%q) must be false for now", c.ID)
+		}
+	}
+	if MaybeCaptureAttemptOnIgnition("") {
+		t.Fatal("empty id must be false")
+	}
+	if MaybeCaptureAttemptOnIgnition("no-such-card") {
+		t.Fatal("unknown id must be false")
+	}
+}

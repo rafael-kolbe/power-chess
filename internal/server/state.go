@@ -26,15 +26,33 @@ type RoomSession struct {
 	seen               map[string]struct{}
 	connectedByPlayer  map[gameplay.PlayerID]int
 	disconnectTimers   map[gameplay.PlayerID]*time.Timer
-	disconnectDeadline map[gameplay.PlayerID]time.Time // when grace timer fires for that seat
-	DisconnectGrace    time.Duration
-	matchEnded         bool
-	winner             gameplay.PlayerID
-	endReason          string
-	reactionTimeout    time.Duration
-	reactionDeadline   time.Time
-	turnDeadline       time.Time
-	turnDeadlineFor    gameplay.PlayerID
+	disconnectDeadline map[gameplay.PlayerID]time.Time // wall-clock instant when disconnect win may be applied for that seat
+	// DisconnectGrace is deprecated: use DisconnectBudgetTotal. Kept for tests that set a long "grace" window.
+	DisconnectGrace time.Duration
+	// DisconnectBudgetTotal is cumulative wall-clock time a player may spend disconnected per match (default 60s).
+	DisconnectBudgetTotal time.Duration
+	// DisconnectMinWinDelay is the minimum time after disconnect detection before declaring a disconnect win (default 5s).
+	DisconnectMinWinDelay time.Duration
+	// disconnectBudgetRemaining is unused disconnect budget per seat for this match (drains while offline).
+	disconnectBudgetRemaining map[gameplay.PlayerID]time.Duration
+	// disconnectSegmentStart records when the current offline segment began (zero if seat is connected or not in segment).
+	disconnectSegmentStart map[gameplay.PlayerID]time.Time
+	// disconnectFrozenReactionRemaining preserves the reaction response deadline slice while exactly one player is offline.
+	disconnectFrozenReactionRemaining time.Duration
+	matchEnded                        bool
+	winner                            gameplay.PlayerID
+	endReason                         string
+	reactionTimeout                   time.Duration
+	reactionDeadline                  time.Time
+	// reactionBudgetA/B: per-player reaction time budget within the current turn.
+	// Both reset to reactionTimeout when a new turn starts.
+	reactionBudgetA time.Duration
+	reactionBudgetB time.Duration
+	// reactionDeadlineFor tracks which player the current reactionDeadline belongs to.
+	reactionDeadlineFor gameplay.PlayerID
+	// reactionBudgetRemaining carries leftover opponent reaction time across counter/ignite chain links
+	// (one shared budget per reaction window; see noteReactionChainStartedUnsafe).
+	reactionBudgetRemaining time.Duration
 	// mulliganDeadline is when the server auto-confirms any player who has not locked in (opening only).
 	mulliganDeadline  time.Time
 	postMatchDeadline time.Time
@@ -50,12 +68,24 @@ type RoomSession struct {
 	sleeveByPlayer map[gameplay.PlayerID]string
 	// deckMatchInitialized is true after the engine was built from saved decks for both connected players, or when loaded from persistence.
 	deckMatchInitialized bool
+	// reactionModeByPlayer stores each seat's preference: off / on / auto (see NormalizeReactionMode).
+	reactionModeByPlayer map[gameplay.PlayerID]string
+	// adminDebugMatch mirrors server-level ADMIN_DEBUG_MATCH for snapshot/UI capabilities.
+	adminDebugMatch bool
+	// clientFxHoldCount is nesting depth of client-reported visual-effect holds (each connected
+	// client should pair hold/release around the same animations so timers stay fair).
+	clientFxHoldCount int
+	// clientFxHoldStarted is when the outermost hold began (zero if clientFxHoldCount==0).
+	clientFxHoldStarted time.Time
 }
 
 const defaultRoomName = "Let's Play!"
 
 // mulliganPhaseDuration is the window for both players to confirm opening mulligan; unconfirmed seats auto-keep.
 const mulliganPhaseDuration = 15 * time.Second
+
+// maxClientFxHoldDepth caps nested client_fx_hold calls to limit abuse.
+const maxClientFxHoldDepth = 64
 
 // NewRoomSession creates a ready-to-use match engine bound to a room.
 func NewRoomSession(roomID string) (*RoomSession, error) {
@@ -76,6 +106,7 @@ func newRoomSessionWithEngine(roomID, roomName string, engine *match.Engine) *Ro
 	if strings.TrimSpace(roomName) == "" {
 		roomName = defaultRoomName
 	}
+	defaultBudget := 60 * time.Second
 	return &RoomSession{
 		RoomID:   roomID,
 		RoomName: roomName,
@@ -87,12 +118,19 @@ func newRoomSessionWithEngine(roomID, roomName string, engine *match.Engine) *Ro
 			gameplay.PlayerA: 0,
 			gameplay.PlayerB: 0,
 		},
-		disconnectTimers:   map[gameplay.PlayerID]*time.Timer{},
-		disconnectDeadline: map[gameplay.PlayerID]time.Time{},
-		DisconnectGrace:    60 * time.Second,
-		reactionTimeout:    10 * time.Second,
-		rematchVotes:       map[gameplay.PlayerID]bool{},
-		lastActivity:       time.Now().UTC(),
+		disconnectTimers:      map[gameplay.PlayerID]*time.Timer{},
+		disconnectDeadline:    map[gameplay.PlayerID]time.Time{},
+		DisconnectGrace:       defaultBudget,
+		DisconnectBudgetTotal: defaultBudget,
+		DisconnectMinWinDelay: 5 * time.Second,
+		disconnectBudgetRemaining: map[gameplay.PlayerID]time.Duration{
+			gameplay.PlayerA: defaultBudget,
+			gameplay.PlayerB: defaultBudget,
+		},
+		disconnectSegmentStart: nil,
+		reactionTimeout:        30 * time.Second,
+		rematchVotes:           map[gameplay.PlayerID]bool{},
+		lastActivity:           time.Now().UTC(),
 		displayNameByPlayer: map[gameplay.PlayerID]string{
 			gameplay.PlayerA: "",
 			gameplay.PlayerB: "",
@@ -106,6 +144,10 @@ func newRoomSessionWithEngine(roomID, roomName string, engine *match.Engine) *Ro
 			gameplay.PlayerB: "",
 		},
 		deckMatchInitialized: false,
+		reactionModeByPlayer: map[gameplay.PlayerID]string{
+			gameplay.PlayerA: ReactionModeOn,
+			gameplay.PlayerB: ReactionModeOn,
+		},
 	}
 }
 
@@ -135,7 +177,7 @@ func (r *RoomSession) Broadcast(env Envelope) {
 	r.clientsM.RLock()
 	defer r.clientsM.RUnlock()
 	for c := range r.clients {
-		c.send(env)
+		_ = c.send(env)
 	}
 }
 
@@ -153,6 +195,221 @@ func (r *RoomSession) MarkRequestOnce(requestKey string) bool {
 	}
 	r.seen[requestKey] = struct{}{}
 	return true
+}
+
+// reactionModeUnsafe returns the canonical reaction mode for pid. Caller must hold r.stateM.
+func (r *RoomSession) reactionModeUnsafe(pid gameplay.PlayerID) string {
+	if r.reactionModeByPlayer == nil {
+		return ReactionModeOn
+	}
+	m, ok := r.reactionModeByPlayer[pid]
+	if !ok || m == "" {
+		return ReactionModeOn
+	}
+	return m
+}
+
+// setReactionModeUnsafe stores the player's reaction preference. Caller must hold r.stateM.
+func (r *RoomSession) setReactionModeUnsafe(pid gameplay.PlayerID, mode string) {
+	if r.reactionModeByPlayer == nil {
+		r.reactionModeByPlayer = map[gameplay.PlayerID]string{
+			gameplay.PlayerA: ReactionModeOn,
+			gameplay.PlayerB: ReactionModeOn,
+		}
+	}
+	r.reactionModeByPlayer[pid] = NormalizeReactionMode(mode)
+}
+
+// maybeAutoResolveCaptureReactionUnsafe applies capture immediately when the responder's
+// reaction mode skips the window (off, or auto with no eligible opening response). Caller must hold r.stateM.
+func (r *RoomSession) maybeAutoResolveCaptureReactionUnsafe() error {
+	rw, stackSize, ok := r.Engine.ReactionWindowSnapshot()
+	if !ok || !rw.Open || rw.Trigger != "capture_attempt" || stackSize != 0 {
+		return nil
+	}
+	responder := oppositePlayer(rw.Actor)
+	switch r.reactionModeUnsafe(responder) {
+	case ReactionModeOn:
+		return nil
+	case ReactionModeAuto:
+		if gameplay.EligibleForCaptureReactionAUTO(r.Engine.State, responder) {
+			return nil
+		}
+	default: // off
+	}
+	if err := r.Engine.ResolveReactionStack(); err != nil {
+		return err
+	}
+	r.reactionDeadline = time.Time{}
+	r.reactionBudgetRemaining = 0
+	return nil
+}
+
+// maybeAutoResolveIgniteReactionUnsafe resolves an empty ignite_reaction window when the
+// opponent's reaction mode skips it (off, or auto with no eligible opening card).
+func (r *RoomSession) maybeAutoResolveIgniteReactionUnsafe() error {
+	rw, stackSize, ok := r.Engine.ReactionWindowSnapshot()
+	if !ok || !rw.Open || rw.Trigger != "ignite_reaction" || stackSize != 0 {
+		return nil
+	}
+	responder := oppositePlayer(rw.Actor)
+	switch r.reactionModeUnsafe(responder) {
+	case ReactionModeOn:
+		return nil
+	case ReactionModeAuto:
+		if gameplay.EligibleForIgniteReactionAUTO(r.Engine.State, responder) {
+			return nil
+		}
+	default:
+	}
+	if err := r.Engine.ResolveReactionStack(); err != nil {
+		return err
+	}
+	r.reactionDeadline = time.Time{}
+	r.reactionBudgetRemaining = 0
+	return nil
+}
+
+// maybeAutoFinalizeIgniteChainIfStuckUnsafe resolves a non-empty ignite_reaction stack when the
+// seat that must respond cannot legally extend the chain, or has reaction mode off, or (auto)
+// has no eligible follow-up. Caller must hold r.stateM.
+func (r *RoomSession) maybeAutoFinalizeIgniteChainIfStuckUnsafe() error {
+	rw, stackSize, ok := r.Engine.ReactionWindowSnapshot()
+	if !ok || !rw.Open || rw.Trigger != "ignite_reaction" || stackSize == 0 {
+		return nil
+	}
+	top, ok := r.Engine.ReactionStackTopSnapshot()
+	if !ok {
+		return nil
+	}
+	next := oppositePlayer(top.Owner)
+	mode := r.reactionModeUnsafe(next)
+	if mode == ReactionModeOn || mode == ReactionModeAuto {
+		if r.Engine.CanPlayerExtendIgniteChain(next) {
+			return nil
+		}
+	}
+	if err := r.Engine.ResolveReactionStack(); err != nil {
+		return err
+	}
+	r.reactionDeadline = time.Time{}
+	r.reactionBudgetRemaining = 0
+	return nil
+}
+
+// maybeAutoFinalizeCounterChainIfStuckUnsafe resolves a non-empty capture_attempt stack when the
+// seat that must respond cannot legally extend the chain under ignition/clear-card rules.
+// Caller must hold r.stateM.
+func (r *RoomSession) maybeAutoFinalizeCounterChainIfStuckUnsafe() error {
+	rw, stackSize, ok := r.Engine.ReactionWindowSnapshot()
+	if !ok || !rw.Open || rw.Trigger != "capture_attempt" || stackSize == 0 {
+		return nil
+	}
+	top, ok := r.Engine.ReactionStackTopSnapshot()
+	if !ok {
+		return nil
+	}
+	next := oppositePlayer(top.Owner)
+	mode := r.reactionModeUnsafe(next)
+	if mode == ReactionModeOn || mode == ReactionModeAuto {
+		if r.Engine.CanPlayerExtendCaptureReactionChain(next) {
+			return nil
+		}
+	}
+	if err := r.Engine.ResolveReactionStack(); err != nil {
+		return err
+	}
+	r.reactionDeadline = time.Time{}
+	r.reactionBudgetRemaining = 0
+	return nil
+}
+
+// noteReactionChainStartedUnsafe clears the reaction timeout while a non-empty stack is resolving.
+// Caller must hold r.stateM.
+func (r *RoomSession) noteReactionChainStartedUnsafe() {
+	now := time.Now()
+	if !r.reactionDeadline.IsZero() {
+		rem := r.reactionDeadline.Sub(now)
+		if rem < 0 {
+			rem = 0
+		}
+		if rem > 0 {
+			r.reactionBudgetRemaining = rem
+		}
+	}
+	r.reactionDeadline = time.Time{}
+}
+
+// beginClientFxHoldUnsafe records nested client-side FX blocking; timers do not expire until
+// matching releases drain the depth. Caller must hold r.stateM.
+func (r *RoomSession) beginClientFxHoldUnsafe(now time.Time) {
+	if r.matchEnded {
+		return
+	}
+	if r.clientFxHoldCount >= maxClientFxHoldDepth {
+		return
+	}
+	if r.clientFxHoldCount == 0 {
+		r.clientFxHoldStarted = now
+	}
+	r.clientFxHoldCount++
+}
+
+// endClientFxHoldUnsafe pops one FX hold level and shifts active deadlines by wall time elapsed
+// since the outermost hold began when the depth reaches zero. Caller must hold r.stateM.
+func (r *RoomSession) endClientFxHoldUnsafe(now time.Time) {
+	if r.clientFxHoldCount == 0 {
+		return
+	}
+	r.clientFxHoldCount--
+	if r.clientFxHoldCount > 0 {
+		return
+	}
+	started := r.clientFxHoldStarted
+	r.clientFxHoldStarted = time.Time{}
+	elapsed := now.Sub(started)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	r.shiftDeadlinesAfterClientFxHoldUnsafe(elapsed)
+}
+
+// shiftDeadlinesAfterClientFxHoldUnsafe moves absolute deadlines forward after wall time
+// was frozen (e.g. after client_fx_hold / client_fx_release).
+// Caller must hold r.stateM.
+func (r *RoomSession) shiftDeadlinesAfterClientFxHoldUnsafe(elapsed time.Duration) {
+	if elapsed <= 0 {
+		return
+	}
+	if !r.reactionDeadline.IsZero() {
+		r.reactionDeadline = r.reactionDeadline.Add(elapsed)
+	}
+	if !r.mulliganDeadline.IsZero() {
+		r.mulliganDeadline = r.mulliganDeadline.Add(elapsed)
+	}
+}
+
+// resetClientFxHoldUnsafe clears hold state without shifting deadlines (e.g. both seats dropped).
+// Caller must hold r.stateM.
+func (r *RoomSession) resetClientFxHoldUnsafe() {
+	r.clientFxHoldCount = 0
+	r.clientFxHoldStarted = time.Time{}
+}
+
+// flushClientFxHoldWallTimeUnsafe applies wall elapsed since the outermost hold began and clears
+// hold state. Used when one seat disconnects so frozen timeout evaluation does not strand deadlines.
+// Caller must hold r.stateM.
+func (r *RoomSession) flushClientFxHoldWallTimeUnsafe(now time.Time) {
+	if r.clientFxHoldCount == 0 || r.clientFxHoldStarted.IsZero() {
+		r.resetClientFxHoldUnsafe()
+		return
+	}
+	elapsed := now.Sub(r.clientFxHoldStarted)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	r.shiftDeadlinesAfterClientFxHoldUnsafe(elapsed)
+	r.resetClientFxHoldUnsafe()
 }
 
 // Snapshot builds a compact state payload for UI synchronization.
@@ -204,24 +461,18 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 		GameStarted:         (cA > 0 && cB > 0) || reconnectGrace,
 		MulliganPhaseActive: s.MulliganPhaseActive,
 		MulliganReturned:    mulliganReturned,
+		AdminDebugMatch:     r.adminDebugMatch,
 		TurnPlayer:          string(s.CurrentTurn),
-		TurnSeconds:         s.TurnSeconds,
 		TurnNumber:          s.TurnNumber,
-		IgnitionOn:          s.IgnitionSlot.Occupied,
 		ViewerPlayerID:      string(viewerPID),
 		Board:               board,
 		Players: []PlayerHUDState{
-			playerHUDState(gameplay.PlayerA, s.Players[gameplay.PlayerA], r.sleeveByPlayer[gameplay.PlayerA], viewerPID),
-			playerHUDState(gameplay.PlayerB, s.Players[gameplay.PlayerB], r.sleeveByPlayer[gameplay.PlayerB], viewerPID),
+			playerHUDState(gameplay.PlayerA, s.Players[gameplay.PlayerA], r.sleeveByPlayer[gameplay.PlayerA], viewerPID, r.reactionModeUnsafe(gameplay.PlayerA)),
+			playerHUDState(gameplay.PlayerB, s.Players[gameplay.PlayerB], r.sleeveByPlayer[gameplay.PlayerB], viewerPID, r.reactionModeUnsafe(gameplay.PlayerB)),
 		},
 	}
 	if s.MulliganPhaseActive && !r.mulliganDeadline.IsZero() {
 		payload.MulliganDeadlineUnixMs = r.mulliganDeadline.UnixMilli()
-	}
-	if s.IgnitionSlot.Occupied {
-		payload.IgnitionCard = string(s.IgnitionSlot.Card.CardID)
-		payload.IgnitionOwner = string(s.IgnitionSlot.ActivationOwner)
-		payload.IgnitionTurnsRemaining = s.IgnitionSlot.TurnsRemaining
 	}
 	ep := r.Engine.Chess.EnPassant
 	payload.EnPassant = EnPassantStateSnapshot{Valid: ep.Valid}
@@ -244,18 +495,30 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 			CardID: string(pe.CardID),
 		})
 	}
+	payload.ActivationQueueSize = len(s.ResolvedQueue)
 	if rw, stackSize, ok := r.Engine.ReactionWindowSnapshot(); ok {
 		eligible := make([]string, 0, len(rw.EligibleTypes))
 		for _, t := range rw.EligibleTypes {
 			eligible = append(eligible, string(t))
 		}
-		payload.ReactionWindow = ReactionWindowState{
+		rwPayload := ReactionWindowState{
 			Open:          rw.Open,
 			Trigger:       rw.Trigger,
 			Actor:         string(rw.Actor),
 			EligibleTypes: eligible,
 			StackSize:     stackSize,
 		}
+		if top, ok := r.Engine.ReactionStackTopSnapshot(); ok {
+			rwPayload.StagedCardID = string(top.Card.CardID)
+			rwPayload.StagedOwner = string(top.Owner)
+		}
+		for _, ent := range r.Engine.ReactionStackEntries() {
+			rwPayload.StackCards = append(rwPayload.StackCards, ReactionStackPreviewEntry{
+				CardID: string(ent.CardID),
+				Owner:  string(ent.Owner),
+			})
+		}
+		payload.ReactionWindow = rwPayload
 	}
 	if pm, ok := r.Engine.PendingMove(); ok {
 		payload.PendingCapture = PendingCaptureState{
@@ -296,32 +559,73 @@ func (r *RoomSession) SnapshotSafe() StateSnapshotPayload {
 	return r.Snapshot()
 }
 
-// SnapshotForPlayerSafe returns a player-specific snapshot under lock.
-func (r *RoomSession) SnapshotForPlayerSafe(viewerPID gameplay.PlayerID) StateSnapshotPayload {
-	r.stateM.Lock()
-	defer r.stateM.Unlock()
-	return r.SnapshotForPlayer(viewerPID)
+// broadcastActivateCardEvents sends server→client activate_card frames (effect resolution) to every client.
+func (r *RoomSession) broadcastActivateCardEvents(evts []match.ActivationFXEvent) {
+	if len(evts) == 0 {
+		return
+	}
+	r.clientsM.RLock()
+	defer r.clientsM.RUnlock()
+	for _, ev := range evts {
+		cardType := ""
+		if def, ok := gameplay.CardDefinitionByID(ev.CardID); ok {
+			cardType = strings.ToLower(string(def.Type))
+		}
+		env := Envelope{
+			Type: MessageActivateCard,
+			Payload: MustPayload(ActivateCardEventPayload{
+				PlayerID: string(ev.Owner),
+				CardID:   string(ev.CardID),
+				CardType: cardType,
+				Success:  ev.Success,
+			}),
+		}
+		for c := range r.clients {
+			_ = c.send(env)
+		}
+	}
 }
 
 // BroadcastSnapshot sends each connected client a snapshot tailored to their player seat.
 // Clients with no assigned seat receive a generic (no hand) snapshot.
 func (r *RoomSession) BroadcastSnapshot() {
 	r.stateM.Lock()
+	evts := r.Engine.PullActivationFXEvents()
 	snapA := r.SnapshotForPlayer(gameplay.PlayerA)
 	snapB := r.SnapshotForPlayer(gameplay.PlayerB)
 	snapGeneric := r.SnapshotForPlayer("")
 	r.stateM.Unlock()
+
+	r.broadcastActivateCardEvents(evts)
 
 	r.clientsM.RLock()
 	defer r.clientsM.RUnlock()
 	for c := range r.clients {
 		switch c.playerID {
 		case gameplay.PlayerA:
-			c.send(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(snapA)})
+			_ = c.send(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(snapA)})
 		case gameplay.PlayerB:
-			c.send(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(snapB)})
+			_ = c.send(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(snapB)})
 		default:
-			c.send(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(snapGeneric)})
+			_ = c.send(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(snapGeneric)})
+		}
+	}
+}
+
+// broadcastPrecomputedSnapshots sends pre-built player snapshots to all clients without pulling
+// activation FX events. Used to broadcast an intermediate state (staged reaction card) before
+// auto-finalization resolves the stack, so clients animate the card in the ignition zone.
+func (r *RoomSession) broadcastPrecomputedSnapshots(snapA, snapB, snapGeneric StateSnapshotPayload) {
+	r.clientsM.RLock()
+	defer r.clientsM.RUnlock()
+	for c := range r.clients {
+		switch c.playerID {
+		case gameplay.PlayerA:
+			_ = c.send(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(snapA)})
+		case gameplay.PlayerB:
+			_ = c.send(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(snapB)})
+		default:
+			_ = c.send(Envelope{Type: MessageStateSnapshot, Payload: MustPayload(snapGeneric)})
 		}
 	}
 }
@@ -337,22 +641,67 @@ func (r *RoomSession) EvaluateMatchOutcome() {
 func (r *RoomSession) ResolveReactionTimeoutIfExpired(now time.Time) (bool, error) {
 	r.stateM.Lock()
 	defer r.stateM.Unlock()
-	rw, _, ok := r.Engine.ReactionWindowSnapshot()
+	if r.clientFxHoldCount > 0 {
+		return false, nil
+	}
+	if r.connectedByPlayer[gameplay.PlayerA] == 0 || r.connectedByPlayer[gameplay.PlayerB] == 0 {
+		r.reactionDeadline = time.Time{}
+		r.reactionBudgetRemaining = 0
+		return false, nil
+	}
+	rw, stackSize, ok := r.Engine.ReactionWindowSnapshot()
 	if !ok || !rw.Open {
 		r.reactionDeadline = time.Time{}
+		r.reactionDeadlineFor = ""
+		r.reactionBudgetRemaining = 0
 		return false, nil
 	}
 	if r.reactionDeadline.IsZero() {
-		r.reactionDeadline = now.Add(r.reactionTimeout)
+		// noteReactionChainStartedUnsafe clears the deadline when the first reaction is queued.
+		// If we only arm reactionTimeout here, the room waits a full cycle even when the ignite
+		// chain cannot be extended and ResolveReactionStack should run immediately (same as
+		// maybeAutoFinalizeIgniteChainIfStuckUnsafe after queue_reaction).
+		if stackSize > 0 && rw.Trigger == "ignite_reaction" {
+			if err := r.maybeAutoFinalizeIgniteChainIfStuckUnsafe(); err != nil {
+				return false, err
+			}
+			rw2, _, ok2 := r.Engine.ReactionWindowSnapshot()
+			if !ok2 || !rw2.Open {
+				r.reactionDeadline = time.Time{}
+				r.reactionDeadlineFor = ""
+				r.reactionBudgetRemaining = 0
+				r.evaluateMatchOutcomeUnsafe()
+				return true, nil
+			}
+		}
+		if stackSize > 0 && rw.Trigger == "capture_attempt" {
+			if err := r.maybeAutoFinalizeCounterChainIfStuckUnsafe(); err != nil {
+				return false, err
+			}
+			rw2, _, ok2 := r.Engine.ReactionWindowSnapshot()
+			if !ok2 || !rw2.Open {
+				r.reactionDeadline = time.Time{}
+				r.reactionDeadlineFor = ""
+				r.reactionBudgetRemaining = 0
+				r.evaluateMatchOutcomeUnsafe()
+				return true, nil
+			}
+		}
+		responder := r.currentReactionResponder()
+		r.reactionDeadline = now.Add(r.reactionBudgetFor(responder))
+		r.reactionDeadlineFor = responder
 		return false, nil
 	}
 	if now.Before(r.reactionDeadline) {
 		return false, nil
 	}
+	// Timeout expired — resolve immediately.
 	if err := r.Engine.ResolveReactionStack(); err != nil {
 		return false, err
 	}
 	r.reactionDeadline = time.Time{}
+	r.reactionDeadlineFor = ""
+	r.reactionBudgetRemaining = 0
 	r.evaluateMatchOutcomeUnsafe()
 	return true, nil
 }
@@ -430,7 +779,9 @@ func (r *RoomSession) shutdownTimers() {
 	r.stateM.Lock()
 	defer r.stateM.Unlock()
 	for _, tm := range r.disconnectTimers {
-		tm.Stop()
+		if tm != nil {
+			tm.Stop()
+		}
 	}
 	r.disconnectTimers = map[gameplay.PlayerID]*time.Timer{}
 	r.disconnectDeadline = map[gameplay.PlayerID]time.Time{}
@@ -458,20 +809,95 @@ func (r *RoomSession) SetPlayerDisplayNameUnsafe(pid gameplay.PlayerID, name str
 	r.displayNameByPlayer[pid] = strings.TrimSpace(name)
 }
 
+// ensureDisconnectBudgetMapsUnsafe initializes per-seat disconnect budget maps when nil.
+func (r *RoomSession) ensureDisconnectBudgetMapsUnsafe() {
+	total := r.effectiveDisconnectBudgetTotal()
+	if r.disconnectBudgetRemaining == nil {
+		r.disconnectBudgetRemaining = map[gameplay.PlayerID]time.Duration{
+			gameplay.PlayerA: total,
+			gameplay.PlayerB: total,
+		}
+	}
+	if r.disconnectSegmentStart == nil {
+		r.disconnectSegmentStart = map[gameplay.PlayerID]time.Time{}
+	}
+}
+
+// effectiveDisconnectBudgetTotal returns the configured match-wide disconnect budget per player.
+func (r *RoomSession) effectiveDisconnectBudgetTotal() time.Duration {
+	if r.DisconnectBudgetTotal > 0 {
+		return r.DisconnectBudgetTotal
+	}
+	if r.DisconnectGrace > 0 {
+		return r.DisconnectGrace
+	}
+	return 60 * time.Second
+}
+
+// effectiveDisconnectMinWinDelay returns the minimum delay after disconnect before a disconnect win.
+func (r *RoomSession) effectiveDisconnectMinWinDelay() time.Duration {
+	if r.DisconnectMinWinDelay > 0 {
+		return r.DisconnectMinWinDelay
+	}
+	return 5 * time.Second
+}
+
+// endDisconnectSegmentUnsafe subtracts wall time since disconnectSegmentStart[pid] from budget and clears the segment.
+func (r *RoomSession) endDisconnectSegmentUnsafe(pid gameplay.PlayerID, now time.Time) {
+	if r.disconnectSegmentStart == nil {
+		return
+	}
+	t0, ok := r.disconnectSegmentStart[pid]
+	if !ok || t0.IsZero() {
+		return
+	}
+	spent := now.Sub(t0)
+	r.disconnectBudgetRemaining[pid] -= spent
+	if r.disconnectBudgetRemaining[pid] < 0 {
+		r.disconnectBudgetRemaining[pid] = 0
+	}
+	r.disconnectSegmentStart[pid] = time.Time{}
+}
+
 // RegisterPlayerConnection marks player as connected and clears pending disconnect timeout.
 func (r *RoomSession) RegisterPlayerConnection(pid gameplay.PlayerID) {
 	r.stateM.Lock()
 	defer r.stateM.Unlock()
-	r.lastActivity = time.Now().UTC()
+	now := time.Now().UTC()
+	r.lastActivity = now
+	r.ensureDisconnectBudgetMapsUnsafe()
+	r.endDisconnectSegmentUnsafe(pid, now)
 	r.connectedByPlayer[pid]++
-	if timer, ok := r.disconnectTimers[pid]; ok {
+	if timer, ok := r.disconnectTimers[pid]; ok && timer != nil {
 		timer.Stop()
 		delete(r.disconnectTimers, pid)
 	}
 	delete(r.disconnectDeadline, pid)
 	if r.connectedByPlayer[gameplay.PlayerA] > 0 && r.connectedByPlayer[gameplay.PlayerB] > 0 {
-		r.resetTurnDeadlineUnsafe(time.Now())
+		r.resumeReactionDeadlineAfterReconnectUnsafe(now)
 	}
+}
+
+// freezeReactionDeadlineForDisconnectUnsafe snapshots the reaction response deadline before pausing for a single-side disconnect.
+func (r *RoomSession) freezeReactionDeadlineForDisconnectUnsafe(now time.Time) {
+	r.disconnectFrozenReactionRemaining = 0
+	if !r.reactionDeadline.IsZero() && now.Before(r.reactionDeadline) {
+		r.disconnectFrozenReactionRemaining = r.reactionDeadline.Sub(now)
+	}
+	r.reactionDeadline = time.Time{}
+}
+
+// resumeReactionDeadlineAfterReconnectUnsafe restores the reaction deadline frozen during disconnect.
+func (r *RoomSession) resumeReactionDeadlineAfterReconnectUnsafe(now time.Time) {
+	if r.disconnectFrozenReactionRemaining > 0 {
+		r.reactionDeadline = now.Add(r.disconnectFrozenReactionRemaining)
+		r.disconnectFrozenReactionRemaining = 0
+	}
+}
+
+// clearDisconnectFrozenUnsafe drops any in-memory disconnect freeze (match end, leave, or reset).
+func (r *RoomSession) clearDisconnectFrozenUnsafe() {
+	r.disconnectFrozenReactionRemaining = 0
 }
 
 // HandlePlayerDisconnect marks player as disconnected and applies timeout-based match ending rules.
@@ -491,7 +917,8 @@ func (r *RoomSession) HandlePlayerDisconnect(pid gameplay.PlayerID) {
 	aConnected := r.connectedByPlayer[gameplay.PlayerA] > 0
 	bConnected := r.connectedByPlayer[gameplay.PlayerB] > 0
 	if !aConnected && !bConnected {
-		r.turnDeadline = time.Time{}
+		r.resetClientFxHoldUnsafe()
+		r.clearDisconnectFrozenUnsafe()
 		r.evaluateMatchOutcomeUnsafe()
 		if !r.matchEnded {
 			r.cancelMatchNoWinner()
@@ -499,7 +926,9 @@ func (r *RoomSession) HandlePlayerDisconnect(pid gameplay.PlayerID) {
 		return
 	}
 	if (pid == gameplay.PlayerA && bConnected) || (pid == gameplay.PlayerB && aConnected) {
-		r.turnDeadline = time.Time{}
+		now := time.Now().UTC()
+		r.flushClientFxHoldWallTimeUnsafe(now)
+		r.freezeReactionDeadlineForDisconnectUnsafe(now)
 		r.scheduleDisconnectTimeout(pid)
 	}
 }
@@ -513,18 +942,22 @@ func (r *RoomSession) HandlePlayerLeave(pid gameplay.PlayerID) {
 
 func (r *RoomSession) handlePlayerLeaveUnsafe(pid gameplay.PlayerID) {
 	r.lastActivity = time.Now().UTC()
+	r.resetClientFxHoldUnsafe()
+	r.clearDisconnectFrozenUnsafe()
 	if r.connectedByPlayer[pid] > 0 {
 		r.connectedByPlayer[pid]--
 	}
 	if r.connectedByPlayer[pid] == 0 {
 		r.SetPlayerDisplayNameUnsafe(pid, "")
 	}
-	r.turnDeadline = time.Time{}
-	if timer, ok := r.disconnectTimers[pid]; ok {
+	if timer, ok := r.disconnectTimers[pid]; ok && timer != nil {
 		timer.Stop()
 		delete(r.disconnectTimers, pid)
 	}
 	delete(r.disconnectDeadline, pid)
+	if r.disconnectSegmentStart != nil {
+		r.disconnectSegmentStart[pid] = time.Time{}
+	}
 	if r.matchEnded {
 		return
 	}
@@ -552,6 +985,9 @@ func (r *RoomSession) startMulliganDeadlineUnsafe(now time.Time) {
 func (r *RoomSession) ResolveMulliganTimeoutIfExpired(now time.Time) (bool, error) {
 	r.stateM.Lock()
 	defer r.stateM.Unlock()
+	if r.clientFxHoldCount > 0 {
+		return false, nil
+	}
 	if r.matchEnded || !r.Engine.State.MulliganPhaseActive {
 		r.mulliganDeadline = time.Time{}
 		return false, nil
@@ -576,96 +1012,68 @@ func (r *RoomSession) ResolveMulliganTimeoutIfExpired(now time.Time) (bool, erro
 		}
 	}
 	r.mulliganDeadline = time.Time{}
+	if !r.Engine.State.MulliganPhaseActive {
+		r.resetReactionBudgetsUnsafe()
+	}
 	r.lastActivity = now.UTC()
 	return true, nil
 }
 
-// ResolveTurnTimeoutIfExpired applies strike+turn-pass when current turn timer expires.
-func (r *RoomSession) ResolveTurnTimeoutIfExpired(now time.Time) (bool, error) {
-	r.stateM.Lock()
-	defer r.stateM.Unlock()
-	if r.matchEnded {
-		r.turnDeadline = time.Time{}
-		return false, nil
-	}
-	if r.Engine.State.MulliganPhaseActive {
-		r.turnDeadline = time.Time{}
-		return false, nil
-	}
-	if r.connectedByPlayer[gameplay.PlayerA] == 0 || r.connectedByPlayer[gameplay.PlayerB] == 0 {
-		r.turnDeadline = time.Time{}
-		return false, nil
-	}
-	cur := r.Engine.State.CurrentTurn
-	if r.turnDeadline.IsZero() || r.turnDeadlineFor != cur {
-		r.resetTurnDeadlineUnsafe(now)
-		return false, nil
-	}
-	if now.Before(r.turnDeadline) {
-		return false, nil
-	}
-	lost, err := r.Engine.State.HandleTurnTimeout(cur)
-	if err != nil {
-		return false, err
-	}
-	if lost {
-		r.matchEnded = true
-		r.winner = oppositePlayer(cur)
-		r.endReason = "strike_limit"
-		r.startPostMatchWindowUnsafe()
-		r.turnDeadline = time.Time{}
-		r.lastActivity = now.UTC()
-		return true, nil
-	}
-	if err := r.Engine.StartTurn(r.Engine.State.CurrentTurn); err != nil {
-		return false, err
-	}
-	r.Engine.Chess.Turn = toChessColor(r.Engine.State.CurrentTurn)
-	r.resetTurnDeadlineUnsafe(now)
-	r.lastActivity = now.UTC()
-	return true, nil
-}
-
-func (r *RoomSession) resetTurnDeadlineUnsafe(now time.Time) {
-	seconds := r.Engine.State.TurnSeconds
-	if seconds <= 0 {
-		seconds = gameplay.DefaultTurnSeconds
-	}
-	r.turnDeadlineFor = r.Engine.State.CurrentTurn
-	r.turnDeadline = now.Add(time.Duration(seconds) * time.Second)
-}
-
-func toChessColor(pid gameplay.PlayerID) chess.Color {
-	if pid == gameplay.PlayerA {
-		return chess.White
-	}
-	return chess.Black
+func (r *RoomSession) resetReactionBudgetsUnsafe() {
+	// Reset per-player reaction budgets for the new turn.
+	r.reactionBudgetA = r.reactionTimeout
+	r.reactionBudgetB = r.reactionTimeout
+	r.reactionDeadlineFor = ""
+	r.reactionBudgetRemaining = 0
 }
 
 func (r *RoomSession) cancelMatchNoWinner() {
+	r.clearDisconnectFrozenUnsafe()
 	r.endReason = "both_disconnected_cancelled"
 	r.matchEnded = true
 	r.winner = ""
 	r.startPostMatchWindowUnsafe()
 	r.lastActivity = time.Now().UTC()
 	for _, tm := range r.disconnectTimers {
-		tm.Stop()
+		if tm != nil {
+			tm.Stop()
+		}
 	}
 	r.disconnectTimers = map[gameplay.PlayerID]*time.Timer{}
 	r.disconnectDeadline = map[gameplay.PlayerID]time.Time{}
+	if r.disconnectSegmentStart != nil {
+		r.disconnectSegmentStart[gameplay.PlayerA] = time.Time{}
+		r.disconnectSegmentStart[gameplay.PlayerB] = time.Time{}
+	}
 }
 
 func (r *RoomSession) scheduleDisconnectTimeout(pid gameplay.PlayerID) {
-	if timer, ok := r.disconnectTimers[pid]; ok {
+	r.ensureDisconnectBudgetMapsUnsafe()
+	if timer, ok := r.disconnectTimers[pid]; ok && timer != nil {
 		timer.Stop()
 	}
-	grace := r.DisconnectGrace
-	deadline := time.Now().Add(grace)
+	now := time.Now()
 	if r.disconnectDeadline == nil {
 		r.disconnectDeadline = make(map[gameplay.PlayerID]time.Time)
 	}
-	r.disconnectDeadline[pid] = deadline
-	r.disconnectTimers[pid] = time.AfterFunc(grace, func() {
+	budget := r.disconnectBudgetRemaining[pid]
+	minD := r.effectiveDisconnectMinWinDelay()
+	graceEnd := now.Add(minD)
+	budgetEnd := now.Add(budget)
+	winAt := graceEnd
+	if budgetEnd.After(graceEnd) {
+		winAt = budgetEnd
+	}
+	if budget <= 0 {
+		winAt = graceEnd
+	}
+	r.disconnectSegmentStart[pid] = now
+	r.disconnectDeadline[pid] = winAt
+	dur := winAt.Sub(now)
+	if dur < 0 {
+		dur = 0
+	}
+	r.disconnectTimers[pid] = time.AfterFunc(dur, func() {
 		r.stateM.Lock()
 		defer r.stateM.Unlock()
 		delete(r.disconnectDeadline, pid)
@@ -676,6 +1084,7 @@ func (r *RoomSession) scheduleDisconnectTimeout(pid gameplay.PlayerID) {
 		if r.connectedByPlayer[winner] == 0 {
 			return
 		}
+		r.endDisconnectSegmentUnsafe(pid, time.Now().UTC())
 		r.matchEnded = true
 		r.winner = winner
 		r.endReason = "disconnect_timeout"
@@ -698,7 +1107,9 @@ func (r *RoomSession) StayInRoomAfterMatch(pid gameplay.PlayerID) error {
 	if total != 1 {
 		return fmt.Errorf("stay action requires exactly one connected player")
 	}
-	r.resetForNewMatchUnsafe()
+	if err := r.resetForNewMatchUnsafe(); err != nil {
+		return err
+	}
 	r.connectedByPlayer[pid] = 1
 	r.connectedByPlayer[oppositePlayer(pid)] = 0
 	r.lastActivity = time.Now().UTC()
@@ -723,7 +1134,10 @@ func (r *RoomSession) RequestRematch(pid gameplay.PlayerID) (bool, error) {
 	r.lastActivity = time.Now().UTC()
 	if r.rematchVotes[gameplay.PlayerA] && r.rematchVotes[gameplay.PlayerB] {
 		r.swapConnectedPlayerSidesUnsafe()
-		r.resetForNewMatchUnsafe()
+		if err := r.resetForNewMatchUnsafe(); err != nil {
+			r.rematchVotes = map[gameplay.PlayerID]bool{}
+			return false, err
+		}
 		return true, nil
 	}
 	return false, nil
@@ -741,14 +1155,37 @@ func (r *RoomSession) swapConnectedPlayerSidesUnsafe() {
 	connectedB := r.connectedByPlayer[gameplay.PlayerB]
 	r.connectedByPlayer[gameplay.PlayerA] = connectedB
 	r.connectedByPlayer[gameplay.PlayerB] = connectedA
-	timerA := r.disconnectTimers[gameplay.PlayerA]
-	timerB := r.disconnectTimers[gameplay.PlayerB]
-	r.disconnectTimers[gameplay.PlayerA] = timerB
-	r.disconnectTimers[gameplay.PlayerB] = timerA
-	ddA := r.disconnectDeadline[gameplay.PlayerA]
-	ddB := r.disconnectDeadline[gameplay.PlayerB]
-	r.disconnectDeadline[gameplay.PlayerA] = ddB
-	r.disconnectDeadline[gameplay.PlayerB] = ddA
+	timerA, okTA := r.disconnectTimers[gameplay.PlayerA]
+	timerB, okTB := r.disconnectTimers[gameplay.PlayerB]
+	delete(r.disconnectTimers, gameplay.PlayerA)
+	delete(r.disconnectTimers, gameplay.PlayerB)
+	if okTB && timerB != nil {
+		r.disconnectTimers[gameplay.PlayerA] = timerB
+	}
+	if okTA && timerA != nil {
+		r.disconnectTimers[gameplay.PlayerB] = timerA
+	}
+	ddA, okDA := r.disconnectDeadline[gameplay.PlayerA]
+	ddB, okDB := r.disconnectDeadline[gameplay.PlayerB]
+	delete(r.disconnectDeadline, gameplay.PlayerA)
+	delete(r.disconnectDeadline, gameplay.PlayerB)
+	if okDB {
+		r.disconnectDeadline[gameplay.PlayerA] = ddB
+	}
+	if okDA {
+		r.disconnectDeadline[gameplay.PlayerB] = ddA
+	}
+	r.ensureDisconnectBudgetMapsUnsafe()
+	ba := r.disconnectBudgetRemaining[gameplay.PlayerA]
+	bb := r.disconnectBudgetRemaining[gameplay.PlayerB]
+	r.disconnectBudgetRemaining[gameplay.PlayerA] = bb
+	r.disconnectBudgetRemaining[gameplay.PlayerB] = ba
+	if r.disconnectSegmentStart != nil {
+		sa := r.disconnectSegmentStart[gameplay.PlayerA]
+		sb := r.disconnectSegmentStart[gameplay.PlayerB]
+		r.disconnectSegmentStart[gameplay.PlayerA] = sb
+		r.disconnectSegmentStart[gameplay.PlayerB] = sa
+	}
 	nameA := r.displayNameByPlayer[gameplay.PlayerA]
 	nameB := r.displayNameByPlayer[gameplay.PlayerB]
 	r.displayNameByPlayer[gameplay.PlayerA] = nameB
@@ -761,17 +1198,40 @@ func (r *RoomSession) swapConnectedPlayerSidesUnsafe() {
 	}
 }
 
-func (r *RoomSession) resetForNewMatchUnsafe() {
-	r.resetMatchEngineFromSavedDecksUnsafe(r.parent)
+func (r *RoomSession) resetForNewMatchUnsafe() error {
+	if err := r.resetMatchEngineFromSavedDecksUnsafe(r.parent); err != nil {
+		return err
+	}
 	r.matchEnded = false
 	r.winner = ""
 	r.endReason = ""
 	r.postMatchDeadline = time.Time{}
 	r.rematchVotes = map[gameplay.PlayerID]bool{}
-	r.turnDeadline = time.Time{}
-	r.turnDeadlineFor = ""
 	r.reactionDeadline = time.Time{}
+	r.reactionDeadlineFor = ""
+	r.reactionBudgetA = 0
+	r.reactionBudgetB = 0
+	r.reactionBudgetRemaining = 0
 	r.mulliganDeadline = time.Time{}
+	r.reactionModeByPlayer = map[gameplay.PlayerID]string{
+		gameplay.PlayerA: ReactionModeOn,
+		gameplay.PlayerB: ReactionModeOn,
+	}
+	for _, tm := range r.disconnectTimers {
+		if tm != nil {
+			tm.Stop()
+		}
+	}
+	r.disconnectTimers = map[gameplay.PlayerID]*time.Timer{}
+	r.disconnectDeadline = map[gameplay.PlayerID]time.Time{}
+	total := r.effectiveDisconnectBudgetTotal()
+	r.ensureDisconnectBudgetMapsUnsafe()
+	r.disconnectBudgetRemaining[gameplay.PlayerA] = total
+	r.disconnectBudgetRemaining[gameplay.PlayerB] = total
+	r.disconnectSegmentStart[gameplay.PlayerA] = time.Time{}
+	r.disconnectSegmentStart[gameplay.PlayerB] = time.Time{}
+	r.clearDisconnectFrozenUnsafe()
+	return nil
 }
 
 // ShouldForceClosePostMatch reports if post-match idle deadline elapsed.
@@ -802,6 +1262,84 @@ func oppositePlayer(pid gameplay.PlayerID) gameplay.PlayerID {
 		return gameplay.PlayerB
 	}
 	return gameplay.PlayerA
+}
+
+// reactionBudgetFor returns the remaining reaction budget for the given player.
+// Falls back to reactionTimeout when the budget is zero.
+func (r *RoomSession) reactionBudgetFor(pid gameplay.PlayerID) time.Duration {
+	switch pid {
+	case gameplay.PlayerA:
+		if r.reactionBudgetA > 0 {
+			return r.reactionBudgetA
+		}
+	case gameplay.PlayerB:
+		if r.reactionBudgetB > 0 {
+			return r.reactionBudgetB
+		}
+	}
+	return r.reactionTimeout
+}
+
+// saveBudgetForPlayer saves remaining reaction time to the appropriate per-player budget field.
+func (r *RoomSession) saveBudgetForPlayer(pid gameplay.PlayerID, rem time.Duration) {
+	switch pid {
+	case gameplay.PlayerA:
+		r.reactionBudgetA = rem
+	case gameplay.PlayerB:
+		r.reactionBudgetB = rem
+	}
+}
+
+// currentReactionResponder returns the player who should respond in the current reaction window.
+func (r *RoomSession) currentReactionResponder() gameplay.PlayerID {
+	rw, stackSize, ok := r.Engine.ReactionWindowSnapshot()
+	if !ok || !rw.Open {
+		return ""
+	}
+	if stackSize == 0 {
+		return oppositePlayer(rw.Actor)
+	}
+	if top, okTop := r.Engine.ReactionStackTopSnapshot(); okTop {
+		return oppositePlayer(top.Owner)
+	}
+	return oppositePlayer(rw.Actor)
+}
+
+// NoteReactionChainExtendedUnsafe saves the former responder's remaining budget, clears the
+// current deadline, and arms a new deadline for the new responder (after the card was queued).
+// Call this under stateM after QueueReactionCard succeeds.
+func (r *RoomSession) NoteReactionChainExtendedUnsafe(now time.Time) {
+	// Save remaining time for whoever was on the clock.
+	if !r.reactionDeadline.IsZero() && r.reactionDeadlineFor != "" {
+		rem := r.reactionDeadline.Sub(now)
+		if rem < 0 {
+			rem = 0
+		}
+		r.saveBudgetForPlayer(r.reactionDeadlineFor, rem)
+	}
+	// Clear old deadline.
+	r.reactionDeadline = time.Time{}
+	r.reactionDeadlineFor = ""
+	// Arm a new deadline for the new responder.
+	newResponder := r.currentReactionResponder()
+	if newResponder != "" {
+		r.reactionDeadline = now.Add(r.reactionBudgetFor(newResponder))
+		r.reactionDeadlineFor = newResponder
+	}
+}
+
+// NoteReactionResolvedUnsafe saves the former responder's remaining budget when reactions are
+// manually resolved (player clicks "resolve"). Call under stateM before clearing the deadline.
+func (r *RoomSession) NoteReactionResolvedUnsafe(now time.Time) {
+	if !r.reactionDeadline.IsZero() && r.reactionDeadlineFor != "" {
+		rem := r.reactionDeadline.Sub(now)
+		if rem < 0 {
+			rem = 0
+		}
+		r.saveBudgetForPlayer(r.reactionDeadlineFor, rem)
+	}
+	r.reactionDeadline = time.Time{}
+	r.reactionDeadlineFor = ""
 }
 
 // joinSeat returns pid if that seat is free for a new connection, or an error while a reconnect grace timer is waiting for the same seat.
@@ -887,8 +1425,9 @@ func graveyardPieceImportance(code string) int {
 
 // playerHUDState converts internal player state to transport-friendly HUD data.
 // sleeve is the player's chosen sleeve color; viewerPID restricts which hand is included.
-func playerHUDState(pid gameplay.PlayerID, p *gameplay.PlayerState, sleeve string, viewerPID gameplay.PlayerID) PlayerHUDState {
-	// Build the full cooldown list (all entries sent; frontend picks first 4 for inline display).
+// reactionMode is off / on / auto for that seat.
+func playerHUDState(pid gameplay.PlayerID, p *gameplay.PlayerState, sleeve string, viewerPID gameplay.PlayerID, reactionMode string) PlayerHUDState {
+	// Full cooldown queue in preview (UI overlaps cards like the hand; no separate +N overflow tile).
 	preview := make([]CooldownPreviewEntry, 0, len(p.Cooldowns))
 	for _, cd := range p.Cooldowns {
 		preview = append(preview, CooldownPreviewEntry{
@@ -898,10 +1437,6 @@ func playerHUDState(pid gameplay.PlayerID, p *gameplay.PlayerState, sleeve strin
 			Cooldown:       cd.Card.Cooldown,
 			TurnsRemaining: cd.TurnsRemaining,
 		})
-	}
-	hidden := 0
-	if len(preview) > 4 {
-		hidden = len(preview) - 4
 	}
 
 	// Build banished card list (most recently banished first).
@@ -937,13 +1472,18 @@ func playerHUDState(pid gameplay.PlayerID, p *gameplay.PlayerState, sleeve strin
 		HandCount:           len(p.Hand),
 		CooldownCount:       len(p.Cooldowns),
 		GraveyardCount:      len(p.Graveyard),
-		Strikes:             p.Strikes,
 		DeckCount:           len(p.Deck),
 		SleeveColor:         DefaultSleeveColor(sleeve),
 		BanishedCards:       banished,
 		GraveyardPieces:     graveyard,
 		CooldownPreview:     preview,
-		CooldownHiddenCount: hidden,
+		CooldownHiddenCount: 0,
+		ReactionMode:        reactionMode,
+	}
+	if p.Ignition.Occupied {
+		hud.IgnitionOn = true
+		hud.IgnitionCard = string(p.Ignition.Card.CardID)
+		hud.IgnitionTurnsRemaining = p.Ignition.TurnsRemaining
 	}
 
 	// Include hand only for the owning player.

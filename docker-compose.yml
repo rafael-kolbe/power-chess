@@ -6,8 +6,13 @@ services:
     container_name: power-chess-server
     env_file:
       - .env
+    environment:
+      POWER_CHESS_SESSION_LOG_DIR: /var/log/power-chess
+      POWER_CHESS_SESSION_LOG_KEEP: ${POWER_CHESS_SESSION_LOG_KEEP:-5}
     ports:
       - "8080:8080"
+    volumes:
+      - ./logs/docker/server:/var/log/power-chess
     depends_on:
       postgres:
         condition: service_healthy
@@ -19,6 +24,8 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: powerchess
+      POWER_CHESS_SESSION_LOG_DIR: /var/log/power-chess
+      POWER_CHESS_SESSION_LOG_KEEP: ${POWER_CHESS_SESSION_LOG_KEEP:-5}
     ports:
       - "5433:5432"
     healthcheck:
@@ -28,6 +35,12 @@ services:
       retries: 20
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./logs/docker/postgres:/var/log/power-chess
+      - ./scripts/session-log-wrap.sh:/session-log-wrap.sh:ro
+    entrypoint: ["/bin/sh", "/session-log-wrap.sh"]
+    command:
+      - /usr/local/bin/docker-entrypoint.sh
+      - postgres
 
 volumes:
   pgdata:

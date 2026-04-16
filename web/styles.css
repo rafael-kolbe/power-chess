@@ -30,7 +30,7 @@
   /* Single rhythm for playmat: column grid, zone pairs, hand row, stacks */
   --pm-gutter: 8px;
   --pm-hand-gap: var(--pm-gutter);
-  /* Minimum gap between adjacent cards in hand / cooldown / banish / cemetery piles while they fit; tighter overlap when not. */
+  /* Minimum gap between adjacent cards in hand / cooldown / banish / capture-zone piles while they fit; tighter overlap when not. */
   --pm-card-spread-gap: 5px;
   /* Deck row: third column width (DRAW / invisible placeholder) for space-evenly alignment */
   --pm-deck-draw-slot: clamp(2.75rem, 10vmin, 4.75rem);
@@ -113,6 +113,52 @@ body:has(#gameShell:not(.hidden)) .match-header-row button {
   margin: 0;
   opacity: 0.65;
   accent-color: #6a9ab8;
+}
+
+.match-header-tool__select {
+  flex-shrink: 0;
+  max-width: 7.5rem;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: inherit;
+  color: rgb(220 230 245 / 92%);
+  background: rgb(12 14 18 / 90%);
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#reactionPassBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 86px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #fff8e8;
+  text-shadow: 0 1px 0 rgb(0 0 0 / 45%);
+  border: 1px solid #ffdf73;
+  background: linear-gradient(180deg, #8a4200 0%, #5c2a00 100%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 35%),
+    0 0 0 1px rgb(0 0 0 / 35%),
+    0 0 14px rgb(255 170 44 / 38%);
+  animation: reaction-pass-attention 1.2s ease-in-out infinite;
+}
+
+#reactionPassBtn:hover:not(:disabled) {
+  filter: brightness(1.1);
+  border-color: #ffe49a;
+}
+
+#reactionPassBtn:disabled {
+  animation: none;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 15%),
+    0 0 0 1px rgb(0 0 0 / 30%);
 }
 
 /* =============================================================================
@@ -360,8 +406,8 @@ button:disabled {
   padding: 16px 18px;
   text-align: center;
   pointer-events: auto;
-  background: #1a2330;
-  border: 1px solid #3d5a7a;
+  background: linear-gradient(160deg, #143524 0%, #0f2a1c 100%);
+  border: 1px solid #2d6b4a;
   border-radius: 10px;
   box-shadow: 0 8px 28px rgb(0 0 0 / 45%);
 }
@@ -370,7 +416,7 @@ button:disabled {
   margin: 0 0 8px;
   font-size: 17px;
   font-weight: 700;
-  color: #e8c96a;
+  color: #c8f5d8;
 }
 
 .opponent-disconnect-countdown {
@@ -385,7 +431,7 @@ button:disabled {
   margin: 0;
   font-size: 13px;
   line-height: 1.4;
-  color: #a9b6c4;
+  color: #9ec9ae;
 }
 
 .match-error-banner {
@@ -399,7 +445,7 @@ button:disabled {
   border: 1px solid rgba(255, 120, 120, 0.35);
 }
 
-/* Top half of board-wrap = opponent band (cemetery + HUD); stays above all with z-index */
+/* Top half of board-wrap = opponent band (capture zone + HUD); stays above all with z-index */
 .waiting-banner {
   position: absolute;
   top: 0;
@@ -470,7 +516,7 @@ button:disabled {
   align-self: stretch;
 }
 
-/* Stack gap replaces clock margins */
+/* Stack spacing for mana bars and player nameplates */
 .player-b-stack .clock-b {
   margin-bottom: 0;
 }
@@ -583,10 +629,38 @@ button:disabled {
   box-sizing: border-box;
 }
 
-/* Slightly smaller board so cemeteries + HUD fit in the center column */
-.playmat-center .board-frame {
+/* Board + SVG overlay share one grid cell so the arrow lines up with squares */
+.playmat-center .board-frame-stack {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  justify-items: stretch;
+  align-items: stretch;
   max-width: min(100%, 74vmin);
+  width: 100%;
   margin-inline: auto;
+  margin-top: auto;
+  margin-bottom: auto;
+}
+
+.playmat-center .board-frame-stack .board-frame {
+  grid-area: 1 / 1;
+  max-width: 100%;
+  margin-inline: 0;
+}
+
+.capture-threat-overlay {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+  overflow: visible;
+}
+
+.sq.capture-threat-target {
+  box-shadow: inset 0 0 0 3px rgba(220, 38, 38, 0.92);
+  z-index: 1;
 }
 
 .edge-label {
@@ -1278,19 +1352,10 @@ pre {
   align-self: stretch;
 }
 
-/* Banish and cooldown zones are fully clickable */
+/* Banish / cooldown: cards stay in-zone (horizontal scroll when needed); no zone-wide click target */
 .pm-zone--banish,
 .pm-zone--cooldown {
-  cursor: pointer;
-}
-
-.pm-zone--banish:hover,
-.pm-zone--cooldown:hover {
-  border-color: rgba(255 255 255 / 32%);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 14%),
-    inset 0 -1px 0 rgb(0 0 0 / 30%),
-    0 2px 12px rgb(0 0 0 / 50%);
+  cursor: default;
 }
 
 /* Banish zone: zero padding so the stack-top card is not clipped */
@@ -1432,7 +1497,7 @@ pre {
   container-name: pm-graveyard;
 }
 
-/* Opponent cemetery: label reads from opponent side of the board */
+/* Opponent capture zone: label reads from opponent side of the board */
 .pm-graveyard--board.pm-graveyard--opp .pm-zone__label {
   top: auto;
   bottom: 4px;
@@ -1579,6 +1644,24 @@ pre {
   overflow: hidden;
 }
 
+/* Queued reaction card (stack top); may fill the slot or sit above an existing ignition card. */
+.pm-ignition-card.pm-ignition-staged {
+  outline: 2px dashed rgba(120, 200, 255, 0.9);
+  outline-offset: 3px;
+  border-radius: 10px;
+}
+
+.pm-ignition-staged-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+
 .pm-ignition-counter {
   position: absolute;
   bottom: 6px;
@@ -1634,7 +1717,7 @@ pre {
     0 1px 0 rgb(0 0 0 / 50%);
 }
 
-/* Cooldown: Balatro-style row — left-aligned, soonest-to-resolve first; step fits row in container */
+/* Cooldown: same Balatro-style overlap as hand — step compresses to fit the zone width */
 .pm-cooldown-cards {
   --cd-stack-n: 1;
   position: relative;
@@ -1642,7 +1725,7 @@ pre {
   flex: 1 1 auto;
   min-height: calc(var(--pm-card-height) + var(--pm-gutter) + 1rem);
   margin-top: 0;
-  /* Extra top space for peek lift (-4px) so cards do not paint over the header */
+  /* Extra top space so lifted peek cards do not paint over the zone label */
   padding: calc(var(--pm-gutter) + 6px) 2px var(--pm-gutter);
   overflow-x: hidden;
   overflow-y: visible;
@@ -1661,7 +1744,7 @@ pre {
   cursor: default;
   /*
    * Step between left edges: at most card + gap while it fits; otherwise compress (Balatro-style overlap).
-   * max(1, n-1) avoids division by zero when n=1.
+   * Shared by hand, cooldown, and banish. max(1, n-1) avoids division by zero when n=1.
    */
   --cd-step: min(
     calc((100% - var(--pm-card-width)) / max(1, var(--cd-stack-n) - 1)),
@@ -1708,10 +1791,21 @@ pre {
   --i: 0;
   flex: unset;
   min-width: 0;
+  /* Hand wraps stay pointer-transparent for stack-level drag / hover hit-testing */
   pointer-events: none;
-  /* Left index on top; stack tucks under toward the right */
   z-index: calc(10 + var(--cd-stack-n) - var(--i));
   transition: z-index 0s, transform 0.15s ease;
+}
+
+.pm-cooldown-card-wrap,
+.pm-banish-card-wrap {
+  pointer-events: auto;
+}
+
+/* Cooldown / banish minis: full text via hover preview; no example toggle on the strip */
+.pm-cooldown-card-wrap > .power-card .power-card__toggle,
+.pm-banish-card-wrap > .power-card .power-card__toggle {
+  display: none !important;
 }
 
 /*
@@ -1725,11 +1819,14 @@ pre {
   right: calc(var(--i) * var(--cd-step));
 }
 
-.pm-cooldown-card-wrap--peek,
-.pm-banish-card-wrap--peek,
 .pm-hand-card-wrap--peek {
   z-index: 1000;
   transform: translateY(-4px);
+}
+
+/* Cooldown odometer tick: lift entire wrap above siblings so the roll is not painted under the next card */
+.pm-cooldown-card-wrap.pm-cooldown-wrap--odometer-active {
+  z-index: 9000;
 }
 
 .pm-cooldown-card-wrap > .pm-sleeve-card,
@@ -1757,7 +1854,7 @@ pre {
   font-weight: 700;
   color: #9ec8f5;
   text-shadow: 0 0 4px #000, 0 1px 2px #000;
-  z-index: 4;
+  z-index: 6;
   pointer-events: none;
   font-variant-numeric: tabular-nums;
 }
@@ -2007,11 +2104,10 @@ pre {
 }
 
 /* Scaled cards disable hit-testing on the shell so drag/hover use the wrapper; re-enable
-   the description/example toggle so it stays clickable (pointer-events do not inherit). */
+   the description/example toggle on hand + ignition minis (pointer-events do not inherit). */
 .pm-hand-card-wrap > .power-card .power-card__toggle,
-.pm-cooldown-card-wrap > .power-card .power-card__toggle,
-.pm-banish-card-wrap > .power-card .power-card__toggle,
 .pm-ignition-card > .power-card .power-card__toggle,
+.pm-ignition-staged-overlay .power-card .power-card__toggle,
 .pm-stack-top > .power-card .power-card__toggle {
   pointer-events: auto;
 }
@@ -2090,8 +2186,104 @@ pre {
   100% { box-shadow: none; }
 }
 
+@keyframes reaction-pass-attention {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1px); }
+}
+
 .pm-zone--ignition.pm-ignition-activating {
   animation: pm-ignition-activate 0.6s ease-out forwards;
+}
+
+/* Reaction stack resolve — full-width banner (see showResolvingEffectsBanner in app.js). */
+.pm-resolving-effects-banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 50%;
+  width: 100%;
+  max-height: 120px;
+  height: 120px;
+  margin: 0;
+  padding: 0 16px;
+  box-sizing: border-box;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 60000;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transform-origin: center center;
+  opacity: 1;
+  background: linear-gradient(
+    90deg,
+    rgb(18 22 34 / 94%) 0%,
+    rgb(32 42 64 / 97%) 50%,
+    rgb(18 22 34 / 94%) 100%
+  );
+  border-top: 1px solid rgb(255 255 255 / 12%);
+  border-bottom: 1px solid rgb(255 255 255 / 12%);
+  color: #e8ecf4;
+  font-family: var(--font-ui, system-ui, sans-serif);
+  font-size: clamp(0.95rem, 2.2vw, 1.25rem);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 8px rgb(0 0 0 / 80%);
+}
+
+.pm-resolving-effects-banner--in,
+.pm-resolving-effects-banner--out {
+  display: flex;
+}
+
+.pm-resolving-effects-banner--in {
+  animation:
+    pm-resolve-banner-expand 0.5s cubic-bezier(0.22, 0.61, 0.36, 1) forwards,
+    pm-resolve-banner-fade-in 0.28s ease-out forwards;
+}
+
+.pm-resolving-effects-banner--out {
+  animation: pm-resolve-banner-collapse 0.36s ease-in forwards;
+}
+
+@keyframes pm-resolve-banner-expand {
+  from {
+    transform: translateY(-50%) scaleY(0);
+  }
+  to {
+    transform: translateY(-50%) scaleY(1);
+  }
+}
+
+@keyframes pm-resolve-banner-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pm-resolve-banner-collapse {
+  from {
+    transform: translateY(-50%) scaleY(1);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(-50%) scaleY(0);
+    opacity: 0;
+  }
+}
+
+/* Effect activation (server activate_card): ignition reached 0, success/fail check. */
+.pm-effect-activation-glow-overlay {
+  position: fixed;
+  border-radius: 14px;
+  pointer-events: none;
+  z-index: 4400;
+  box-sizing: border-box;
+  background: transparent;
 }
 
 /* Pile view dialog (reuses deck-view-dialog styles) */
@@ -2127,6 +2319,18 @@ pre {
   font-size: 14px;
   font-weight: 600;
   color: #c8c8c8;
+}
+
+.match-debug-events-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.match-debug-events-head .match-debug-sub {
+  margin: 0;
 }
 
 .match-debug pre {

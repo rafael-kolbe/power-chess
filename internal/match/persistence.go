@@ -9,16 +9,12 @@ import (
 
 // PersistedEngineState is a JSON-serializable snapshot of engine runtime state.
 type PersistedEngineState struct {
-	Chess          chess.Game                         `json:"chess"`
-	Match          gameplay.MatchState                `json:"match"`
-	MoveBuffTarget map[gameplay.PlayerID]*chess.Pos   `json:"moveBuffTarget"`
-	MoveBuffKind   map[gameplay.PlayerID]MoveBuffKind `json:"moveBuffKind"`
-	ExtraMoveLeft  map[gameplay.PlayerID]int          `json:"extraMoveLeft"`
-	MovesThisTurn  map[gameplay.PlayerID]int          `json:"movesThisTurn"`
-	PendingEffects []PersistedPendingEffect           `json:"pendingEffects"`
-	ReactionWindow *ReactionWindow                    `json:"reactionWindow,omitempty"`
-	ReactionStack  []PersistedReactionAction          `json:"reactionStack"`
-	PendingMove    *PendingMoveAction                 `json:"pendingMove,omitempty"`
+	Chess          chess.Game                `json:"chess"`
+	Match          gameplay.MatchState       `json:"match"`
+	PendingEffects []PersistedPendingEffect  `json:"pendingEffects"`
+	ReactionWindow *ReactionWindow           `json:"reactionWindow,omitempty"`
+	ReactionStack  []PersistedReactionAction `json:"reactionStack"`
+	PendingMove    *PendingMoveAction        `json:"pendingMove,omitempty"`
 }
 
 // PersistedPendingEffect stores pending effect metadata without function pointers.
@@ -39,30 +35,9 @@ func (e *Engine) ExportState() PersistedEngineState {
 	out := PersistedEngineState{
 		Chess:          *e.Chess.Clone(),
 		Match:          *e.State,
-		MoveBuffTarget: map[gameplay.PlayerID]*chess.Pos{},
-		MoveBuffKind:   map[gameplay.PlayerID]MoveBuffKind{},
-		ExtraMoveLeft:  map[gameplay.PlayerID]int{},
-		MovesThisTurn:  map[gameplay.PlayerID]int{},
 		ReactionWindow: nil,
 		ReactionStack:  make([]PersistedReactionAction, 0, len(e.reactionStack)),
 		PendingMove:    nil,
-	}
-	for pid, pos := range e.moveBuffTarget {
-		if pos == nil {
-			out.MoveBuffTarget[pid] = nil
-			continue
-		}
-		cp := *pos
-		out.MoveBuffTarget[pid] = &cp
-	}
-	for pid, kind := range e.moveBuffKind {
-		out.MoveBuffKind[pid] = kind
-	}
-	for pid, n := range e.extraMoveLeft {
-		out.ExtraMoveLeft[pid] = n
-	}
-	for pid, n := range e.movesThisTurn {
-		out.MovesThisTurn[pid] = n
 	}
 	for _, pid := range []gameplay.PlayerID{gameplay.PlayerA, gameplay.PlayerB} {
 		for _, pe := range e.pendingEffects[pid] {
@@ -94,24 +69,9 @@ func (e *Engine) ExportState() PersistedEngineState {
 // NewEngineFromState recreates a runtime engine from a persisted snapshot.
 func NewEngineFromState(snapshot PersistedEngineState) (*Engine, error) {
 	matchState := snapshot.Match
+	matchState.NormalizeLegacyIgnition()
 	chessState := snapshot.Chess
 	e := NewEngine(&matchState, &chessState)
-	e.moveBuffTarget = snapshot.MoveBuffTarget
-	e.moveBuffKind = snapshot.MoveBuffKind
-	e.extraMoveLeft = snapshot.ExtraMoveLeft
-	e.movesThisTurn = snapshot.MovesThisTurn
-	if e.moveBuffTarget == nil {
-		e.moveBuffTarget = map[gameplay.PlayerID]*chess.Pos{}
-	}
-	if e.moveBuffKind == nil {
-		e.moveBuffKind = map[gameplay.PlayerID]MoveBuffKind{}
-	}
-	if e.extraMoveLeft == nil {
-		e.extraMoveLeft = map[gameplay.PlayerID]int{}
-	}
-	if e.movesThisTurn == nil {
-		e.movesThisTurn = map[gameplay.PlayerID]int{}
-	}
 	if snapshot.ReactionWindow != nil {
 		rw := *snapshot.ReactionWindow
 		rw.EligibleTypes = append([]gameplay.CardType(nil), rw.EligibleTypes...)

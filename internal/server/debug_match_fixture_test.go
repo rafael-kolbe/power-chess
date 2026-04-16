@@ -23,7 +23,7 @@ func TestDebugMatchFixtureRejectedWhenEnvDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 	_, _, _ = c.ReadMessage() // hello
 
@@ -83,12 +83,12 @@ func TestDebugMatchFixtureAppliesWhenEnvEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c1.Close()
+	defer func() { _ = c1.Close() }()
 	c2, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c2.Close()
+	defer func() { _ = c2.Close() }()
 
 	for _, c := range []*websocket.Conn{c1, c2} {
 		_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))

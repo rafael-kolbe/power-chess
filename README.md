@@ -15,7 +15,7 @@ Jogo **multiplayer 1v1** de xadrez com **cartas de poder** e **habilidades de jo
 
 - Git  
 - Go **1.26+** (ver `go.mod`)  
-- Node.js 18+ (apenas para testes E2E com Playwright)  
+- Node.js 18+ (apenas para tooling frontend opcional)  
 - Docker + Docker Compose (opcional, para Postgres + servidor em container)
 
 ## Executar localmente
@@ -58,6 +58,8 @@ Subir stack:
 docker compose up --build
 ```
 
+Cada arranque grava **stdout/stderr** em ficheiros novos (append) em `logs/docker/server/` e `logs/docker/postgres/` (bind mount no repositório, visível no IDE; pasta `logs/` está no `.gitignore`). Nome do ficheiro: `YYYY-MM-DD:HH:MM:SS.log`. Por defeito mantêm-se só os **5 ficheiros mais recentes** em cada pasta (`POWER_CHESS_SESSION_LOG_KEEP` no `.env` / `docker-compose`; `0` desativa a limpeza).
+
 - Servidor em `:8080`  
 - Postgres: host `localhost:5433` → container `:5432` (ver `docker-compose.yml`)  
 - Copia `.env.example` → `.env` e ajusta. O serviço `server` usa `env_file: .env`; `JWT_SECRET`, `SERVER_ADDR`, `ADMIN_DEBUG_MATCH`, etc. vêm dali. O `DATABASE_URL` **dentro do container** é fixo no `docker-compose.yml` para apontar ao serviço `postgres` (o `.env` continua a poder usar `localhost:5433` para correr o binário Go no host).
@@ -82,13 +84,12 @@ Variáveis úteis: `SERVER_ADDR`, `DATABASE_URL` (persistência de sala em Postg
 | `internal/match` | Efeitos, reações, cadeias Counter |
 | `internal/ranking` | ELO |
 | `web/` | Frontend estático (`app.js`, `index.html`, assets) |
-| `tests/e2e/` | Testes Playwright |
 
 ## Protocolo WebSocket (resumo)
 
 Envelope JSON: `id`, `type`, `payload`. Detalhes completos, códigos de erro e exemplos de `state_snapshot` estão em **[PROTOCOL.md](PROTOCOL.md)**.
 
-Mensagens comuns (cliente → servidor): `ping`, `join_match`, `submit_move`, `activate_card`, `resolve_pending_effect`, `queue_reaction`, `resolve_reactions`, `leave_match`, `stay_in_room`, `request_rematch`.
+Mensagens comuns (cliente → servidor): `ping`, `join_match`, `submit_move`, `ignite_card`, `resolve_pending_effect`, `queue_reaction`, `resolve_reactions`, `leave_match`, `stay_in_room`, `request_rematch`. O servidor pode enviar `activate_card` (efeito após ignição chegar a 0); ver `PROTOCOL.md`.
 
 Servidor → cliente: `hello`, `ack`, `error`, `state_snapshot`.
 
@@ -98,21 +99,11 @@ Servidor → cliente: `hello`, `ack`, `error`, `state_snapshot`.
 go test ./...
 ```
 
-### E2E (Playwright)
-
-```bash
-npm install
-npx playwright install
-npm run test:e2e
-```
-
-Com navegador visível: `npm run test:e2e:headed`
-
 ## Git e entregas
 
 - Branch principal: **`main`**.  
 - **Cada funcionalidade grande** deve ser **commitada** de forma coesa e **enviada** para `origin/main` (`git push origin main`) quando estiver pronta e com testes passando.  
-- Antes de commitar: `go test ./...` (e `npm run test:e2e` se alterar UI/protocolo relevante).
+- Antes de commitar: `go test ./...`.
 
 ## Telemetria e persistência
 
@@ -127,4 +118,4 @@ Com navegador visível: `npm run test:e2e:headed`
 
 ---
 
-Para regras de negócio, timers, strikes, mana e roadmap de produto, use **[PROJECT.md](PROJECT.md)**.
+Para regras de negócio, timers, mana e roadmap de produto, use **[PROJECT.md](PROJECT.md)**.

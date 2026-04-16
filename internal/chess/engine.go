@@ -120,6 +120,7 @@ func (g *Game) Clone() *Game {
 
 // PieceAt returns the piece at a board position.
 func (g *Game) PieceAt(p Pos) Piece { return g.Board[p.Row][p.Col] }
+
 // SetPiece places a piece at a board position.
 func (g *Game) SetPiece(p Pos, piece Piece) {
 	g.Board[p.Row][p.Col] = piece
@@ -136,6 +137,9 @@ func (g *Game) ApplyMove(m Move) error {
 	}
 	if p.Color != g.Turn {
 		return fmt.Errorf("wrong turn")
+	}
+	if t := g.PieceAt(m.To); !t.IsEmpty() && t.Type == King && t.Color != p.Color {
+		return ErrKingCannotBeCaptured
 	}
 
 	legal := false

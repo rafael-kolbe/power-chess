@@ -32,7 +32,7 @@ rg -n "i18n" web/app.js
 | Cooldown (slot) | Recarga / slot de recarga |
 | Retribution | Retribuição |
 | Banish | Banir |
-| Hand / deck / graveyard | Mão / deck / cemitério |
+| Hand / deck / capture (pieces) | Mão / deck / captura |
 | Power / Counter / Continuous (card type) | Poder / Contra / Contínua (capitalize like EN when naming types) |
 | Negate | Negar |
 | Reveal | Revelar |

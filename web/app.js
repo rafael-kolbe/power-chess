@@ -12,13 +12,23 @@ import {
     let selectedFrom = null;
     let highlightedMoves = [];
     let draggingFrom = null;
-    let currentTurn = "A";
-    let turnSeconds = 30;
-    let turnDeadline = Date.now() + turnSeconds * 1000;
-    /** When true, block outgoing game actions and freeze turn clocks during turn-start resource animation. */
+    /** When true, block outgoing game actions during turn-start resource animation. */
     let turnResourceAnimBlocking = false;
-    /** @type {{ active: string, secLeft: number } | null} */
-    let frozenTurnClockDisplay = null;
+    let effectAnimBlocking = false;
+    let effectAnimBlockTimeout = null;
+    /** Wall-clock ms when effect-anim input block ends (extends on overlapping blocks). */
+    let effectAnimUnblockAt = 0;
+    /**
+     * `activate_card` payloads received before the matching `state_snapshot` is applied.
+     * Flushed after the "resolving effects" banner when the reaction stack had 2+ cards, or earlier otherwise.
+     */
+    /** @type {object[]} */
+    let pendingActivateCardPayloads = [];
+    /** Server `activate_card` events processed in order (reaction pile + ignition finalize). */
+    /** @type {object[]} */
+    let activationFxQueue = [];
+    /** @type {Promise<void> | null} */
+    let activationFxWorkerPromise = null;
     /** @type {boolean} */
     let gameStarted = false;
     let joinedRoom = false;
@@ -30,6 +40,12 @@ import {
     let pendingJoinAttempt = null;
     /** @type {string} Room name shown in the private-join modal (for i18n refresh). */
     let privateJoinPendingRoomName = "";
+    /** @type {object[]} Recent WebSocket traffic and UI events (export + optional server mirror). */
+    let clientTraceBuffer = [];
+    /** @type {ReturnType<typeof setInterval> | null} */
+    let clientTraceMirrorTimerId = null;
+    const CLIENT_TRACE_CAP = 600;
+
     /** @type {Set<number>} Hand indices selected to return to the deck during mulligan (local UI only). */
     let mulliganPick = new Set();
     /** Updates mulligan countdown text while the opening phase is active. */
@@ -67,16 +83,18 @@ import {
     const pieceTypeEl = document.getElementById("pieceType");
     const boardWrapEl = document.getElementById("boardWrap");
     const boardFrameEl = document.getElementById("boardFrame");
+    const captureThreatOverlayEl = document.getElementById("captureThreatOverlay");
     const snapshotEl = document.getElementById("snapshot");
     const eventsEl = document.getElementById("events");
+    const exportClientTraceBtnEl = document.getElementById("exportClientTraceBtn");
     const statusEl = document.getElementById("status");
+
     const playerEl = document.getElementById("playerId");
-    const reactionToggleEl = document.getElementById("reactionToggle");
-    const reactionToggleLabelEl = document.getElementById("reactionToggleLabel");
+    const reactionModeSelectEl = document.getElementById("reactionModeSelect");
+    const reactionModeLabelEl = document.getElementById("reactionModeLabel");
+    const reactionPassBtnEl = document.getElementById("reactionPassBtn");
     const coordsInSquaresEl = document.getElementById("coordsInSquares");
     const coordsInSquaresTextEl = document.getElementById("coordsInSquaresText");
-    const clockAEl = document.getElementById("clockA");
-    const clockBEl = document.getElementById("clockB");
     const manaFillA = document.getElementById("manaFillA");
     const manaFillB = document.getElementById("manaFillB");
     const manaLabelA = document.getElementById("manaLabelA");
@@ -85,8 +103,6 @@ import {
     const energizedFillB = document.getElementById("energizedFillB");
     const energizedLabelA = document.getElementById("energizedLabelA");
     const energizedLabelB = document.getElementById("energizedLabelB");
-    const strikesAEl = document.getElementById("strikesA");
-    const strikesBEl = document.getElementById("strikesB");
     const matchEndOverlayEl = document.getElementById("matchEndOverlay");
     const matchEndBodyEl = document.getElementById("matchEndBody");
     const matchEndCountdownEl = document.getElementById("matchEndCountdown");
@@ -173,6 +189,10 @@ import {
             statusWaiting: "waiting",
             statusPlaying: "in game",
             reactions: "Reactions",
+            reactionModeOff: "Off",
+            reactionModeOn: "On",
+            reactionModeAuto: "Auto",
+            reactionPassOk: "OK",
             toggleOn: "On",
             toggleOff: "Off",
             coordsLabel: "Coords",
@@ -182,11 +202,11 @@ import {
             resolvePending: "Resolve pending effect",
             queueReaction: "Queue reaction",
             resolveReactions: "Resolve reactions",
+            resolvingEffects: "Resolving Effects",
             reactionPendingTitle: "Reaction/Pending status",
             snapshotTitle: "Snapshot",
             eventsTitle: "Events",
-            clock: "Clock",
-            strikes: "Strikes",
+            exportClientTrace: "Download client trace (JSON)",
             fromPlaceholder: "from row,col",
             toPlaceholder: "to row,col",
             handIndexPlaceholder: "hand index",
@@ -198,7 +218,6 @@ import {
             reasonBothDisconnected: "Reason: both players disconnected (match canceled).",
             reasonDisconnectTimeout: "Reason: opponent disconnected (timeout).",
             reasonLeftRoom: "Reason: opponent left the room.",
-            reasonStrikeLimit: "Reason: defeat by 3 strikes (turn timeout).",
             youWon: "You won!",
             youLost: "You lost!",
             draw: "Draw!",
@@ -208,8 +227,7 @@ import {
             reasonCheckmateShort: "Reason: checkmate.",
             reasonStalemateShort: "Reason: stalemate.",
             disconnectWinAlert: "Victory: opponent disconnected and did not return in time.",
-            opponentDisconnectedTitle: "Opponent disconnected",
-            opponentDisconnectedSeconds: "{s}s",
+            opponentDisconnectedBanner: "Opponent disconnected ({s}s)",
             opponentDisconnectedHint:
                 "You will win when the timer reaches 0 if they do not return. This seat is closed to other players until then.",
             rematchProposed: "New game proposed, click on 'Play again' to accept.",
@@ -246,6 +264,12 @@ import {
             debugLogsTitle: "Debug logs",
             zoneHand: "Hand",
             zoneDeck: "Deck",
+            zoneIgnition: "Ignition",
+            zoneCooldown: "Cooldown",
+            zoneBanished: "Banished",
+            zoneCapture: "Capture",
+            zoneCaptureAriaYour: "Your captures",
+            zoneCaptureAriaOpponent: "Opponent captures",
             drawFromDeck: "DRAW",
             connectErrorPrefix: "Could not connect:",
             mulliganHint: "Tap cards to mark them red (they return to the deck). Confirm when ready.",
@@ -273,7 +297,7 @@ import {
             searchLabel: "Buscar (ID ou nome)",
             searchPlaceholder: "Buscar salas...",
             noRooms: "Nenhuma sala ativa no momento.",
-            waiting: "Aguardando adversário...",
+            waiting: "Aguardando oponente...",
             matchFinished: "Partida encerrada",
             backLobby: "Voltar ao lobby",
             playAgain: "Jogar novamente",
@@ -300,6 +324,10 @@ import {
             statusWaiting: "aguardando",
             statusPlaying: "em partida",
             reactions: "Reações",
+            reactionModeOff: "Desligado",
+            reactionModeOn: "Ligado",
+            reactionModeAuto: "Automático",
+            reactionPassOk: "OK",
             toggleOn: "Ligado",
             toggleOff: "Desligado",
             coordsLabel: "Coords",
@@ -309,11 +337,11 @@ import {
             resolvePending: "Resolver efeito pendente",
             queueReaction: "Enfileirar reação",
             resolveReactions: "Resolver reações",
+            resolvingEffects: "Resolvendo Efeitos",
             reactionPendingTitle: "Status de reação/pendente",
             snapshotTitle: "Snapshot",
             eventsTitle: "Eventos",
-            clock: "Relógio",
-            strikes: "Strikes",
+            exportClientTrace: "Baixar trace do cliente (JSON)",
             fromPlaceholder: "origem linha,col",
             toPlaceholder: "destino linha,col",
             handIndexPlaceholder: "índice da mão",
@@ -323,25 +351,23 @@ import {
             reasonCheckmate: "Motivo: xeque-mate.",
             reasonStalemate: "Motivo: empate por afogamento.",
             reasonBothDisconnected: "Motivo: ambos desconectaram (partida cancelada).",
-            reasonDisconnectTimeout: "Motivo: vitória por desconexão do adversário.",
-            reasonLeftRoom: "Motivo: vitória por saída da sala do adversário.",
-            reasonStrikeLimit: "Motivo: derrota por 3 strikes (tempo estourado).",
+            reasonDisconnectTimeout: "Motivo: vitória por desconexão do oponente.",
+            reasonLeftRoom: "Motivo: vitória por saída do oponente da sala.",
             youWon: "Você venceu!",
             youLost: "Você perdeu!",
             draw: "Empate!",
             matchEndedNoWinner: "Partida encerrada.",
             reasonPrefix: "Motivo",
-            reasonOpponentAbandoned: "Motivo: Seu adversário abandonou a partida.",
+            reasonOpponentAbandoned: "Motivo: o oponente abandonou a partida.",
             reasonCheckmateShort: "Motivo: Xeque-mate.",
             reasonStalemateShort: "Motivo: Afogamento (stalemate).",
-            disconnectWinAlert: "Vitória: o adversário saiu da sala (tempo de reconexão expirou).",
-            opponentDisconnectedTitle: "Oponente desconectou",
-            opponentDisconnectedSeconds: "{s}s",
+            disconnectWinAlert: "Vitória: o oponente não voltou a tempo (desconexão).",
+            opponentDisconnectedBanner: "Jogador desconectado ({s}s)",
             opponentDisconnectedHint:
-                "Você vence quando o tempo chegar a 0 se o adversário não voltar. Este lugar fica fechado para outros até lá.",
+                "Você vence quando o tempo chegar a 0 se o oponente não voltar. Este assento permanece fechado a novas entradas até lá.",
             rematchProposed: "Novo jogo proposto, clique em 'Jogar novamente' para aceitar.",
-            rematchWaiting: "Aguardando o adversário aceitar o novo jogo.",
-            rematchOpponentLeft: "O outro jogador saiu da sala.",
+            rematchWaiting: "Aguardando o oponente aceitar o novo jogo.",
+            rematchOpponentLeft: "O oponente saiu da sala.",
             autoCloseIn: "A sala fecha em {s}s se ninguém fizer nada.",
             autoCloseNow: "A sala será fechada agora se ninguém fizer nada.",
             cardMarqueeTitle: "Todas as cartas — prévia do layout",
@@ -373,6 +399,12 @@ import {
             debugLogsTitle: "Logs de debug",
             zoneHand: "Mão",
             zoneDeck: "Deck",
+            zoneIgnition: "Ignição",
+            zoneCooldown: "Recarga",
+            zoneBanished: "Banidas",
+            zoneCapture: "Captura",
+            zoneCaptureAriaYour: "Suas capturas",
+            zoneCaptureAriaOpponent: "Capturas do oponente",
             drawFromDeck: "Comprar",
             connectErrorPrefix: "Não foi possível conectar:",
             mulliganHint: "Toque nas cartas para marcar em vermelho (voltam ao deck). Confirme quando terminar.",
@@ -760,14 +792,21 @@ import {
         s("handLabelOpp", "zoneHand");
         s("deckLabelSelf", "zoneDeck");
         s("deckLabelOpp", "zoneDeck");
+        s("labelIgnitionOpp", "zoneIgnition");
+        s("labelIgnitionSelf", "zoneIgnition");
+        s("labelCooldownOpp", "zoneCooldown");
+        s("labelCooldownSelf", "zoneCooldown");
+        s("labelBanishSelf", "zoneBanished");
+        s("labelBanishOpp", "zoneBanished");
+        s("labelGraveyardOpp", "zoneCapture");
+        s("labelGraveyardSelf", "zoneCapture");
         if (pmEl.drawBtn) pmEl.drawBtn.textContent = t("drawFromDeck");
         if (lastSnapshot) renderMulliganBar(lastSnapshot);
         updateCoordsToggleLabel();
-        updateReactionToggleLabel();
-        s("clockLabelA", "clock");
-        s("clockLabelB", "clock");
-        s("strikesLabelA", "strikes");
-        s("strikesLabelB", "strikes");
+        updateReactionModeOptions();
+        updateReactionModeLabel();
+        if (reactionPassBtnEl) reactionPassBtnEl.textContent = t("reactionPassOk");
+        if (exportClientTraceBtnEl) exportClientTraceBtnEl.textContent = t("exportClientTrace");
         if (pieceTypeEl) {
             const optRandom = pieceTypeEl.querySelector('option[value="random"]');
             const optWhite = pieceTypeEl.querySelector('option[value="white"]');
@@ -926,9 +965,37 @@ import {
         });
     }
 
-    function updateReactionToggleLabel() {
-        if (!reactionToggleEl || !reactionToggleLabelEl) return;
-        reactionToggleLabelEl.textContent = `${t("reactions")}: ${reactionToggleEl.checked ? t("toggleOn") : t("toggleOff")}`;
+    /** Fills reaction mode select option labels from the active locale. */
+    function updateReactionModeOptions() {
+        if (!reactionModeSelectEl || reactionModeSelectEl.options.length < 3) return;
+        reactionModeSelectEl.options[0].textContent = t("reactionModeOff");
+        reactionModeSelectEl.options[1].textContent = t("reactionModeOn");
+        reactionModeSelectEl.options[2].textContent = t("reactionModeAuto");
+    }
+
+    function updateReactionModeLabel() {
+        if (!reactionModeSelectEl || !reactionModeLabelEl) return;
+        const mode = reactionModeSelectEl.value;
+        let modeKey = "reactionModeOn";
+        if (mode === "off") modeKey = "reactionModeOff";
+        else if (mode === "auto") modeKey = "reactionModeAuto";
+        reactionModeLabelEl.textContent = `${t("reactions")}: ${t(modeKey)}`;
+    }
+
+    /**
+     * Syncs the header control from the server snapshot (per-player reactionMode).
+     * @param {object} snapshot
+     */
+    function syncReactionModeFromSnapshot(snapshot) {
+        if (!reactionModeSelectEl || !snapshot?.players) return;
+        const selfId = playerEl.value;
+        const row = snapshot.players.find((p) => p.playerId === selfId);
+        const raw = (row?.reactionMode || "on").toLowerCase();
+        const m = raw === "off" || raw === "auto" || raw === "on" ? raw : "on";
+        if (reactionModeSelectEl.value !== m) {
+            reactionModeSelectEl.value = m;
+            updateReactionModeLabel();
+        }
     }
 
     function updateCoordsToggleLabel() {
@@ -940,7 +1007,7 @@ import {
      * @param {string} roleKey i18n key: youLabel or opponentLabel
      * @param {string} [name] server snapshot display name for that seat
      */
-    function playerClockLabel(roleKey, name) {
+    function playerRoleLabel(roleKey, name) {
         const role = t(roleKey);
         const n = name && String(name).trim();
         if (!n) return role;
@@ -960,11 +1027,11 @@ import {
         const nameA = snap?.playerAName ?? "";
         const nameB = snap?.playerBName ?? "";
         if (isA) {
-            top.textContent = playerClockLabel("opponentLabel", nameB);
-            bottom.textContent = playerClockLabel("youLabel", nameA);
+            top.textContent = playerRoleLabel("opponentLabel", nameB);
+            bottom.textContent = playerRoleLabel("youLabel", nameA);
         } else {
-            top.textContent = playerClockLabel("youLabel", nameB);
-            bottom.textContent = playerClockLabel("opponentLabel", nameA);
+            top.textContent = playerRoleLabel("youLabel", nameB);
+            bottom.textContent = playerRoleLabel("opponentLabel", nameA);
         }
     }
 
@@ -1130,6 +1197,10 @@ import {
             });
         };
         ws.onclose = () => {
+            if (clientTraceMirrorTimerId) {
+                clearInterval(clientTraceMirrorTimerId);
+                clientTraceMirrorTimerId = null;
+            }
             logEvent({ event: "socket_close" });
             stopRoomListPolling();
             resetToLobbyUi();
@@ -1138,10 +1209,21 @@ import {
         ws.onmessage = (ev) => {
             const msg = JSON.parse(ev.data);
             logEvent(msg);
+            // Server→client: one card finished its activation step (reaction pile LIFO or ignition counter0).
+            if (msg.type === "activate_card" && msg.payload && typeof msg.payload === "object") {
+                bufferServerActivationFx(msg.payload);
+                return;
+            }
             if (msg.type === "state_snapshot") {
                 pendingJoinAttempt = null;
                 const nextSnap = msg.payload;
                 lastSnapshot = nextSnap;
+                const viewer = nextSnap.viewerPlayerId;
+                if ((viewer === "A" || viewer === "B") && playerEl && playerEl.value !== viewer) {
+                    playerEl.value = viewer;
+                    syncBoardPerspectiveClass();
+                    syncPlayerRoleLabels(nextSnap);
+                }
                 selectedFrom = null;
                 highlightedMoves = [];
 
@@ -1162,19 +1244,38 @@ import {
                     syncBoardPerspectiveClass();
                 }
 
-                const wasStarted = gameStarted;
                 updateLobbyChromeFromSnapshot(nextSnap);
-                if (nextSnap.gameStarted && !wasStarted) {
-                    turnSeconds = turnSecondsFromSnapshot(nextSnap);
-                    currentTurn = nextSnap.turnPlayer || "A";
-                    turnDeadline = Date.now() + turnSeconds * 1000;
-                }
-                syncTurnFromSnapshot(nextSnap);
                 updateOpponentDisconnectOverlay(nextSnap);
                 maybeShowMatchEndModal(nextSnap);
+                updateReactionPassButton(nextSnap);
+
+                if (nextSnap.adminDebugMatch) {
+                    if (!clientTraceMirrorTimerId) {
+                        clientTraceMirrorTimerId = setInterval(flushClientTraceToServer, 8000);
+                    }
+                } else if (clientTraceMirrorTimerId) {
+                    clearInterval(clientTraceMirrorTimerId);
+                    clientTraceMirrorTimerId = null;
+                }
 
                 if (snapshotEl) snapshotEl.textContent = JSON.stringify(nextSnap, null, 2);
-                renderBoard(nextSnap.board);
+                // Defer board render when animations will play before the board should update:
+                //  - reaction stack clearing (shouldRunReactionStackResolve)
+                //  - activate_card event already buffered (card with ignition=0 queued+resolved atomically;
+                //    server never sends an intermediate stackSize>0 snapshot, so the reaction check alone
+                //    would miss this case)
+                // prevReceivedSnapshot tracks the last-received snapshot synchronously so rapid bursts
+                // of snapshots still see the correct transition.
+                const willReactionResolve = shouldRunReactionStackResolve(prevReceivedSnapshot, nextSnap);
+                const activationFxInFlight =
+                    pendingActivateCardPayloads.length > 0 ||
+                    activationFxQueue.length > 0 ||
+                    activationFxWorkerPromise !== null;
+                const willDeferBoard = willReactionResolve || activationFxInFlight;
+                prevReceivedSnapshot = nextSnap;
+                if (!willDeferBoard) {
+                    renderBoard(nextSnap.board);
+                }
                 renderStatus(nextSnap);
                 renderPlayerHud(nextSnap);
 
@@ -1187,27 +1288,68 @@ import {
                         nextSnap.turnPlayer &&
                         prevSnap.turnPlayer !== nextSnap.turnPlayer;
 
-                    /** True if ignition→cooldown fly already ran after 1t→0t in {@link runTurnStartResourceSequence}. */
-                    let skipIgnitionResolveFly = false;
-                    if (turnChanged) {
-                        turnResourceAnimBlocking = true;
-                        beginTurnResourceAnimFreeze();
-                        renderTurnClocks();
+                    const doReactionResolve = shouldRunReactionStackResolve(prevSnap, nextSnap);
+                    if (!doReactionResolve) {
+                        flushPendingActivationFx(null);
+                        await waitActivationFxWorkerIdle();
+                        // Board was deferred because of pending activate_card payloads: render now
+                        // that activation animations have finished.
+                        if (willDeferBoard) {
+                            renderBoard(nextSnap.board);
+                        }
+                    }
+                    if (doReactionResolve) {
+                        const bannerCount = reactionStackBannerCardCount(prevSnap);
+                        const stepsPreview = reactionStackResolveOrderFromPrev(prevSnap);
+                        const reactionBlockMs =
+                            (bannerCount > 1 ? 1500 : 0) +
+                            Math.max(stepsPreview.length, bannerCount, 1) * 1520 +
+                            300;
                         try {
-                            skipIgnitionResolveFly = await runTurnStartResourceSequence(prevSnap, nextSnap);
+                            await runReactionStackResolveSequence(prevSnap, nextSnap);
+                        } catch (_) {
+                            flushPendingActivationFx(prevSnap);
+                        }
+                        // Ensure board mutation (captured piece removed) only appears after all
+                        // server-driven activation FX for this resolve step are fully finished.
+                        await waitActivationFxWorkerIdle();
+                        // Board was deferred: apply now that all reaction animations finished.
+                        renderBoard(nextSnap.board);
+                        let effectBlockMs = reactionBlockMs;
+                        if (hasEffectAnimationDelta(prevSnap, nextSnap)) {
+                            effectBlockMs = Math.max(effectBlockMs, 900);
+                        }
+                        blockGameplayInputForEffects(effectBlockMs);
+                    }
+
+                    if (turnChanged) {
+                        send("client_fx_hold", {});
+                        turnResourceAnimBlocking = true;
+                        try {
+                            await runTurnStartResourceSequence(prevSnap, nextSnap);
                         } finally {
                             turnResourceAnimBlocking = false;
-                            endTurnResourceAnimFreeze();
+                            send("client_fx_release", {});
                         }
                     }
 
-                    runSnapshotAnimations(prevSnap, nextSnap, skipIgnitionResolveFly);
+                    const skipDupPlaymatAnim =
+                        prevSnap &&
+                        snapshotPlaymatAnimationDigest(prevSnap) === snapshotPlaymatAnimationDigest(nextSnap);
+                    if (!skipDupPlaymatAnim) {
+                        runSnapshotAnimations(prevSnap, nextSnap, doReactionResolve);
+                    }
+                    if (!doReactionResolve && !skipDupPlaymatAnim && hasEffectAnimationDelta(prevSnap, nextSnap)) {
+                        blockGameplayInputForEffects(900);
+                    }
                     renderPlaymat(nextSnap);
                     pmPrevSnapshot = nextSnap;
                     syncPlayerRoleLabels(nextSnap);
-                    handleAutoSkipReaction(nextSnap);
-                    renderTurnClocks();
+                    syncReactionModeFromSnapshot(nextSnap);
                     maybeApplyMatchTestFixture(nextSnap);
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => renderCaptureThreatOverlay());
+                    });
                 });
                 return;
             }
@@ -1563,6 +1705,10 @@ import {
     // Playmat: previous snapshot reference for animation diffing
     // ---------------------------------------------------------------------------
     let pmPrevSnapshot = null;
+    // Updated synchronously on every received snapshot (before enqueueSnapshotApply).
+    // Used to detect reaction-resolve transitions at arrival time, independently of the
+    // async queue which updates pmPrevSnapshot only when each closure executes.
+    let prevReceivedSnapshot = null;
 
     /** @type {Promise<void>} */
     let snapshotApplyChain = Promise.resolve();
@@ -1606,10 +1752,6 @@ import {
         handSelf: document.getElementById("handSelf"),
         handOpp: document.getElementById("handOpp"),
         matchCardPreview: document.getElementById("matchCardPreview"),
-        pileViewModal: document.getElementById("pileViewModal"),
-        pileViewGrid: document.getElementById("pileViewGrid"),
-        pileViewTitle: document.getElementById("pileViewTitle"),
-        pileViewCloseBtn: document.getElementById("pileViewCloseBtn"),
         banishSelf: document.getElementById("banishSelf"),
         banishOpp: document.getElementById("banishOpp"),
         cooldownSelf: document.getElementById("cooldownSelf"),
@@ -1623,12 +1765,92 @@ import {
         mulliganConfirmBtn: document.getElementById("mulliganConfirmBtn"),
     };
 
+    /**
+     * Returns the HUD entry for seat A/B in a state snapshot.
+     * @param {object|null} snap
+     * @param {string} pid
+     * @returns {object|undefined}
+     */
+    function hudForSeat(snap, pid) {
+        return snap?.players?.find((p) => p.playerId === pid);
+    }
+
+    /**
+     * Stable string of per-player ignition fields for snapshot diffing (animation gate).
+     * @param {object|null} snap
+     * @returns {string}
+     */
+    function ignitionHudSignature(snap) {
+        const ps = snap?.players;
+        if (!Array.isArray(ps)) return "";
+        return ps
+            .map((p) =>
+                [
+                    p.playerId,
+                    p.ignitionOn ? "1" : "0",
+                    p.ignitionCard || "",
+                    String(p.ignitionTurnsRemaining ?? 0),
+                ].join(":"),
+            )
+            .sort()
+            .join("|");
+    }
+
+    /**
+     * Stable digest of playmat-relevant state for snapshot animation deduping.
+     * Ignores wall-clock / deadline fields so duplicate `state_snapshot` broadcasts
+     * (e.g. paired `client_fx_release` from both clients) do not re-run flies.
+     * @param {object|null} snap
+     * @returns {string}
+     */
+    function snapshotPlaymatAnimationDigest(snap) {
+        if (!snap || !Array.isArray(snap.players)) return "";
+        const rw = snap.reactionWindow || {};
+        const players = [...snap.players]
+            .map((p) => ({
+                id: p.playerId,
+                hand: (p.hand || []).map((c) => c.cardId).join(","),
+                ign: p.ignitionOn ? `${p.ignitionCard}:${p.ignitionTurnsRemaining ?? 0}` : "",
+                cd: (p.cooldownPreview || [])
+                    .map((e) => `${e.cardId}:${e.turnsRemaining}`)
+                    .join(";"),
+                bc: (p.banishedCards || []).length,
+                hc: p.handCount,
+                dco: p.deckCount,
+            }))
+            .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+        const pc = snap.pendingCapture;
+        const pcKey =
+            pc && pc.active
+                ? `${pc.actor || ""}:${pc.fromRow},${pc.fromCol}-${pc.toRow},${pc.toCol}`
+                : "";
+        return JSON.stringify({
+            t: snap.turnPlayer,
+            tn: snap.turnNumber,
+            b: snap.board,
+            gs: snap.gameStarted,
+            me: snap.matchEnded,
+            rw: {
+                o: !!rw.open,
+                tr: rw.trigger || "",
+                ac: rw.actor || "",
+                ss: rw.stackSize ?? 0,
+                sc: rw.stagedCardId || "",
+                so: rw.stagedOwner || "",
+                st: (rw.stackCards || []).map((c) => `${c.owner}:${c.cardId}`).join("|"),
+            },
+            pc: pcKey,
+            aq: snap.activationQueueSize ?? 0,
+            pe: Array.isArray(snap.pendingEffects) ? snap.pendingEffects.length : 0,
+            ig: ignitionHudSignature(snap),
+            players,
+        });
+    }
+
     // ---------------------------------------------------------------------------
     // Playmat: card preview hover (hover shows full card at cursor)
     // ---------------------------------------------------------------------------
     let pmPreviewCard = null;
-    /** @type {string | null} Catalog id for the card currently shown in the match hover preview. */
-    let pmPreviewCardId = null;
     /** Remember description vs example per catalog id while on the match screen (same idea as deck builder). */
     const matchHandExampleMode = new Map();
 
@@ -1656,7 +1878,6 @@ import {
         if (!pmEl.matchCardPreview || !cardData) return;
         pmEl.matchCardPreview.innerHTML = "";
         const cid = cardData.id != null ? String(cardData.id) : "";
-        pmPreviewCardId = cid || null;
         if (cid) {
             pmEl.matchCardPreview.dataset.cardId = cid;
         } else {
@@ -1713,7 +1934,6 @@ import {
         pmEl.matchCardPreview.innerHTML = "";
         delete pmEl.matchCardPreview.dataset.cardId;
         pmPreviewCard = null;
-        pmPreviewCardId = null;
     }
 
     function getCardDef(cardId) {
@@ -1844,90 +2064,6 @@ import {
     // ---------------------------------------------------------------------------
 
     /**
-     * Shifts a DOMRect by a screen-space offset (for staggered landings).
-     * @param {DOMRect} r
-     * @param {number} dx
-     * @param {number} dy
-     * @returns {{ left: number, top: number, width: number, height: number }}
-     */
-    function offsetDomRectLike(r, dx, dy) {
-        return {
-            left: r.left + dx,
-            top: r.top + dy,
-            width: r.width,
-            height: r.height,
-            right: r.left + dx + r.width,
-            bottom: r.top + dy + r.height,
-        };
-    }
-
-    /**
-     * Flies a visual clone of `cardEl` from `fromRect` to `toRect`, then calls `done`.
-     * Used for all "fluid movement" animations between zones.
-     * @param {DOMRect} fromRect - source bounding rect
-     * @param {DOMRect} toRect   - destination bounding rect
-     * @param {HTMLElement|null} cardEl - element to clone (null = use sleeve)
-     * @param {string} [sleeve="blue"] - sleeve color when no card face available
-     * @param {number} [duration=400]  - animation duration in ms
-     * @param {Function} [done]        - called when animation completes
-     * @param {{ fitDestination?: boolean }} [opts] - if `fitDestination` is false, translate only (no stretch to destination size)
-     */
-    function flyCard(fromRect, toRect, cardEl, sleeve, duration, done, opts) {
-        duration = duration || 400;
-        const fitDestination = opts?.fitDestination !== false;
-        const overlay = document.createElement("div");
-        overlay.style.cssText = [
-            "position:fixed",
-            "pointer-events:none",
-            `width:${fromRect.width}px`,
-            `height:${fromRect.height}px`,
-            `left:${fromRect.left}px`,
-            `top:${fromRect.top}px`,
-            "z-index:3000",
-            "border-radius:4px",
-            "box-shadow:0 8px 24px rgba(0,0,0,.7)",
-            "transform-origin:center center",
-        ].join(";");
-
-        if (cardEl) {
-            const clone = cardEl.cloneNode(true);
-            clone.style.cssText = "width:100%;height:100%;pointer-events:none";
-            overlay.appendChild(clone);
-        } else {
-            overlay.style.background = `url('${sleeveUrl(sleeve)}') center/100% 100% no-repeat #263040`;
-        }
-
-        document.body.appendChild(overlay);
-
-        const dx = toRect.left + toRect.width / 2 - (fromRect.left + fromRect.width / 2);
-        const dy = toRect.top + toRect.height / 2 - (fromRect.top + fromRect.height / 2);
-        let scaleX = toRect.width / fromRect.width;
-        let scaleY = toRect.height / fromRect.height;
-        if (!fitDestination) {
-            scaleX = 1;
-            scaleY = 1;
-        }
-
-        const anim = overlay.animate(
-            [
-                { transform: "translate(0,0) scale(1)", opacity: 1 },
-                { transform: `translate(${dx}px,${dy}px) scale(${scaleX},${scaleY})`, opacity: 0.9 },
-            ],
-            { duration, easing: "cubic-bezier(0.22,0.61,0.36,1)", fill: "forwards" },
-        );
-
-        anim.onfinish = () => {
-            overlay.remove();
-            if (done) done();
-        };
-    }
-
-    /** Returns the bounding rect of the given element or null. */
-    function zoneRect(el) {
-        return el ? el.getBoundingClientRect() : null;
-    }
-
-    /**
      * @param {number} ms
      * @returns {Promise<void>}
      */
@@ -1957,120 +2093,94 @@ import {
      */
     async function odometerFlip(el, fromText, toText, totalMs = 700) {
         if (!el || fromText === toText) return;
+        const liftWrap = el.closest(".pm-cooldown-card-wrap");
+        if (liftWrap) liftWrap.classList.add("pm-cooldown-wrap--odometer-active");
         const t0 = totalMs * 0.25;
         const t1 = totalMs * 0.5;
         const t2 = totalMs * 0.25;
+        try {
+            el.classList.add("pm-odometer-highlight");
+            await el
+                .animate([{ transform: "scale(1)" }, { transform: "scale(1.25)" }], {
+                    duration: t0,
+                    easing: "ease-out",
+                    fill: "forwards",
+                })
+                .finished;
 
-        el.classList.add("pm-odometer-highlight");
-        await el
-            .animate([{ transform: "scale(1)" }, { transform: "scale(1.25)" }], {
-                duration: t0,
-                easing: "ease-out",
-                fill: "forwards",
-            })
-            .finished;
+            const viewport = document.createElement("span");
+            viewport.className = "pm-odometer-viewport";
+            const track = document.createElement("span");
+            track.className = "pm-odometer-track";
+            const line0 = document.createElement("span");
+            line0.className = "pm-odometer-line";
+            line0.textContent = fromText;
+            const line1 = document.createElement("span");
+            line1.className = "pm-odometer-line";
+            line1.textContent = toText;
+            track.appendChild(line0);
+            track.appendChild(line1);
+            viewport.appendChild(track);
+            el.innerHTML = "";
+            el.appendChild(viewport);
 
-        const viewport = document.createElement("span");
-        viewport.className = "pm-odometer-viewport";
-        const track = document.createElement("span");
-        track.className = "pm-odometer-track";
-        const line0 = document.createElement("span");
-        line0.className = "pm-odometer-line";
-        line0.textContent = fromText;
-        const line1 = document.createElement("span");
-        line1.className = "pm-odometer-line";
-        line1.textContent = toText;
-        track.appendChild(line0);
-        track.appendChild(line1);
-        viewport.appendChild(track);
-        el.innerHTML = "";
-        el.appendChild(viewport);
+            const h = line0.getBoundingClientRect().height;
+            track.style.transform = "translateY(0)";
+            await track
+                .animate([{ transform: "translateY(0)" }, { transform: `translateY(-${h}px)` }], {
+                    duration: t1,
+                    easing: "cubic-bezier(0.4,0,0.2,1)",
+                    fill: "forwards",
+                })
+                .finished;
 
-        const h = line0.getBoundingClientRect().height;
-        track.style.transform = "translateY(0)";
-        await track
-            .animate([{ transform: "translateY(0)" }, { transform: `translateY(-${h}px)` }], {
-                duration: t1,
-                easing: "cubic-bezier(0.4,0,0.2,1)",
-                fill: "forwards",
-            })
-            .finished;
-
-        el.textContent = toText;
-        el.style.transform = "scale(1.25)";
-        el.classList.remove("pm-odometer-highlight");
-        await el
-            .animate([{ transform: "scale(1.25)" }, { transform: "scale(1)" }], {
-                duration: t2,
-                easing: "ease-out",
-                fill: "forwards",
-            })
-            .finished;
-        el.style.transform = "";
+            el.textContent = toText;
+            el.style.transform = "scale(1.25)";
+            el.classList.remove("pm-odometer-highlight");
+            await el
+                .animate([{ transform: "scale(1.25)" }, { transform: "scale(1)" }], {
+                    duration: t2,
+                    easing: "ease-out",
+                    fill: "forwards",
+                })
+                .finished;
+            el.style.transform = "";
+        } finally {
+            if (liftWrap) liftWrap.classList.remove("pm-cooldown-wrap--odometer-active");
+        }
     }
 
     /**
-     * Flies the ignition card to the cooldown row after the 1t→0t odometer (uses previous-frame DOM).
-     * @param {object} prevSnap
-     * @returns {Promise<void>}
-     */
-    function flyIgnitionResolvedToCooldown(prevSnap) {
-        return new Promise((resolve) => {
-            const localPID = playerEl.value;
-            const wasOwn = prevSnap.ignitionOwner === localPID;
-            const fromEl = wasOwn ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
-            const toEl = wasOwn ? pmEl.cooldownCardsSelf : pmEl.cooldownCardsOpp;
-            const fr = zoneRect(fromEl);
-            const tr = zoneRect(toEl);
-            if (!fr || !tr) {
-                resolve();
-                return;
-            }
-            const prevSelf = prevSnap.players?.find((p) => p.playerId === localPID);
-            const def = getCardDef(prevSnap.ignitionCard);
-            const face = def
-                ? (() => {
-                      const el = createPowerCard({
-                          type: def.type,
-                          name: def.name,
-                          description: def.description,
-                          example: def.example,
-                          mana: def.mana,
-                          ignition: def.ignition,
-                          cooldown: def.cooldown,
-                          cardWidth: "86px",
-                      });
-                      el.style.cssText = "width:100%;height:100%";
-                      return el;
-                  })()
-                : null;
-            flyCard(fr, tr, face, prevSelf?.sleeveColor || "blue", 450, () => resolve(), { fitDestination: false });
-        });
-    }
-
-    /**
-     * Animates ignition (activator turn only), then on resolve (0t) flies the card to cooldown,
-     * then animates other cooldown turn badges for that player. All before playmat DOM is replaced.
+     * Animates ignition counter tick, then immediately shows the card in cooldown, then animates
+     * other cooldown counter ticks for that player. All before playmat DOM is replaced.
      * @param {object | null} prevSnap
      * @param {object} nextSnap
-     * @returns {Promise<boolean>} true if ignition→cooldown fly was performed here (caller must not repeat in runSnapshotAnimations)
+     * @returns {Promise<void>}
      */
     async function runTurnStartResourceSequence(prevSnap, nextSnap) {
-        if (!prevSnap || !nextSnap) return false;
+        if (!prevSnap || !nextSnap) return;
         const localPID = playerEl.value;
         const turnStarter = nextSnap.turnPlayer;
-        if (!turnStarter || prevSnap.turnPlayer === nextSnap.turnPlayer) return false;
+        if (!turnStarter || prevSnap.turnPlayer === nextSnap.turnPlayer) return;
 
         const delayMs = 200;
         const animMs = 700;
-        let didIgnitionResolveFly = false;
+
+        const prevTurnStarterHud = hudForSeat(prevSnap, turnStarter);
+        const nextTurnStarterHud = hudForSeat(nextSnap, turnStarter);
+        const ignitionResolvedForTurnStarter =
+            !!prevTurnStarterHud?.ignitionOn &&
+            !nextTurnStarterHud?.ignitionOn;
+        const arrivingIgnitionCardId = ignitionResolvedForTurnStarter
+            ? String(prevTurnStarterHud?.ignitionCard || "")
+            : "";
 
         /** @type {{ el: HTMLElement, from: string, to: string } | null} */
         let ignitionOdometer = null;
-        if (prevSnap.ignitionOn && prevSnap.ignitionOwner === turnStarter) {
-            const prevTurns = prevSnap.ignitionTurnsRemaining ?? 0;
-            const stillOn = nextSnap.ignitionOn && nextSnap.ignitionOwner === turnStarter;
-            const nextTurns = stillOn ? (nextSnap.ignitionTurnsRemaining ?? 0) : 0;
+        if (prevTurnStarterHud?.ignitionOn) {
+            const prevTurns = prevTurnStarterHud.ignitionTurnsRemaining ?? 0;
+            const stillOn = !!nextTurnStarterHud?.ignitionOn;
+            const nextTurns = stillOn ? (nextTurnStarterHud.ignitionTurnsRemaining ?? 0) : 0;
             if (prevTurns > nextTurns) {
                 const counterEl =
                     turnStarter === localPID ? pmEl.ignitionCounterSelf : pmEl.ignitionCounterOpp;
@@ -2084,77 +2194,105 @@ import {
             }
         }
 
-        /** @type {{ el: HTMLElement, from: string, to: string }[]} */
+        // cooldownTasks stores only card data; DOM elements are looked up lazily so that an
+        // intermediate renderCooldownList call (after the ignition fly) doesn't leave stale refs.
+        /** @type {{ cardId: string, from: string, to: string }[]} */
         const cooldownTasks = [];
         const prevStarter = prevSnap.players?.find((p) => p.playerId === turnStarter);
         const nextStarter = nextSnap.players?.find((p) => p.playerId === turnStarter);
+        const cdContainer = turnStarter === localPID ? pmEl.cooldownCardsSelf : pmEl.cooldownCardsOpp;
+        let prevCD = [], nextCD = [];
         if (prevStarter && nextStarter) {
-            const prevCD = sortCooldownEntriesForDisplay(prevStarter.cooldownPreview || []);
-            const nextCD = sortCooldownEntriesForDisplay(nextStarter.cooldownPreview || []);
-            const container =
-                turnStarter === localPID ? pmEl.cooldownCardsSelf : pmEl.cooldownCardsOpp;
+            prevCD = sortCooldownEntriesForDisplay(prevStarter.cooldownPreview || []);
+            nextCD = sortCooldownEntriesForDisplay(nextStarter.cooldownPreview || []);
             for (const nEntry of nextCD) {
+                if (arrivingIgnitionCardId && nEntry.cardId === arrivingIgnitionCardId) continue;
                 const pEntry = prevCD.find((p) => p.cardId === nEntry.cardId);
                 if (!pEntry || nEntry.turnsRemaining >= pEntry.turnsRemaining) continue;
-                const wrap = container?.querySelector(
-                    `[data-card-id="${escapeCardIdForSelector(String(nEntry.cardId))}"]`,
-                );
-                const turnsEl = wrap?.querySelector(".pm-cooldown-turns");
-                if (turnsEl) {
-                    cooldownTasks.push({
-                        el: turnsEl,
-                        from: `${pEntry.turnsRemaining}t`,
-                        to: `${nEntry.turnsRemaining}t`,
-                    });
-                }
+                cooldownTasks.push({
+                    cardId: nEntry.cardId,
+                    from: `${pEntry.turnsRemaining}t`,
+                    to: `${nEntry.turnsRemaining}t`,
+                });
             }
             // Cards that left cooldown entirely this turn (hit 0 turns → returned to deck).
             // The server removes them from cooldownPreview atomically, so nextCD never contains
             // them; we must detect their absence and animate the final N→0 tick.
             for (const pEntry of prevCD) {
+                if (arrivingIgnitionCardId && pEntry.cardId === arrivingIgnitionCardId) continue;
                 if (nextCD.find((n) => n.cardId === pEntry.cardId)) continue;
                 if (pEntry.turnsRemaining <= 0) continue;
-                const wrap = container?.querySelector(
-                    `[data-card-id="${escapeCardIdForSelector(String(pEntry.cardId))}"]`,
-                );
-                const turnsEl = wrap?.querySelector(".pm-cooldown-turns");
-                if (turnsEl) {
-                    cooldownTasks.push({
-                        el: turnsEl,
-                        from: `${pEntry.turnsRemaining}t`,
-                        to: "0t",
-                    });
-                }
+                cooldownTasks.push({
+                    cardId: pEntry.cardId,
+                    from: `${pEntry.turnsRemaining}t`,
+                    to: "0t",
+                });
             }
         }
 
         if (ignitionOdometer) {
             await odometerFlip(ignitionOdometer.el, ignitionOdometer.from, ignitionOdometer.to, animMs);
-            const resolved =
-                prevSnap.ignitionOn &&
-                !nextSnap.ignitionOn &&
-                prevSnap.ignitionOwner === turnStarter;
-            if (resolved && ignitionOdometer.to === "0t") {
-                await flyIgnitionResolvedToCooldown(prevSnap);
-                didIgnitionResolveFly = true;
+            const resolved = !!prevTurnStarterHud?.ignitionOn && !nextTurnStarterHud?.ignitionOn;
+            if (resolved && ignitionOdometer.to === "0t" && arrivingIgnitionCardId) {
+                // Clear the ignition slot immediately: the server already removed the card.
+                renderIgnitionZone(nextSnap);
+                if (cdContainer) {
+                    // Show arriving ignition card in cooldown at its final counter value.
+                    // Other cooldown cards keep their prevSnap values so their odometer animations still work.
+                    const arrivingEntry = nextCD.find((e) => e.cardId === arrivingIgnitionCardId);
+                    const intermediateList = [
+                        ...prevCD.filter((e) => e.cardId !== arrivingIgnitionCardId),
+                        ...(arrivingEntry ? [arrivingEntry] : []),
+                    ];
+                    renderCooldownList(cdContainer, intermediateList);
+                    // Card with 0 cooldown skipped the cooldown queue entirely → immediately show its
+                    // destination (banished for Continuous cards, deck for others) without waiting
+                    // for all cooldown countdown animations to complete.
+                    if (!nextCD.find((e) => e.cardId === arrivingIgnitionCardId)) {
+                        const localSelf = nextSnap.players?.find((p) => p.playerId === localPID);
+                        let localOpp = nextSnap.players?.find((p) => p.playerId !== localPID);
+                        if (!localOpp) localOpp = emptyOppPlaymatStub(localPID);
+                        if (localSelf) {
+                            renderBanishZone(localSelf, localOpp);
+                            renderDeckZone(localSelf, localOpp);
+                        }
+                    }
+                }
             }
-            if (cooldownTasks.length > 0) await sleep(delayMs);
         }
 
         for (let i = 0; i < cooldownTasks.length; i++) {
-            await odometerFlip(cooldownTasks[i].el, cooldownTasks[i].from, cooldownTasks[i].to, animMs);
+            const task = cooldownTasks[i];
+            // Lazy DOM lookup: elements may have been recreated by the intermediate renderCooldownList.
+            const taskWrap = cdContainer?.querySelector(
+                `[data-card-id="${escapeCardIdForSelector(String(task.cardId))}"]`,
+            );
+            const turnsEl = taskWrap?.querySelector(".pm-cooldown-turns");
+            if (turnsEl) {
+                await odometerFlip(turnsEl, task.from, task.to, animMs);
+            }
+            // Card reached 0t: remove it from cooldown DOM and immediately show its destination
+            // (banished for Continuous cards, deck for others) rather than waiting until renderPlaymat
+            // at the very end of enqueueSnapshotApply.
+            if (task.to === "0t") {
+                taskWrap?.remove();
+                const localSelf = nextSnap.players?.find((p) => p.playerId === localPID);
+                let localOpp = nextSnap.players?.find((p) => p.playerId !== localPID);
+                if (!localOpp) localOpp = emptyOppPlaymatStub(localPID);
+                if (localSelf) {
+                    renderBanishZone(localSelf, localOpp);
+                    renderDeckZone(localSelf, localOpp);
+                }
+            }
             if (i < cooldownTasks.length - 1) await sleep(delayMs);
         }
-
-        return didIgnitionResolveFly;
     }
 
     /**
-     * Runs all animations needed when transitioning from prevSnap to nextSnap.
-     * Animations are fire-and-forget; the DOM update happens normally after.
-     * @param {boolean} [skipIgnitionResolveFly] when true, ignition→cooldown fly already ran after 1t→0t odômetro
+     * Runs glow animations when transitioning from prevSnap to nextSnap.
+     * @param {boolean} [reactionStackJustCleared] when true, skip fallback ignition glow (activate_card already ran)
      */
-    function runSnapshotAnimations(prevSnap, nextSnap, skipIgnitionResolveFly) {
+    function runSnapshotAnimations(prevSnap, nextSnap, reactionStackJustCleared) {
         if (!prevSnap || !nextSnap) return;
         const localPID = playerEl.value;
 
@@ -2165,49 +2303,24 @@ import {
 
         if (!prevSelf || !nextSelf) return;
 
-        // 1. Card draw: deck → hand. Opening (mulligan, from empty hand): one fly per card gained
-        //    this snapshot (e.g. 0→3 → 3 staggered flies). Any other draw: at most one fly per snapshot.
-        const selfDrawDelta = nextSelf.handCount - prevSelf.handCount;
-        if (selfDrawDelta > 0) {
-            const openingDeal =
-                nextSnap.mulliganPhaseActive === true && prevSelf.handCount === 0;
-            const selfFlies = openingDeal ? selfDrawDelta : Math.min(selfDrawDelta, 1);
-            scheduleDeckToHandFlies(selfFlies, pmEl.deckSleeveSelf, pmEl.deckSelf, pmEl.handSelf, nextSelf.sleeveColor);
-        }
-        if (nextOpp && prevOpp && nextOpp.handCount > prevOpp.handCount) {
-            const oppDrawDelta = nextOpp.handCount - prevOpp.handCount;
-            const openingDealOpp = nextSnap.mulliganPhaseActive === true && prevOpp.handCount === 0;
-            const oppFlies = openingDealOpp ? oppDrawDelta : Math.min(oppDrawDelta, 1);
-            scheduleDeckToHandFlies(oppFlies, pmEl.deckSleeveOpp, pmEl.deckOpp, pmEl.handOpp, nextOpp.sleeveColor);
-        }
-
-        // 2. Ignition / cooldown turn ticks are animated in runTurnStartResourceSequence (turn change only).
-
-        // 3a. Card placed in ignition: was not occupied, now is → brief glow on ignition zone.
-        if (!prevSnap.ignitionOn && nextSnap.ignitionOn) {
-            const slotEl = nextSnap.ignitionOwner === localPID ? pmEl.ignitionSelf : pmEl.ignitionOpp;
-            if (slotEl) {
-                slotEl.classList.remove("pm-ignition-activating");
-                void slotEl.offsetWidth; // force reflow to restart animation
-                slotEl.classList.add("pm-ignition-activating");
-                setTimeout(() => slotEl.classList.remove("pm-ignition-activating"), 650);
+        // 3a. Card placed in ignition: was not occupied, now is → brief glow on that seat's ignition zone.
+        for (const pid of ["A", "B"]) {
+            const pPrev = hudForSeat(prevSnap, pid);
+            const pNext = hudForSeat(nextSnap, pid);
+            if (pPrev && pNext && !pPrev.ignitionOn && pNext.ignitionOn) {
+                const slotEl = pid === localPID ? pmEl.ignitionSelf : pmEl.ignitionOpp;
+                if (slotEl) {
+                    slotEl.classList.remove("pm-ignition-activating");
+                    void slotEl.offsetWidth;
+                    slotEl.classList.add("pm-ignition-activating");
+                    setTimeout(() => slotEl.classList.remove("pm-ignition-activating"), 650);
+                }
             }
         }
 
-        // 3b. Ignition resolved (was occupied, now gone) → fly to cooldown pile (if not already done after 1t→0t).
-        if (
-            !skipIgnitionResolveFly &&
-            prevSnap.ignitionOn &&
-            !nextSnap.ignitionOn &&
-            prevSnap.ignitionOwner
-        ) {
-            flyIgnitionResolvedToCooldown(prevSnap);
-        }
-
-        // 3c. Card with ignition=0 activated: the server resolves it atomically so the ignition
-        // slot is never "occupied" in any snapshot the client sees.  Detect a new cooldown entry
-        // whose card definition has ignition=0 and show a brief glow + fly from the ignition zone.
-        if (!prevSnap.ignitionOn && !nextSnap.ignitionOn) {
+        // 3c. Fallback: ignition=0 card went directly to cooldown (no ignition slot visible in either snapshot).
+        // Skip when a reaction chain just resolved — activate_card already fired the glow.
+        if (!reactionStackJustCleared && !prevSelf?.ignitionOn && !nextSelf?.ignitionOn) {
             const prevSelfCD = prevSelf?.cooldownPreview || [];
             const nextSelfCD = nextSelf?.cooldownPreview || [];
             const newSelfEntry = nextSelfCD.find((e) => !prevSelfCD.some((p) => p.cardId === e.cardId));
@@ -2219,128 +2332,21 @@ import {
                     slotEl.classList.add("pm-ignition-activating");
                     setTimeout(() => slotEl.classList.remove("pm-ignition-activating"), 650);
                 }
-                const frSelf = zoneRect(pmEl.ignitionCardSelf);
-                const trSelf = zoneRect(pmEl.cooldownCardsSelf);
-                if (frSelf && trSelf) {
-                    setTimeout(
-                        () => flyCard(frSelf, trSelf, null, nextSelf.sleeveColor || "blue", 400, null, { fitDestination: false }),
-                        220,
-                    );
+            }
+        }
+        if (!reactionStackJustCleared && nextOpp && prevOpp && !prevOpp?.ignitionOn && !nextOpp?.ignitionOn) {
+            const prevOppCD = prevOpp?.cooldownPreview || [];
+            const nextOppCD = nextOpp?.cooldownPreview || [];
+            const newOppEntry = nextOppCD.find((e) => !prevOppCD.some((p) => p.cardId === e.cardId));
+            if (newOppEntry && (getCardDef(newOppEntry.cardId)?.ignition ?? -1) === 0) {
+                const slotEl = pmEl.ignitionOpp;
+                if (slotEl) {
+                    slotEl.classList.remove("pm-ignition-activating");
+                    void slotEl.offsetWidth;
+                    slotEl.classList.add("pm-ignition-activating");
+                    setTimeout(() => slotEl.classList.remove("pm-ignition-activating"), 650);
                 }
             }
-            if (nextOpp && prevOpp) {
-                const prevOppCD = prevOpp?.cooldownPreview || [];
-                const nextOppCD = nextOpp?.cooldownPreview || [];
-                const newOppEntry = nextOppCD.find((e) => !prevOppCD.some((p) => p.cardId === e.cardId));
-                if (newOppEntry && (getCardDef(newOppEntry.cardId)?.ignition ?? -1) === 0) {
-                    const slotEl = pmEl.ignitionOpp;
-                    if (slotEl) {
-                        slotEl.classList.remove("pm-ignition-activating");
-                        void slotEl.offsetWidth;
-                        slotEl.classList.add("pm-ignition-activating");
-                        setTimeout(() => slotEl.classList.remove("pm-ignition-activating"), 650);
-                    }
-                    const frOpp = zoneRect(pmEl.ignitionCardOpp);
-                    const trOpp = zoneRect(pmEl.cooldownCardsOpp);
-                    if (frOpp && trOpp) {
-                        setTimeout(
-                            () => flyCard(frOpp, trOpp, null, nextOpp.sleeveColor || "blue", 400, null, { fitDestination: false }),
-                            220,
-                        );
-                    }
-                }
-            }
-        }
-
-        // 4. Card banished: banishedCards length increased → fly from deck or ignition area to banish zone.
-        if (nextSelf.banishedCards.length > prevSelf.banishedCards.length) {
-            const toEl = pmEl.banishTopSelf;
-            const fromEl = pmEl.ignitionCardSelf;
-            const fr = zoneRect(fromEl) || zoneRect(pmEl.deckSelf);
-            const tr = zoneRect(toEl);
-            if (fr && tr) flyCard(fr, tr, null, nextSelf.sleeveColor || "blue", 500);
-        }
-        if (nextOpp && prevOpp && nextOpp.banishedCards.length > prevOpp.banishedCards.length) {
-            const toEl = pmEl.banishTopOpp;
-            const fromEl = pmEl.ignitionCardOpp;
-            const fr = zoneRect(fromEl) || zoneRect(pmEl.deckOpp);
-            const tr = zoneRect(toEl);
-            if (fr && tr) flyCard(fr, tr, null, nextOpp?.sleeveColor || "blue", 500);
-        }
-
-        // 5. Card returned from cooldown to deck (same idea as deck → hand).
-        if (nextSelf.deckCount > prevSelf.deckCount && nextSelf.cooldownCount < prevSelf.cooldownCount) {
-            const removedId = findRemovedCooldownCardId(prevSelf.cooldownPreview, nextSelf.cooldownPreview);
-            const fromWrap =
-                removedId && pmEl.cooldownCardsSelf
-                    ? pmEl.cooldownCardsSelf.querySelector(`[data-card-id="${escapeCardIdForSelector(String(removedId))}"]`)
-                    : null;
-            const fr = zoneRect(fromWrap) || zoneRect(pmEl.cooldownCardsSelf);
-            const tr = zoneRect(pmEl.deckSleeveSelf) || zoneRect(pmEl.deckSelf);
-            if (fr && tr) {
-                flyCard(fr, tr, null, nextSelf.sleeveColor || "blue", 500, null, { fitDestination: false });
-            }
-        }
-        if (nextOpp && prevOpp && nextOpp.deckCount > prevOpp.deckCount && nextOpp.cooldownCount < prevOpp.cooldownCount) {
-            const removedId = findRemovedCooldownCardId(prevOpp.cooldownPreview, nextOpp.cooldownPreview);
-            const fromWrap =
-                removedId && pmEl.cooldownCardsOpp
-                    ? pmEl.cooldownCardsOpp.querySelector(`[data-card-id="${escapeCardIdForSelector(String(removedId))}"]`)
-                    : null;
-            const fr = zoneRect(fromWrap) || zoneRect(pmEl.cooldownCardsOpp);
-            const tr = zoneRect(pmEl.deckSleeveOpp) || zoneRect(pmEl.deckOpp);
-            if (fr && tr) {
-                flyCard(fr, tr, null, nextOpp.sleeveColor || "blue", 500, null, { fitDestination: false });
-            }
-        }
-
-    }
-
-    /** Stagger between multiple opening-draw flies (deck → hand). */
-    const OPENING_DRAW_STAGGER_MS = 130;
-
-    /**
-     * Returns the card id that left cooldown between two preview snapshots, if any.
-     * @param {Array<{ cardId: string }>|undefined} prevList
-     * @param {Array<{ cardId: string }>|undefined} nextList
-     * @returns {string | null}
-     */
-    function findRemovedCooldownCardId(prevList, nextList) {
-        const nextIds = new Set((nextList || []).map((e) => e.cardId));
-        for (const e of prevList || []) {
-            if (!nextIds.has(e.cardId)) return e.cardId;
-        }
-        return null;
-    }
-
-    /**
-     * Flies one or more cards from the deck sleeve to hand slots (staggered). Call only while
-     * the previous playmat DOM still matches prevSnap; {@link renderPlaymat} runs right after,
-     * so timeouts see the updated hand for slot rects.
-     * @param {number} count
-     * @param {HTMLElement | null} deckSleeveEl
-     * @param {HTMLElement | null} deckZoneEl
-     * @param {HTMLElement | null} handAreaEl
-     * @param {string} [sleeve]
-     */
-    function scheduleDeckToHandFlies(count, deckSleeveEl, deckZoneEl, handAreaEl, sleeve) {
-        if (count <= 0 || !handAreaEl) return;
-        const fr = zoneRect(deckSleeveEl || deckZoneEl);
-        if (!fr) return;
-        for (let i = 0; i < count; i++) {
-            setTimeout(() => {
-                const wraps = handAreaEl.querySelectorAll(".pm-hand-card-wrap");
-                let tr = null;
-                if (wraps.length > 0) {
-                    const idx = Math.max(0, wraps.length - count + i);
-                    tr = zoneRect(wraps[idx]);
-                } else {
-                    const cardsRoot = handAreaEl.querySelector(".pm-hand-cards");
-                    const base = cardsRoot ? zoneRect(cardsRoot) : zoneRect(handAreaEl);
-                    if (base) tr = offsetDomRectLike(base, i * 14, 0);
-                }
-                if (tr) flyCard(fr, tr, null, sleeve || "blue", 380, null, { fitDestination: true });
-            }, i * OPENING_DRAW_STAGGER_MS);
         }
     }
 
@@ -2381,8 +2387,15 @@ import {
     /** @param {object} snapshot */
     function renderPlaymat(snapshot) {
         if (!snapshot || !snapshot.players) return;
+        clearDanglingHandDragCards();
         const view = isPlaymatUiTestEnabled() ? applyPlaymatUiTestOverlay(snapshot) : snapshot;
-        const localPID = String(playerEl.value || "").trim();
+        const localPID = String(
+            (snapshot.viewerPlayerId &&
+                (snapshot.viewerPlayerId === "A" || snapshot.viewerPlayerId === "B") &&
+                snapshot.viewerPlayerId) ||
+                playerEl.value ||
+                "",
+        ).trim();
         if (localPID !== "A" && localPID !== "B") return;
         const self = view.players.find((p) => p.playerId === localPID);
         let opp = view.players.find((p) => p.playerId !== localPID);
@@ -2486,9 +2499,9 @@ import {
     }
 
     /**
-     * Renders cemetery thumbnails. DOM ids are tied to player A/B stacks; when the local
-     * player is B, `.board-wrap-perspective-b` reverses the column so the physical stacks
-     * swap screen position — we map self/opp pieces and own/opp styling to screen top/bottom.
+     * Renders capture-zone thumbnails. DOM ids use graveyard*; when the local player is B,
+     * `.board-wrap-perspective-b` reverses the column so the physical stacks swap screen position —
+     * we map self/opp pieces and own/opp styling to screen top/bottom.
      * @param {object} self Local player snapshot slice
      * @param {object} opp Opponent snapshot slice
      */
@@ -2504,8 +2517,8 @@ import {
             zs?.classList.add("pm-graveyard--opp");
             zo?.classList.remove("pm-graveyard--opp");
             zo?.classList.add("pm-graveyard--own");
-            zs?.setAttribute("aria-label", "Opponent graveyard");
-            zo?.setAttribute("aria-label", "Your graveyard");
+            zs?.setAttribute("aria-label", t("zoneCaptureAriaOpponent"));
+            zo?.setAttribute("aria-label", t("zoneCaptureAriaYour"));
         } else {
             renderGraveyardGrid(pmEl.graveyardGridSelf, self.graveyardPieces || [], "left");
             renderGraveyardGrid(pmEl.graveyardGridOpp, opp.graveyardPieces || [], "right");
@@ -2513,13 +2526,13 @@ import {
             zs?.classList.add("pm-graveyard--own");
             zo?.classList.remove("pm-graveyard--own");
             zo?.classList.add("pm-graveyard--opp");
-            zs?.setAttribute("aria-label", "Your graveyard");
-            zo?.setAttribute("aria-label", "Opponent graveyard");
+            zs?.setAttribute("aria-label", t("zoneCaptureAriaYour"));
+            zo?.setAttribute("aria-label", t("zoneCaptureAriaOpponent"));
         }
     }
 
     /**
-     * Renders graveyard thumbnails in groups by piece type (Q>R>B>N>P), stacked horizontally
+     * Renders capture thumbnails in groups by piece type (Q>R>B>N>P), stacked horizontally
      * within each group; `align` is own=left, opponent=right.
      * @param {HTMLElement | null} container
      * @param {string[]} pieces
@@ -2612,6 +2625,7 @@ import {
                     },
                 });
                 wrap.appendChild(card);
+                attachCardHover(wrap, { ...def, id: cid, manaCost: def.mana });
             } else {
                 const fb = document.createElement("div");
                 fb.className = "pm-sleeve-card";
@@ -2620,59 +2634,351 @@ import {
             }
             stack.appendChild(wrap);
         }
+    }
 
-        wireOverlapStackPreviewHover(stack, list, {
-            wrapSelector: ".pm-banish-card-wrap",
-            peekClassName: "pm-banish-card-wrap--peek",
-            hiddenSelector: null,
+    /**
+     * Ignition card mount for the reaction stack top: always that seat's zone (never the opponent's).
+     * When that zone already shows a base ignition card, {@link renderReactionStagedIfAny} stacks the staged card as an overlay.
+     */
+    function pickReactionStagedSlot(snapshot, localPID, stagedOwner) {
+        if (!snapshot || !localPID || !stagedOwner) return null;
+        return stagedOwner === localPID ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
+    }
+
+    /**
+     * Returns the ignition card wrap element used to show a given stack card during resolve animations.
+     * @param {object} snapshot
+     * @param {string} localPID
+     * @param {string} cardId
+     * @param {string} cardOwner seat "A" | "B"
+     * @returns {HTMLElement | null}
+     */
+    function reactionStackCardWrap(snapshot, localPID, cardId, cardOwner) {
+        const fakeSnap = {
+            ...snapshot,
+            reactionWindow: {
+                ...(snapshot.reactionWindow || {}),
+                open: true,
+                stagedCardId: String(cardId),
+                stagedOwner: String(cardOwner),
+            },
+        };
+        let wrap = pickReactionStagedSlot(fakeSnap, localPID, cardOwner);
+        if (!wrap) {
+            wrap = cardOwner === localPID ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
+        }
+        const stagedOv = wrap?.querySelector?.(".pm-ignition-staged-overlay");
+        if (stagedOv) {
+            wrap = stagedOv;
+        }
+        return wrap || null;
+    }
+
+    /**
+     * Rim color for effect activation (ignite counter hit 0): type × success/fail.
+     * Power→green, Continuous→blue, Retribution→red, Counter→gold (muted on fail).
+     * @param {string} typeLower
+     * @param {boolean} success
+     * @returns {string}
+     */
+    function effectActivationGlowColor(typeLower, success) {
+        const a = success ? 0.92 : 0.62;
+        switch (typeLower) {
+            case "power":
+                return `rgba(85, 210, 130, ${a})`;
+            case "continuous":
+                return `rgba(110, 175, 255, ${a})`;
+            case "retribution":
+                return `rgba(220, 85, 105, ${a})`;
+            case "counter":
+                return `rgba(245, 205, 95, ${a})`;
+            default:
+                return `rgba(200, 210, 230, ${success ? 0.8 : 0.55})`;
+        }
+    }
+
+    /**
+     * Glow when the server reports effect activation (activate_card) after ignition reaches 0.
+     * @param {HTMLElement | null} wrapEl
+     * @param {string} typeLower
+     * @param {boolean} success
+     * @returns {Promise<void>}
+     */
+    async function playEffectActivationGlow(wrapEl, typeLower, success) {
+        if (!wrapEl) return;
+        const rect = wrapEl.getBoundingClientRect();
+        if (!rect || rect.width < 2 || rect.height < 2) return;
+        const pad = 12;
+        const el = document.createElement("div");
+        el.className = "pm-effect-activation-glow-overlay";
+        el.setAttribute("aria-hidden", "true");
+        const c = effectActivationGlowColor(typeLower, success);
+        el.style.left = `${rect.left - pad}px`;
+        el.style.top = `${rect.top - pad}px`;
+        el.style.width = `${rect.width + pad * 2}px`;
+        el.style.height = `${rect.height + pad * 2}px`;
+        document.body.appendChild(el);
+        const anim = el.animate(
+            [
+                { boxShadow: `0 0 0 3px ${c}`, opacity: 0.98 },
+                { boxShadow: `0 0 52px 28px ${c}`, opacity: 0 },
+            ],
+            { duration: 1100, easing: "ease-out", fill: "forwards" },
+        );
+        await anim.finished.catch(() => {});
+        el.remove();
+    }
+
+    /**
+     * Buffers a server `activate_card` until the matching snapshot apply runs (so banner can precede FX).
+     * @param {object} payload
+     */
+    function bufferServerActivationFx(payload) {
+        pendingActivateCardPayloads.push(payload);
+    }
+
+    /**
+     * Drains buffered `activate_card` payloads into the activation FX worker queue.
+     * @param {object | null} layoutSnap snapshot to use for DOM/wrap lookup (pre-resolve); omit for non-reaction FX.
+     */
+    function flushPendingActivationFx(layoutSnap) {
+        if (pendingActivateCardPayloads.length === 0) {
+            return;
+        }
+        const batch = pendingActivateCardPayloads;
+        pendingActivateCardPayloads = [];
+        for (const pl of batch) {
+            const wrapped = layoutSnap ? { ...pl, _layoutSnap: layoutSnap } : pl;
+            enqueueServerActivationFx(wrapped);
+        }
+    }
+
+    /**
+     * Awaits the activation FX worker if a glow/fly sequence is in progress.
+     * @returns {Promise<void>}
+     */
+    async function waitActivationFxWorkerIdle() {
+        if (activationFxWorkerPromise) {
+            try {
+                await activationFxWorkerPromise;
+            } catch (_) {
+                /* worker clears queue on error */
+            }
+        }
+    }
+
+    /**
+     * Queues server `activate_card` frames so glow/fly run one after another until the pile is drained.
+     * @param {object} payload
+     */
+    function enqueueServerActivationFx(payload) {
+        activationFxQueue.push(payload);
+        if (activationFxWorkerPromise) {
+            return;
+        }
+        activationFxWorkerPromise = (async () => {
+            try {
+                while (activationFxQueue.length > 0) {
+                    const pl = activationFxQueue.shift();
+                    const p = String(pl.playerId || "");
+                    const c = String(pl.cardId || "");
+                    if (!p || !c) continue;
+                    await runEffectActivationClientSequence(pl);
+                }
+            } finally {
+                activationFxWorkerPromise = null;
+            }
+        })();
+    }
+
+    /**
+     * Runs activation glow for server `activate_card` (effect resolution after reaction pile / ignition),
+     * then immediately renders the card in cooldown so it appears before the next card's animation.
+     * @param {object} payload
+     */
+    async function runEffectActivationClientSequence(payload) {
+        send("client_fx_hold", {});
+        try {
+            const pid = String(payload.playerId || "");
+            const cid = String(payload.cardId || "");
+            const localPID = playerEl.value;
+            const isSelf = pid === localPID;
+            const layoutSnap = payload._layoutSnap || lastSnapshot;
+            let wrap = reactionStackCardWrap(layoutSnap, localPID, cid, pid);
+            if (!wrap) {
+                wrap = isSelf ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
+            }
+            const typeLower = String(payload.cardType || getCardDef(cid)?.type || "").toLowerCase();
+            const success = !!payload.success;
+            blockGameplayInputForEffects(1600);
+            await playEffectActivationGlow(wrap, typeLower, success);
+            // Immediately render card in cooldown so it appears before the next card's animation starts.
+            const cooldownContainer = isSelf ? pmEl.cooldownCardsSelf : pmEl.cooldownCardsOpp;
+            const pidSnap = lastSnapshot?.players?.find((p) => p.playerId === pid);
+            if (cooldownContainer && pidSnap) {
+                renderCooldownList(cooldownContainer, pidSnap.cooldownPreview || []);
+            }
+            const clearedIgnitionCardEl = isSelf ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
+            const clearedIgnitionCounterEl = isSelf ? pmEl.ignitionCounterSelf : pmEl.ignitionCounterOpp;
+            if (clearedIgnitionCardEl) {
+                clearedIgnitionCardEl.innerHTML = "";
+                delete clearedIgnitionCardEl.dataset.cardId;
+                clearedIgnitionCardEl.classList.remove("pm-ignition-staged");
+                clearedIgnitionCardEl
+                    .querySelectorAll(".pm-ignition-staged-overlay")
+                    .forEach((el) => el.remove());
+            }
+            if (clearedIgnitionCounterEl) {
+                clearedIgnitionCounterEl.classList.add("hidden");
+            }
+        } finally {
+            send("client_fx_release", {});
+        }
+    }
+
+    /**
+     * Full-width "Resolving Effects" banner: width immediate, height grows from center in 0.5s; total ~1.5s.
+     * @returns {Promise<void>}
+     */
+    function showResolvingEffectsBanner() {
+        return new Promise((resolve) => {
+            const mount = document.body;
+            let el = document.getElementById("pmResolvingEffectsBanner");
+            if (!el) {
+                el = document.createElement("div");
+                el.id = "pmResolvingEffectsBanner";
+                el.className = "pm-resolving-effects-banner";
+                el.setAttribute("role", "status");
+                mount.appendChild(el);
+            }
+            el.textContent = t("resolvingEffects");
+            el.classList.remove("pm-resolving-effects-banner--in", "pm-resolving-effects-banner--out");
+            el.style.animation = "none";
+            void el.offsetWidth;
+            el.style.animation = "";
+            void el.offsetWidth;
+            el.classList.add("pm-resolving-effects-banner--in");
+            setTimeout(() => {
+                // Swap out --in for --out in one paint so we never fall back to the base (hidden) rule.
+                requestAnimationFrame(() => {
+                    el.classList.remove("pm-resolving-effects-banner--in");
+                    void el.offsetWidth;
+                    el.classList.add("pm-resolving-effects-banner--out");
+                });
+                setTimeout(() => {
+                    el.classList.remove("pm-resolving-effects-banner--out");
+                    resolve();
+                }, 400);
+            }, 1500);
         });
     }
 
-    function renderIgnitionZone(snapshot) {
-        const localPID = playerEl.value;
-        const occupied = snapshot.ignitionOn;
-        const owner = snapshot.ignitionOwner;
-        const turns = snapshot.ignitionTurnsRemaining ?? 0;
-        const cardId = snapshot.ignitionCard;
+    /**
+     * @param {object | null} prevSnap
+     * @param {object} nextSnap
+     * @returns {boolean}
+     */
+    function shouldRunReactionStackResolve(prevSnap, nextSnap) {
+        if (!prevSnap || !nextSnap) return false;
+        const p = prevSnap.reactionWindow || {};
+        const n = nextSnap.reactionWindow || {};
+        const trig = String(p.trigger || "");
+        if (
+            trig !== "" &&
+            trig !== "ignite_reaction" &&
+            trig !== "capture_attempt"
+        ) {
+            return false;
+        }
+        // Authoritative signal is stackSize (queued cards), not open: snapshots may omit or vary open.
+        const hadStack = Number(p.stackSize || 0) > 0;
+        const nextOpen = !!n.open;
+        const nextSz = Number(n.stackSize || 0);
+        const stackCleared = !nextOpen || nextSz === 0;
+        return hadStack && stackCleared;
+    }
 
-        if (!occupied) {
-            if (pmEl.ignitionCardSelf) {
-                pmEl.ignitionCardSelf.innerHTML = "";
-                delete pmEl.ignitionCardSelf.dataset.cardId;
-            }
-            if (pmEl.ignitionCardOpp) {
-                pmEl.ignitionCardOpp.innerHTML = "";
-                delete pmEl.ignitionCardOpp.dataset.cardId;
-            }
-            if (pmEl.ignitionCounterSelf) pmEl.ignitionCounterSelf.classList.add("hidden");
-            if (pmEl.ignitionCounterOpp) pmEl.ignitionCounterOpp.classList.add("hidden");
+    /**
+     * Builds ordered resolve steps (LIFO) from the previous snapshot's reaction stack preview.
+     * @param {object} prevSnap
+     * @returns {{ cardId: string, owner: string }[]}
+     */
+    function reactionStackResolveOrderFromPrev(prevSnap) {
+        const rw = prevSnap?.reactionWindow || {};
+        const raw = Array.isArray(rw.stackCards) ? rw.stackCards : [];
+        if (raw.length > 0) {
+            return [...raw].reverse().map((e) => ({
+                cardId: String(e.cardId || ""),
+                owner: String(e.owner || ""),
+            }));
+        }
+        const stagedId = String(rw.stagedCardId || "");
+        const stagedOwner = String(rw.stagedOwner || "");
+        const sz = Number(rw.stackSize || 0);
+        if (!stagedId || !stagedOwner || sz <= 0) return [];
+        // Without stackCards we only know the visible top; animating the same id N times is wrong.
+        return [{ cardId: stagedId, owner: stagedOwner }];
+    }
+
+    /**
+     * Number of cards queued on the reaction stack (uses stackSize when stackCards is omitted).
+     * @param {object | null} prevSnap
+     * @returns {number}
+     */
+    function reactionStackBannerCardCount(prevSnap) {
+        const rw = prevSnap?.reactionWindow || {};
+        const raw = Array.isArray(rw.stackCards) ? rw.stackCards : [];
+        return Math.max(raw.length, Number(rw.stackSize || 0));
+    }
+
+    /**
+     * "Resolving Effects" banner + glow flush for the reaction stack resolve sequence.
+     * Banner shows only when 2+ effects are activating (reaction card + ignition card, or 2+ reactions).
+     * Per-card glow runs after the banner.
+     * @param {object} prevSnap
+     * @param {object} nextSnap
+     * @returns {Promise<void>}
+     */
+    async function runReactionStackResolveSequence(prevSnap, _nextSnap) {
+        const bannerCount = reactionStackBannerCardCount(prevSnap);
+        const pendingCount = pendingActivateCardPayloads.length;
+        const steps = reactionStackResolveOrderFromPrev(prevSnap);
+        if (steps.length === 0 && pendingCount === 0) {
             return;
         }
-
-        // Global ignition slot — show on the owner's side only; both DOM slots must not retain stale art.
-        const isSelf = owner === localPID;
-        const cardEl = isSelf ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
-        const counterEl = isSelf ? pmEl.ignitionCounterSelf : pmEl.ignitionCounterOpp;
-        const emptyCardEl = isSelf ? pmEl.ignitionCardOpp : pmEl.ignitionCardSelf;
-        const emptyCounterEl = isSelf ? pmEl.ignitionCounterOpp : pmEl.ignitionCounterSelf;
-
-        if (emptyCardEl) {
-            emptyCardEl.innerHTML = "";
-            delete emptyCardEl.dataset.cardId;
+        renderPlaymat(prevSnap);
+        await new Promise((r) => requestAnimationFrame(() => r()));
+        // Show banner only when 2+ effects are activating simultaneously (e.g. retribution + power card).
+        if (Math.max(bannerCount, pendingCount) >= 2) {
+            await showResolvingEffectsBanner();
         }
-        if (emptyCounterEl) emptyCounterEl.classList.add("hidden");
+        flushPendingActivationFx(prevSnap);
+    }
 
-        if (!cardEl) return;
-
-        cardEl.innerHTML = "";
-        cardEl.dataset.cardId = String(cardId || "");
-        if (counterEl) {
-            counterEl.textContent = `${turns}t`;
-            counterEl.classList.toggle("hidden", false);
-        }
-
-        const def = getCardDef(cardId);
-        if (def) {
+    /**
+     * Renders the top queued reaction on the correct side of the playmat for the current viewer.
+     */
+    function renderReactionStagedIfAny(snapshot, localPID) {
+        const rw = snapshot?.reactionWindow;
+        const sid = rw?.stagedCardId;
+        const sor = rw?.stagedOwner;
+        const stackCards = Array.isArray(rw?.stackCards) ? rw.stackCards : [];
+        const clearStagedDecor = () => {
+            [pmEl.ignitionCardSelf, pmEl.ignitionCardOpp].forEach((slot) => {
+                if (!slot) return;
+                slot.classList.remove("pm-ignition-staged");
+                slot.querySelectorAll(".pm-ignition-staged-overlay").forEach((el) => el.remove());
+            });
+        };
+        const mountCardIntoSlot = (slot, counterEl, cardId) => {
+            if (!slot || !cardId) return;
+            const def = getCardDef(cardId);
+            slot.innerHTML = "";
+            slot.dataset.cardId = String(cardId);
+            slot.classList.remove("pm-ignition-staged");
+            slot.querySelectorAll(".pm-ignition-staged-overlay").forEach((el) => el.remove());
+            if (counterEl) counterEl.classList.add("hidden");
+            if (!def) return;
             const cid = String(cardId);
             const card = createPowerCard({
                 type: def.type,
@@ -2689,14 +2995,157 @@ import {
                     syncAllMatchPowerCardMinis(cid, showing);
                 },
             });
-            cardEl.appendChild(card);
-            attachCardHover(cardEl, { ...def, id: cid, manaCost: def.mana });
+            slot.appendChild(card);
+            attachCardHover(slot, { ...def, id: cid, manaCost: def.mana });
+        };
+        // Capture-attempt stacks can have 2+ Counters with no base ignition cards.
+        // Keep the latest card from each owner visible in their ignition slots so
+        // the next card does not "disappear" while the previous one animates.
+        if (rw?.trigger === "capture_attempt" && stackCards.length > 1) {
+            const byOwner = new Map();
+            for (const entry of stackCards) {
+                const owner = String(entry?.owner || "");
+                const cardId = String(entry?.cardId || "");
+                if (owner === "" || cardId === "") continue;
+                byOwner.set(owner, cardId);
+            }
+            const selfCardId = byOwner.get(localPID) || "";
+            const oppPID = localPID === "A" ? "B" : "A";
+            const oppCardId = byOwner.get(oppPID) || "";
+            if (selfCardId) {
+                mountCardIntoSlot(pmEl.ignitionCardSelf, pmEl.ignitionCounterSelf, selfCardId);
+            }
+            if (oppCardId) {
+                mountCardIntoSlot(pmEl.ignitionCardOpp, pmEl.ignitionCounterOpp, oppCardId);
+            }
         }
+        if (!sid || !sor) {
+            clearStagedDecor();
+            return;
+        }
+        const slot = pickReactionStagedSlot(snapshot, localPID, sor);
+        if (!slot) {
+            clearStagedDecor();
+            return;
+        }
+        clearStagedDecor();
+        const baseId = slot.dataset.cardId ? String(slot.dataset.cardId) : "";
+        const overlayNeeded = baseId !== "" && baseId !== String(sid);
+        const counterEl = slot === pmEl.ignitionCardSelf ? pmEl.ignitionCounterSelf : pmEl.ignitionCounterOpp;
+
+        const mountStagedCard = (parent) => {
+            const def = getCardDef(sid);
+            if (!def) return;
+            const cid = String(sid);
+            const card = createPowerCard({
+                type: def.type,
+                name: def.name,
+                description: def.description,
+                example: def.example,
+                mana: def.mana,
+                ignition: def.ignition,
+                cooldown: def.cooldown,
+                cardWidth: "220px",
+                showExampleInitially: matchHandExampleMode.get(cid) === true,
+                onExampleToggle: (showing) => {
+                    matchHandExampleMode.set(cid, showing);
+                    syncAllMatchPowerCardMinis(cid, showing);
+                },
+            });
+            parent.appendChild(card);
+            attachCardHover(parent, { ...def, id: cid, manaCost: def.mana });
+        };
+
+        if (overlayNeeded) {
+            slot.classList.add("pm-ignition-staged");
+            const layer = document.createElement("div");
+            layer.className = "pm-ignition-staged-overlay";
+            slot.appendChild(layer);
+            mountStagedCard(layer);
+            return;
+        }
+
+        slot.classList.add("pm-ignition-staged");
+        slot.innerHTML = "";
+        slot.dataset.cardId = String(sid);
+        if (counterEl) counterEl.classList.add("hidden");
+        mountStagedCard(slot);
+    }
+
+    function renderIgnitionZone(snapshot) {
+        const localPID = playerEl.value;
+        const selfHud = hudForSeat(snapshot, localPID);
+        const oppHud = snapshot?.players?.find((p) => p.playerId !== localPID);
+
+        if (pmEl.ignitionSelf) {
+            pmEl.ignitionSelf.classList.remove("pm-ignition-global-blocked");
+            pmEl.ignitionSelf.title = "";
+        }
+        if (pmEl.ignitionOpp) {
+            pmEl.ignitionOpp.classList.remove("pm-ignition-global-blocked");
+            pmEl.ignitionOpp.title = "";
+        }
+
+        /**
+         * @param {object|undefined} hud
+         * @param {boolean} isSelf
+         */
+        const fillOne = (hud, isSelf) => {
+            const cardEl = isSelf ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
+            const counterEl = isSelf ? pmEl.ignitionCounterSelf : pmEl.ignitionCounterOpp;
+            const occupied = !!hud?.ignitionOn;
+            if (!occupied) {
+                if (cardEl) {
+                    cardEl.innerHTML = "";
+                    delete cardEl.dataset.cardId;
+                    cardEl.classList.remove("pm-ignition-staged");
+                    cardEl.querySelectorAll(".pm-ignition-staged-overlay").forEach((el) => el.remove());
+                }
+                if (counterEl) counterEl.classList.add("hidden");
+                return;
+            }
+            const cardId = hud.ignitionCard;
+            const turns = hud.ignitionTurnsRemaining ?? 0;
+            if (!cardEl) return;
+            cardEl.innerHTML = "";
+            cardEl.dataset.cardId = String(cardId || "");
+            cardEl.classList.remove("pm-ignition-staged");
+            cardEl.querySelectorAll(".pm-ignition-staged-overlay").forEach((el) => el.remove());
+            if (counterEl) {
+                counterEl.textContent = `${turns}t`;
+                counterEl.classList.remove("hidden");
+            }
+            const def = getCardDef(cardId);
+            if (def) {
+                const cid = String(cardId);
+                const card = createPowerCard({
+                    type: def.type,
+                    name: def.name,
+                    description: def.description,
+                    example: def.example,
+                    mana: def.mana,
+                    ignition: def.ignition,
+                    cooldown: def.cooldown,
+                    cardWidth: "220px",
+                    showExampleInitially: matchHandExampleMode.get(cid) === true,
+                    onExampleToggle: (showing) => {
+                        matchHandExampleMode.set(cid, showing);
+                        syncAllMatchPowerCardMinis(cid, showing);
+                    },
+                });
+                cardEl.appendChild(card);
+                attachCardHover(cardEl, { ...def, id: cid, manaCost: def.mana });
+            }
+        };
+
+        fillOne(selfHud, true);
+        fillOne(oppHud, false);
+        renderReactionStagedIfAny(snapshot, localPID);
     }
 
     function renderCooldownZone(self, opp) {
-        renderCooldownList(pmEl.cooldownCardsSelf, self.cooldownPreview || [], self.cooldownHiddenCount);
-        renderCooldownList(pmEl.cooldownCardsOpp, opp.cooldownPreview || [], opp.cooldownHiddenCount);
+        renderCooldownList(pmEl.cooldownCardsSelf, self.cooldownPreview || []);
+        renderCooldownList(pmEl.cooldownCardsOpp, opp.cooldownPreview || []);
     }
 
     /**
@@ -2704,15 +3153,13 @@ import {
      * overlap tightens so the row fits the container width.
      * @param {HTMLElement | null} container
      * @param {Array<{ cardId: string, turnsRemaining: number }>} allEntries
-     * @param {number} hiddenCount
      */
-    function renderCooldownList(container, allEntries, hiddenCount) {
+    function renderCooldownList(container, allEntries) {
         if (!container) return;
         container.innerHTML = "";
         const entries = sortCooldownEntriesForDisplay(allEntries || []);
-        const extraHidden = Math.max(0, Number(hiddenCount) || 0);
-        const stackTotal = entries.length + (extraHidden > 0 ? 1 : 0);
-        container.style.setProperty("--cd-stack-n", String(Math.max(1, stackTotal)));
+        const stackTotal = Math.max(1, entries.length);
+        container.style.setProperty("--cd-stack-n", String(stackTotal));
 
         const stack = document.createElement("div");
         stack.className = "pm-cooldown-stack";
@@ -2745,6 +3192,7 @@ import {
                     },
                 });
                 wrap.appendChild(card);
+                attachCardHover(wrap, { ...def, id: cid, manaCost: def.mana });
             } else {
                 const fb = document.createElement("div");
                 fb.className = "pm-sleeve-card";
@@ -2757,21 +3205,6 @@ import {
             wrap.appendChild(turnsEl);
             stack.appendChild(wrap);
         }
-
-        if (extraHidden > 0) {
-            const i = entries.length;
-            const wrap = document.createElement("div");
-            wrap.className = "pm-cooldown-card-wrap pm-cooldown-card-wrap--hidden";
-            wrap.dataset.cooldownIndex = String(i);
-            wrap.style.setProperty("--i", String(i));
-            const label = document.createElement("span");
-            label.className = "pm-cooldown-hidden-label";
-            label.textContent = `+${extraHidden}`;
-            wrap.appendChild(label);
-            stack.appendChild(wrap);
-        }
-
-        wireCooldownStackPointerHover(stack, entries);
     }
 
     function renderHandZone(self, opp) {
@@ -2805,8 +3238,6 @@ import {
             if (idx < 0 || idx >= hand.length) mulliganPick.delete(idx);
         }
         const snap = lastSnapshot;
-        const isMyTurn = snap && snap.turnPlayer === playerEl.value;
-        const ignitionOccupied = snap && snap.ignitionOn;
         const mr = snap?.mulliganReturned || {};
         const myPid = playerEl.value;
         const myMulliganDone = mr[myPid] !== undefined && mr[myPid] >= 0;
@@ -2853,8 +3284,7 @@ import {
                 wrap.appendChild(card);
             }
             wrap.style.setProperty("--i", String(i));
-            const canActivate =
-                !mulliganChoose && isMyTurn && (!ignitionOccupied || entry.cardId === "save-it-for-later");
+            const canActivate = !mulliganChoose && canActivateHandCard(snap, myPid, entry);
             wrap.classList.toggle("pm-hand-card-wrap--inactive", !canActivate);
             wrap.classList.toggle("pm-hand-card-wrap--mulligan-return", mulliganChoose && mulliganPick.has(i));
             if (mulliganChoose) {
@@ -2878,6 +3308,92 @@ import {
         if (!mulliganChoose) {
             wireHandStackPointerDrag(stack);
         }
+    }
+
+    function isReactionFirstResponseTurn(snapshot, pid) {
+        const rw = snapshot?.reactionWindow || {};
+        if (!rw.open) return false;
+        if (!rw.actor || rw.actor === pid) return false;
+        const stackSize = Number(rw.stackSize || 0);
+        return Number.isFinite(stackSize) && stackSize === 0;
+    }
+
+    function isReactionWindowOpen(snapshot) {
+        return !!snapshot?.reactionWindow?.open;
+    }
+
+    /**
+     * Attacker may pass the optional Blockade step after the defender queues Counterattack (capture_attempt).
+     */
+    function canAttackerPassAfterCounterQueued(snapshot, pid) {
+        const rw = snapshot?.reactionWindow || {};
+        if (!rw.open || rw.trigger !== "capture_attempt") return false;
+        if (!rw.actor || rw.actor !== pid) return false;
+        const stackSize = Number(rw.stackSize || 0);
+        if (stackSize !== 1) return false;
+        if ((rw.stagedCardId || "") !== "counterattack") return false;
+        if ((rw.stagedOwner || "") === pid) return false;
+        return true;
+    }
+
+    function canPassReactionPriority(snapshot, pid) {
+        return isReactionFirstResponseTurn(snapshot, pid) || canAttackerPassAfterCounterQueued(snapshot, pid);
+    }
+
+    /**
+     * True when this seat's ignition zone is occupied. Server rejects new normal ignite_card
+     * for that seat until it clears.
+     * @param {object|null} snapshot
+     * @param {string} pid
+     * @returns {boolean}
+     */
+    function isOwnIgnitionOccupied(snapshot, pid) {
+        return !!hudForSeat(snapshot, pid)?.ignitionOn;
+    }
+
+    /**
+     * Returns whether the hand card's type matches reactionWindow.eligibleTypes (case-insensitive).
+     * Server metadata uses title case ("Counter"); card-metadata may use lowercase ("counter").
+     */
+    function cardMatchesReactionEligibleTypes(snapshot, handEntry) {
+        const eligible = snapshot?.reactionWindow?.eligibleTypes;
+        if (!Array.isArray(eligible) || eligible.length === 0) return true;
+        const def = getCardDef(handEntry?.cardId);
+        if (!def?.type) return false;
+        const t = String(def.type).toLowerCase();
+        return eligible.some((e) => String(e).toLowerCase() === t);
+    }
+
+    function canActivateHandCard(snapshot, pid, handEntry) {
+        if (!snapshot || !pid || !handEntry) return false;
+        if (isOwnIgnitionOccupied(snapshot, pid)) {
+            return false;
+        }
+        if (isReactionWindowOpen(snapshot)) {
+            return cardMatchesReactionEligibleTypes(snapshot, handEntry);
+        }
+        if (isReactionFirstResponseTurn(snapshot, pid)) {
+            return true;
+        }
+        const isMyTurn = snapshot.turnPlayer === pid;
+        if (!isMyTurn) return false;
+        return true;
+    }
+
+    function sendHandCardAction(snapshot, handIndex) {
+        if (!isGameplayInputOpen()) return;
+        if (isReactionWindowOpen(snapshot)) {
+            send("queue_reaction", { handIndex });
+            return;
+        }
+        send("ignite_card", { handIndex });
+    }
+
+    function updateReactionPassButton(snapshot) {
+        if (!reactionPassBtnEl) return;
+        const canPass = canPassReactionPriority(snapshot, playerEl.value);
+        reactionPassBtnEl.classList.toggle("hidden", !canPass);
+        reactionPassBtnEl.disabled = !canPass || !isGameplayInputOpen();
     }
 
     function renderOppHand(container, opp) {
@@ -2923,7 +3439,7 @@ import {
         const gameOn = snapshot.gameStarted && !snapshot.matchEnded;
         const mulliganOn = !!snapshot.mulliganPhaseActive;
         btn.disabled =
-            mulliganOn || !(isMyTurn && hasMana && hasSpace && gameOn) || turnResourceAnimBlocking;
+            mulliganOn || !(isMyTurn && hasMana && hasSpace && gameOn) || !isGameplayInputOpen();
     }
 
     // ---------------------------------------------------------------------------
@@ -2941,7 +3457,6 @@ import {
 
     // Hand → ignition: shared state for HTML5 drop target + pointer drag.
     let draggingHandIndex = null;
-    let draggingHandEntry = null;
 
     /**
      * First wrap (left-to-right DOM order) whose horizontal bounds contain clientX wins overlaps.
@@ -2975,6 +3490,12 @@ import {
         }
 
         function onMove(ev) {
+            if (draggingHandIndex !== null) {
+                if (lastIdx !== -1) hideCardPreview();
+                lastIdx = -1;
+                clearPeek();
+                return;
+            }
             const x = ev.clientX;
             const wraps = [...stack.querySelectorAll(wrapSelector)];
             let idx = overlapHitFirstWrapIndex(x, wraps);
@@ -3028,16 +3549,26 @@ import {
         stack.addEventListener("mouseleave", onLeave);
     }
 
-    /**
-     * @param {HTMLElement} stack
-     * @param {Array<{ cardId: string, turnsRemaining: number }>} entries
-     */
-    function wireCooldownStackPointerHover(stack, entries) {
-        wireOverlapStackPreviewHover(stack, entries, {
-            wrapSelector: ".pm-cooldown-card-wrap:not(.pm-cooldown-card-wrap--hidden)",
-            peekClassName: "pm-cooldown-card-wrap--peek",
-            hiddenSelector: ".pm-cooldown-card-wrap--hidden",
+    function clearDanglingHandDragCards() {
+        document.querySelectorAll(".power-card--hand-dragging").forEach((card) => {
+            if (!(card instanceof HTMLElement)) return;
+            card.classList.remove("power-card--hand-dragging");
+            card.style.position = "";
+            card.style.left = "";
+            card.style.top = "";
+            card.style.width = "";
+            card.style.zIndex = "";
+            card.style.margin = "";
+            card.style.pointerEvents = "";
+            card.style.transform = "";
+            card.style.transformOrigin = "";
+            card.style.boxShadow = "";
+            if (card.parentElement === document.body) {
+                card.remove();
+            }
         });
+        draggingHandIndex = null;
+        hideCardPreview();
     }
 
     /**
@@ -3084,12 +3615,12 @@ import {
                 pmEl.ignitionSelf.classList.remove("pm-drop-active", "pm-drop-hover");
             }
             draggingHandIndex = null;
-            draggingHandEntry = null;
-        }
+            }
 
         stack.addEventListener("pointerdown", (ev) => {
             if (ev.button !== 0) return;
-            if (turnResourceAnimBlocking) return;
+            if (!isGameplayInputOpen()) return;
+            clearDanglingHandDragCards();
             // Let the description/example toggle receive a normal click cycle; pointer capture
             // on the stack would steal pointerup/click from the button.
             const t = ev.target;
@@ -3107,9 +3638,7 @@ import {
             if (idx < 0 || idx >= hand.length) return;
 
             const entry = hand[idx];
-            const isMyTurn = snap && snap.turnPlayer === localPID;
-            const ignitionOccupied = snap && snap.ignitionOn;
-            const canActivate = isMyTurn && (!ignitionOccupied || entry.cardId === "save-it-for-later");
+            const canActivate = canActivateHandCard(snap, localPID, entry);
             if (!canActivate) return;
 
             pending = {
@@ -3135,7 +3664,6 @@ import {
                 if (dx * dx + dy * dy < dragThresholdPx * dragThresholdPx) return;
                 pending.armed = true;
                 draggingHandIndex = pending.idx;
-                draggingHandEntry = pending.entry;
                 pmEl.ignitionSelf?.classList.add("pm-drop-active");
                 hideCardPreview();
                 const wraps = [...stack.querySelectorAll(".pm-hand-card-wrap")];
@@ -3200,12 +3728,26 @@ import {
                     droppedOnIgnition = true;
                 }
             }
-            if (droppedOnIgnition && !turnResourceAnimBlocking) {
-                send("activate_card", { handIndex: pending.idx });
+            if (droppedOnIgnition && isGameplayInputOpen()) {
+                const idx = pending.idx;
+                sendHandCardAction(lastSnapshot, idx);
+                if (pending.cardEl && pending.wrapEl) {
+                    const card = pending.cardEl;
+                    const wrap = pending.wrapEl;
+                    card.classList.remove("power-card--hand-dragging");
+                    wrap.classList.remove("pm-hand-card-wrap--dragging");
+                    wrap.style.minHeight = "";
+                    if (card.parentNode === document.body) {
+                        card.remove();
+                    }
+                }
+                if (lastSnapshot) {
+                    renderPlaymat(lastSnapshot);
+                }
+            } else {
+                // Restore the hand card DOM when not committing to ignition (clear position:fixed).
+                resetHandDragVisual(pending);
             }
-            // Always restore the hand card DOM (clear position:fixed). If we skipped this on
-            // ignition drop, a rejected/late snapshot left the card floating forever.
-            resetHandDragVisual(pending);
             clearDragChrome();
             pending = null;
         }
@@ -3225,7 +3767,7 @@ import {
 
         slot.addEventListener("dragover", (ev) => {
             // Only allow drop when a hand card is being dragged.
-            if (draggingHandIndex === null || turnResourceAnimBlocking) return;
+            if (draggingHandIndex === null || !isGameplayInputOpen()) return;
             ev.preventDefault();
             ev.dataTransfer.dropEffect = "move";
         });
@@ -3237,21 +3779,23 @@ import {
         });
 
         slot.addEventListener("dragenter", (ev) => {
-            if (draggingHandIndex === null || turnResourceAnimBlocking) return;
+            if (draggingHandIndex === null || !isGameplayInputOpen()) return;
             ev.preventDefault();
             slot.classList.add("pm-drop-hover");
         });
 
         slot.addEventListener("drop", (ev) => {
             ev.preventDefault();
-            if (turnResourceAnimBlocking) return;
+            if (!isGameplayInputOpen()) return;
             slot.classList.remove("pm-drop-hover");
             slot.classList.remove("pm-drop-active");
             const idx = draggingHandIndex;
             draggingHandIndex = null;
-            draggingHandEntry = null;
-            if (idx === null) return;
-            send("activate_card", { handIndex: idx });
+                if (idx === null) return;
+            sendHandCardAction(lastSnapshot, idx);
+            if (lastSnapshot) {
+                renderPlaymat(lastSnapshot);
+            }
         });
     }
 
@@ -3264,98 +3808,10 @@ import {
         }
     });
 
-    // Pile view modal (shared for cooldown/banish inspection)
-    // showTurns=true renders a "Xt" badge on each card (used for cooldown pile).
-    function openPileView(title, cards, sleeve, showTurns) {
-        if (!pmEl.pileViewModal || !pmEl.pileViewGrid) return;
-        pmEl.pileViewTitle.textContent = title;
-        pmEl.pileViewGrid.innerHTML = "";
-        if (cards.length === 0) {
-            const empty = document.createElement("p");
-            empty.style.cssText = "color:#888;text-align:center;width:100%;padding:24px 0";
-            empty.textContent = "Empty pile.";
-            pmEl.pileViewGrid.appendChild(empty);
-        }
-        const catalog = getLocalizedCardCatalog(locale);
-        const byId = new Map(catalog.map((c) => [c.id, c]));
-        for (const entry of cards) {
-            const def = byId.get(entry.cardId);
-            if (!def) continue;
-            const wrap = document.createElement("div");
-            wrap.className = "deck-view-card-wrap";
-            const card = createPowerCard({
-                type: def.type,
-                name: def.name,
-                description: def.description,
-                example: def.example,
-                mana: def.mana,
-                ignition: def.ignition,
-                cooldown: def.cooldown,
-                cardWidth: "180px",
-            });
-            wrap.appendChild(card);
-            if (showTurns && entry.turnsRemaining !== undefined) {
-                const badge = document.createElement("span");
-                badge.className = "count-badge";
-                badge.style.color = "#7ab0e0";
-                badge.textContent = `${entry.turnsRemaining}t`;
-                wrap.appendChild(badge);
-            }
-            pmEl.pileViewGrid.appendChild(wrap);
-        }
-        pmEl.pileViewModal.classList.remove("hidden");
-        pmEl.pileViewModal.setAttribute("aria-hidden", "false");
-    }
-
-    function closePileView() {
-        if (!pmEl.pileViewModal) return;
-        pmEl.pileViewModal.classList.add("hidden");
-        pmEl.pileViewModal.setAttribute("aria-hidden", "true");
-        pmEl.pileViewGrid.innerHTML = "";
-    }
-
-    if (pmEl.pileViewCloseBtn) {
-        pmEl.pileViewCloseBtn.addEventListener("click", closePileView);
-    }
-    if (pmEl.pileViewModal) {
-        pmEl.pileViewModal.addEventListener("click", (ev) => {
-            if (ev.target === pmEl.pileViewModal) closePileView();
-        });
-    }
-
-    // Zone click → open pile modal
-    if (pmEl.banishSelf) {
-        pmEl.banishSelf.addEventListener("click", () => {
-            const snap = lastSnapshot;
-            const self = snap?.players?.find((p) => p.playerId === playerEl.value);
-            openPileView("Banished — Your pile", self?.banishedCards || []);
-        });
-    }
-    if (pmEl.banishOpp) {
-        pmEl.banishOpp.addEventListener("click", () => {
-            const snap = lastSnapshot;
-            const opp = snap?.players?.find((p) => p.playerId !== playerEl.value);
-            openPileView("Banished — Opponent", opp?.banishedCards || []);
-        });
-    }
-    if (pmEl.cooldownSelf) {
-        pmEl.cooldownSelf.addEventListener("click", () => {
-            const snap = lastSnapshot;
-            const self = snap?.players?.find((p) => p.playerId === playerEl.value);
-            openPileView("Cooldown — Your pile", self?.cooldownPreview || [], null, true);
-        });
-    }
-    if (pmEl.cooldownOpp) {
-        pmEl.cooldownOpp.addEventListener("click", () => {
-            const snap = lastSnapshot;
-            const opp = snap?.players?.find((p) => p.playerId !== playerEl.value);
-            openPileView("Cooldown — Opponent", opp?.cooldownPreview || [], null, true);
-        });
-    }
-
     // DRAW button
     if (pmEl.drawBtn) {
         pmEl.drawBtn.addEventListener("click", () => {
+            if (!isGameplayInputOpen()) return;
             send("draw_card", {});
         });
     }
@@ -3370,83 +3826,88 @@ import {
         const players = snapshot?.players || [];
         for (const p of players) {
             if (p.playerId === "A") {
-                if (strikesAEl) strikesAEl.textContent = String(p.strikes ?? 0);
                 setBar(manaFillA, manaLabelA, p.mana, p.maxMana);
                 setBar(energizedFillA, energizedLabelA, p.energizedMana, p.maxEnergized);
             } else if (p.playerId === "B") {
-                if (strikesBEl) strikesBEl.textContent = String(p.strikes ?? 0);
                 setBar(manaFillB, manaLabelB, p.mana, p.maxMana);
                 setBar(energizedFillB, energizedLabelB, p.energizedMana, p.maxEnergized);
             }
         }
     }
 
-    function clocksActive(snapshot) {
-        return snapshot && snapshot.gameStarted === true && !snapshot.matchEnded;
+    /**
+     * Blocks gameplay input during effect visuals. Overlapping calls extend the block to the
+     * latest end time so rapid snapshots do not shorten the protection window.
+     * @param {number} ms
+     */
+    function blockGameplayInputForEffects(ms) {
+        const m = Math.max(0, Number(ms) || 0);
+        effectAnimBlocking = true;
+        const want = Date.now() + m;
+        if (want > effectAnimUnblockAt) {
+            effectAnimUnblockAt = want;
+        }
+        const hadScheduled = effectAnimBlockTimeout != null;
+        if (effectAnimBlockTimeout) {
+            clearTimeout(effectAnimBlockTimeout);
+            effectAnimBlockTimeout = null;
+        }
+        if (!hadScheduled) {
+            send("client_fx_hold", {});
+        }
+        const delay = Math.max(0, effectAnimUnblockAt - Date.now());
+        effectAnimBlockTimeout = setTimeout(() => {
+            effectAnimBlocking = false;
+            effectAnimUnblockAt = 0;
+            effectAnimBlockTimeout = null;
+            send("client_fx_release", {});
+        }, delay);
     }
 
     /**
-     * Captures turn clock display so it stays fixed during turn-start resource animations.
+     * Returns true when snapshot delta likely triggers card/effect visual transitions.
+     * This prevents locking gameplay input on every periodic snapshot tick.
+     * @param {object|null} prevSnap
+     * @param {object} nextSnap
+     * @returns {boolean}
      */
-    function beginTurnResourceAnimFreeze() {
-        if (!clockAEl || !clockBEl) return;
-        const snap = lastSnapshot;
-        if (!clocksActive(snap)) return;
-        const secLeft = Math.max(0, Math.ceil((turnDeadline - Date.now()) / 1000));
-        frozenTurnClockDisplay = { active: currentTurn, secLeft };
+    function hasEffectAnimationDelta(prevSnap, nextSnap) {
+        if (!prevSnap || !nextSnap) return false;
+        if (ignitionHudSignature(prevSnap) !== ignitionHudSignature(nextSnap)) return true;
+        if ((prevSnap.activationQueueSize || 0) !== (nextSnap.activationQueueSize || 0)) return true;
+        const prevPE = Array.isArray(prevSnap.pendingEffects) ? prevSnap.pendingEffects.length : 0;
+        const nextPE = Array.isArray(nextSnap.pendingEffects) ? nextSnap.pendingEffects.length : 0;
+        if (prevPE !== nextPE) return true;
+        const prevRW = prevSnap.reactionWindow || {};
+        const nextRW = nextSnap.reactionWindow || {};
+        if ((prevRW.stackSize || 0) !== (nextRW.stackSize || 0)) return true;
+        if ((prevRW.stagedCardId || "") !== (nextRW.stagedCardId || "")) return true;
+        if ((prevRW.stagedOwner || "") !== (nextRW.stagedOwner || "")) return true;
+        return false;
     }
 
-    function endTurnResourceAnimFreeze() {
-        frozenTurnClockDisplay = null;
+    /**
+     * Whether the match allows gameplay input (not blocked by reconnect banner or local animations).
+     * @param {object} [snapshot]
+     * @param {{ turnStartAnimation?: boolean, effectAnimation?: boolean }} [uiLocks]
+     */
+    function isOpenGameState(snapshot, uiLocks) {
+        if (snapshot?.gameStarted !== true || snapshot?.matchEnded) return false;
+        if (uiLocks?.turnStartAnimation) return false;
+        if (uiLocks?.effectAnimation) return false;
+        if (snapshot?.reconnectPendingFor) return false;
+        return true;
     }
 
-    function renderTurnClocks() {
-        if (!clockAEl || !clockBEl) return;
-        const snap = lastSnapshot;
-        if (!clocksActive(snap)) {
-            clockAEl.textContent = "--";
-            clockBEl.textContent = "--";
-            return;
-        }
-        if (turnResourceAnimBlocking && frozenTurnClockDisplay) {
-            const t = frozenTurnClockDisplay;
-            const secLeft = t.secLeft;
-            if (t.active === "A") {
-                clockAEl.textContent = String(secLeft);
-                clockBEl.textContent = String(turnSeconds);
-            } else {
-                clockAEl.textContent = String(turnSeconds);
-                clockBEl.textContent = String(secLeft);
-            }
-            return;
-        }
-        const secLeft = Math.max(0, Math.ceil((turnDeadline - Date.now()) / 1000));
-        if (currentTurn === "A") {
-            clockAEl.textContent = String(secLeft);
-            clockBEl.textContent = String(turnSeconds);
-        } else {
-            clockAEl.textContent = String(turnSeconds);
-            clockBEl.textContent = String(secLeft);
-        }
-    }
-
-    function turnSecondsFromSnapshot(payload) {
-        const v = Number(payload?.turnSeconds);
-        if (!Number.isFinite(v) || v <= 0) return 30;
-        return Math.round(v);
-    }
-
-    function handleAutoSkipReaction(snapshot) {
-        if (!reactionToggleEl || reactionToggleEl.checked) return;
-        const rw = snapshot?.reactionWindow;
-        if (!rw?.open) return;
-        const localPlayer = playerEl.value;
-        if (rw.stackSize === 0 && rw.actor && rw.actor !== localPlayer) {
-            send("resolve_reactions", {});
-        }
+    function isGameplayInputOpen() {
+        return isOpenGameState(lastSnapshot, {
+            turnStartAnimation: turnResourceAnimBlocking,
+            effectAnimation: effectAnimBlocking,
+        });
     }
 
     function sendMove(from, to) {
+        if (!isGameplayInputOpen()) return;
         send("submit_move", {
             fromRow: from.row,
             fromCol: from.col,
@@ -3455,15 +3916,121 @@ import {
         });
     }
 
+    function pushClientTrace(entry) {
+        try {
+            clientTraceBuffer.push({ ts: new Date().toISOString(), ...entry });
+            if (clientTraceBuffer.length > CLIENT_TRACE_CAP) {
+                clientTraceBuffer.splice(0, clientTraceBuffer.length - CLIENT_TRACE_CAP);
+            }
+        } catch (_) {
+            /* ignore */
+        }
+    }
+
+    /**
+     * Strips full boards / hands from trace entries before mirroring to server logs (ADMIN_DEBUG_MATCH).
+     * The in-browser buffer keeps full payloads; use Download client trace for complete JSON.
+     * @param {object} entry
+     * @returns {object}
+     */
+    function slimTraceEntryForServerMirror(entry) {
+        try {
+            if (entry.envelope && typeof entry.envelope === "object") {
+                const env = entry.envelope;
+                const slim = { ts: entry.ts, dir: entry.dir, envelope: { type: env.type, id: env.id } };
+                if (env.type === "state_snapshot" && env.payload && typeof env.payload === "object") {
+                    const p = env.payload;
+                    slim.envelope.payload = {
+                        roomId: p.roomId,
+                        turnPlayer: p.turnPlayer,
+                        turnNumber: p.turnNumber,
+                        matchEnded: p.matchEnded,
+                        pendingCapture: p.pendingCapture,
+                        reactionWindow: p.reactionWindow
+                            ? {
+                                  open: p.reactionWindow.open,
+                                  trigger: p.reactionWindow.trigger,
+                                  stackSize: p.reactionWindow.stackSize,
+                              }
+                            : undefined,
+                        mulliganPhaseActive: p.mulliganPhaseActive,
+                    };
+                } else if (env.payload !== undefined) {
+                    slim.envelope.payload = env.payload;
+                }
+                return slim;
+            }
+            return { ts: entry.ts, dir: entry.dir, type: entry.type, payload: entry.payload };
+        } catch (_) {
+            return { ts: entry.ts, dir: entry.dir, note: "slim_failed" };
+        }
+    }
+
+    function flushClientTraceToServer() {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (!lastSnapshot?.adminDebugMatch || !joinedRoom) return;
+        if (clientTraceBuffer.length === 0) return;
+        const chunk = clientTraceBuffer.slice(-80).map(slimTraceEntryForServerMirror);
+        let text;
+        try {
+            text = JSON.stringify(chunk);
+        } catch (_) {
+            text = `{"error":"serialize_failed"}`;
+        }
+        ws.send(JSON.stringify({ id: `req-${seq++}`, type: "client_trace", payload: { text } }));
+    }
+
+    function downloadClientTraceJson() {
+        let raw;
+        try {
+            raw = JSON.stringify(clientTraceBuffer, null, 2);
+        } catch (_) {
+            raw = "[]";
+        }
+        const blob = new Blob([raw], { type: "application/json" });
+        const a = document.createElement("a");
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        a.href = URL.createObjectURL(blob);
+        a.download = `power-chess-client-trace-${stamp}.json`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+
     function logEvent(obj) {
+        try {
+            pushClientTrace({ dir: "in", envelope: obj });
+        } catch (_) {
+            /* ignore */
+        }
         if (!eventsEl) return;
-        const line = JSON.stringify(obj);
-        eventsEl.textContent = `${line}\n${eventsEl.textContent}`.slice(0, 8000);
+        let line;
+        try {
+            line = JSON.stringify(obj, null, 2);
+        } catch (_) {
+            line = String(obj);
+        }
+        const cap = 32000;
+        const next = `${line}\n\n${eventsEl.textContent}`;
+        eventsEl.textContent = next.slice(0, cap);
     }
 
     function send(type, payload) {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        if (turnResourceAnimBlocking) return;
+        if (type !== "client_trace") {
+            try {
+                pushClientTrace({ dir: "out", type, payload: payload ?? null });
+            } catch (_) {
+                /* ignore */
+            }
+        }
+        const bypassTurnStartAnim =
+            type === "ping" ||
+            type === "pong" ||
+            type === "leave_match" ||
+            type === "client_trace" ||
+            type === "client_fx_hold" ||
+            type === "client_fx_release";
+        if (turnResourceAnimBlocking && !bypassTurnStartAnim) return;
         ws.send(JSON.stringify({ id: `req-${seq++}`, type, payload }));
     }
 
@@ -3499,9 +4066,72 @@ import {
         const s = lastSnapshot;
         if (!s?.board || !gameStarted || s.matchEnded) return false;
         if (s.mulliganPhaseActive) return false;
-        if (turnResourceAnimBlocking) return false;
+        if (!isGameplayInputOpen()) return false;
         if (s.turnPlayer !== playerEl.value) return false;
         return true;
+    }
+
+       /** Draws arrow from attacker to capture target while `pendingCapture` is active (server snapshot). */
+    function renderCaptureThreatOverlay() {
+        const svg = captureThreatOverlayEl;
+        if (!svg || !boardFrameEl) return;
+        const pc = lastSnapshot?.pendingCapture;
+        if (!pc?.active) {
+            svg.innerHTML = "";
+            return;
+        }
+        const paint = () => {
+            if (!boardFrameEl || !captureThreatOverlayEl) return;
+            const pcInner = lastSnapshot?.pendingCapture;
+            if (!pcInner?.active) {
+                svg.innerHTML = "";
+                return;
+            }
+            const fr = Number(pcInner.fromRow ?? 0);
+            const fc = Number(pcInner.fromCol ?? 0);
+            const tr = Number(pcInner.toRow ?? 0);
+            const tc = Number(pcInner.toCol ?? 0);
+            const fromSq = boardFrameEl.querySelector(`.sq[data-row="${fr}"][data-col="${fc}"]`);
+            const toSq = boardFrameEl.querySelector(`.sq[data-row="${tr}"][data-col="${tc}"]`);
+            if (!fromSq || !toSq) {
+                svg.innerHTML = "";
+                return;
+            }
+            void boardFrameEl.offsetWidth;
+            const br = boardFrameEl.getBoundingClientRect();
+            const w = Math.max(1, br.width);
+            const h = Math.max(1, br.height);
+            svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+            svg.setAttribute("width", "100%");
+            svg.setAttribute("height", "100%");
+            const r1 = fromSq.getBoundingClientRect();
+            const r2 = toSq.getBoundingClientRect();
+            const x1 = r1.left - br.left + r1.width / 2;
+            const y1 = r1.top - br.top + r1.height / 2;
+            const x2 = r2.left - br.left + r2.width / 2;
+            const y2 = r2.top - br.top + r2.height / 2;
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const len = Math.hypot(dx, dy) || 1;
+            const ux = dx / len;
+            const uy = dy / len;
+            const head = 12;
+            const halfW = 5.5;
+            const lineEndX = x2 - ux * head;
+            const lineEndY = y2 - uy * head;
+            const px = -uy;
+            const py = ux;
+            const b1x = lineEndX + px * halfW;
+            const b1y = lineEndY + py * halfW;
+            const b2x = lineEndX - px * halfW;
+            const b2y = lineEndY - py * halfW;
+            const line = `<line x1="${x1}" y1="${y1}" x2="${lineEndX}" y2="${lineEndY}" stroke="#dc2626" stroke-width="3" stroke-linecap="round" opacity="0.88"/>`;
+            const headPoly = `<polygon points="${x2},${y2} ${b1x},${b1y} ${b2x},${b2y}" fill="#dc2626" opacity="0.88"/>`;
+            svg.innerHTML = line + headPoly;
+        };
+        requestAnimationFrame(() => {
+            requestAnimationFrame(paint);
+        });
     }
 
     function renderBoard(board) {
@@ -3512,6 +4142,9 @@ import {
         const moveSet = boardMoveKeySet();
         const selectedKey = selectedFrom ? posKey(selectedFrom.row, selectedFrom.col) : null;
         const ep = lastSnapshot?.enPassant;
+        const pendingCap = lastSnapshot?.pendingCapture;
+        const capToR = Number(pendingCap?.toRow ?? -1);
+        const capToC = Number(pendingCap?.toCol ?? -1);
 
         for (let gr = 0; gr < 10; gr++) {
             for (let gc = 0; gc < 10; gc++) {
@@ -3555,6 +4188,9 @@ import {
                 if (code) sq.classList.add("piece");
                 if (selectedKey === posKey(r, c)) sq.classList.add("selected");
                 if (moveSet.has(posKey(r, c))) sq.classList.add("move");
+                if (pendingCap?.active && capToR === r && capToC === c) {
+                    sq.classList.add("capture-threat-target");
+                }
                 const coordSpan = document.createElement("span");
                 coordSpan.className = "sq-coord";
                 coordSpan.textContent = logicalToAlgebraic(r, c);
@@ -3673,6 +4309,7 @@ import {
                 boardFrameEl.appendChild(sq);
             }
         }
+        renderCaptureThreatOverlay();
     }
 
     function renderStatus(snapshot) {
@@ -3723,12 +4360,13 @@ import {
         }
         opponentDisconnectOverlayEl.classList.remove("hidden");
         opponentDisconnectOverlayEl.setAttribute("aria-hidden", "false");
-        document.getElementById("opponentDisconnectTitle").textContent = t("opponentDisconnectedTitle");
-        document.getElementById("opponentDisconnectHint").textContent = t("opponentDisconnectedHint");
+        const titleEl = document.getElementById("opponentDisconnectTitle");
         const countdownEl = document.getElementById("opponentDisconnectCountdown");
+        document.getElementById("opponentDisconnectHint").textContent = t("opponentDisconnectedHint");
+        if (countdownEl) countdownEl.classList.add("hidden");
         const tick = () => {
             const sec = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-            countdownEl.textContent = t("opponentDisconnectedSeconds", { s: sec });
+            if (titleEl) titleEl.textContent = t("opponentDisconnectedBanner", { s: sec });
             if (sec <= 0) {
                 hideOpponentDisconnectOverlay();
             }
@@ -3773,7 +4411,6 @@ import {
             both_disconnected_cancelled: t("reasonBothDisconnected"),
             disconnect_timeout: t("reasonDisconnectTimeout"),
             left_room: t("reasonLeftRoom"),
-            strike_limit: t("reasonStrikeLimit"),
         };
         return m[code] || (code ? `${t("reasonPrefix")}: ${code}.` : "");
     }
@@ -3924,15 +4561,6 @@ import {
         inRoomLabelEl.append(` | ${youRoom}`);
     }
 
-    function syncTurnFromSnapshot(payload) {
-        if (!clocksActive(payload)) return;
-        turnSeconds = turnSecondsFromSnapshot(payload);
-        if (payload.turnPlayer && payload.turnPlayer !== currentTurn) {
-            currentTurn = payload.turnPlayer;
-            turnDeadline = Date.now() + turnSeconds * 1000;
-        }
-    }
-
     /**
      * Sends one `debug_match_fixture` on the snapshot where the second player has just joined
      * (transition to both connected). Optionally queues mulligan confirm for a later snapshot.
@@ -3975,6 +4603,10 @@ import {
     }
 
     function resetToLobbyUi() {
+        if (clientTraceMirrorTimerId) {
+            clearInterval(clientTraceMirrorTimerId);
+            clientTraceMirrorTimerId = null;
+        }
         joinedRoom = false;
         gameStarted = false;
         matchTestFixtureSent = false;
@@ -3982,6 +4614,7 @@ import {
         matchTestAwaitingMulliganConfirm = false;
         lastSnapshot = null;
         pmPrevSnapshot = null;
+        prevReceivedSnapshot = null;
         snapshotApplyChain = Promise.resolve();
         setLobbyFooterVisible(true);
         if (lobbyScreenEl) lobbyScreenEl.classList.remove("hidden");
@@ -3998,15 +4631,15 @@ import {
         renderStatus({});
         if (snapshotEl) snapshotEl.textContent = "";
         if (inRoomLabelEl) inRoomLabelEl.textContent = "";
-        currentTurn = "A";
-        turnSeconds = 30;
-        turnDeadline = Date.now() + turnSeconds * 1000;
         revealRoomPassword = false;
         prevMatchEnded = false;
+        pendingActivateCardPayloads = [];
+        activationFxQueue = [];
+        activationFxWorkerPromise = null;
         hideMatchEndOverlay();
         hideOpponentDisconnectOverlay();
+        updateReactionPassButton(null);
         hideLobbyPrivatePasswordError();
-        renderTurnClocks();
         startRoomListPolling();
         void refreshLobbyDecks();
     }
@@ -4192,7 +4825,22 @@ import {
             }
         });
     }
-    if (reactionToggleEl) reactionToggleEl.addEventListener("change", updateReactionToggleLabel);
+    if (exportClientTraceBtnEl) {
+        exportClientTraceBtnEl.addEventListener("click", () => downloadClientTraceJson());
+    }
+    if (reactionModeSelectEl) {
+        reactionModeSelectEl.addEventListener("change", () => {
+            updateReactionModeLabel();
+            if (joinedRoom) send("set_reaction_mode", { mode: reactionModeSelectEl.value });
+        });
+    }
+    if (reactionPassBtnEl) {
+        reactionPassBtnEl.addEventListener("click", () => {
+            if (!isGameplayInputOpen()) return;
+            if (!canPassReactionPriority(lastSnapshot, playerEl.value)) return;
+            send("resolve_reactions", {});
+        });
+    }
     if (coordsInSquaresEl) {
         coordsInSquaresEl.addEventListener("change", () => {
             updateCoordsToggleLabel();
@@ -4217,8 +4865,6 @@ import {
     }
     setLocale(savedLocale);
 
-    globalThis.setInterval(renderTurnClocks, 250);
-    renderTurnClocks();
     updatePrivatePasswordVisibility();
     updatePasswordToggleVisual();
     renderBoard([]);
@@ -4226,5 +4872,8 @@ import {
     void bootstrapAuthSession();
     startRoomListPolling();
     document.addEventListener("scroll", () => hideCardPreview(), true);
-    window.addEventListener("resize", () => hideCardPreview());
+    window.addEventListener("resize", () => {
+        hideCardPreview();
+        renderCaptureThreatOverlay();
+    });
 })();

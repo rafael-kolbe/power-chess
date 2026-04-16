@@ -1,0 +1,26 @@
+---
+description: When the user reports or identifies a bug, use the power-chess-log-investigator skill and latest Docker session logs first
+alwaysApply: true
+---
+
+# Power Chess — bug reports → log investigator
+
+## When this applies
+
+Whenever **you** (the user) **identify or report a bug** — gameplay, WebSocket/protocol, timers, pause, UI desync, crashes, or unexpected server behavior — the agent must treat log-backed investigation as the default first step.
+
+## Required action
+
+1. **Read and follow** the skill at `.cursor/skills/power-chess-log-investigator/SKILL.md` (invoke it as **power-chess-log-investigator** / follow its workflow completely).
+2. Use the **newest** session log files only (`ls -t logs/docker/server/*.log` and `logs/docker/postgres/*.log` per the skill); do not guess filenames or rooms from memory.
+3. Correlate log lines with code in `internal/server/` and `internal/match/` (and related paths) before concluding root cause.
+4. If logs are empty or stale, say so and ask for a fresh `docker compose up` or capture — do not skip the skill workflow.
+
+## Out of scope
+
+- Pure feature requests or refactors with no defect report.
+- Copy-only or documentation-only tasks unless tied to a **bug** you described.
+
+## Rationale
+
+Docker session logs under `logs/docker/` are the authoritative trace for local multiplayer issues; skipping them wastes time and repeats fixed regressions.

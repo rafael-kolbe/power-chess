@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 )
 
@@ -48,6 +49,24 @@ func TestRoomPersistCallsStore(t *testing.T) {
 }
 
 // TestGetOrCreateRoomLoadsPersistedRoom validates loading persisted room snapshots.
+// TestRoomServerStateDisconnectFrozenJSON ensures disconnect clock freeze fields round-trip in server JSON.
+func TestRoomServerStateDisconnectFrozenJSON(t *testing.T) {
+	in := roomServerState{
+		DisconnectFrozenReactionMs: 8000,
+	}
+	raw, err := json.Marshal(&in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out roomServerState
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.DisconnectFrozenReactionMs != in.DisconnectFrozenReactionMs {
+		t.Fatalf("round-trip mismatch: %+v vs %+v", out, in)
+	}
+}
+
 func TestGetOrCreateRoomLoadsPersistedRoom(t *testing.T) {
 	loaded, err := NewRoomSession("loaded-room")
 	if err != nil {

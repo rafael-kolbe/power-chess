@@ -1,5 +1,11 @@
 node_modules/
 
+# Local browser cache directory (can remain from previous UI tooling)
+.pw-browsers/
+
+# Match debug file logs (ADMIN_DEBUG_MATCH)
+logs/
+
 # Local secrets (compose / env)
 .env
 .env.local
@@ -7,3 +13,4 @@ node_modules/
 test-result
 test-result/
 test-results/
+*.out

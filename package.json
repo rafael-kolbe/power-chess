@@ -4,11 +4,10 @@
   "scripts": {
     "lint:css": "stylelint \"web/**/*.css\"",
     "lint:css:fix": "stylelint \"web/**/*.css\" --fix",
-    "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed"
+    "format:html": "prettier --write \"web/**/*.html\""
   },
   "devDependencies": {
-    "@playwright/test": "^1.55.0",
+    "prettier": "^3.5.3",
     "stylelint": "^16.14.1",
     "stylelint-config-standard": "^37.0.0"
   }

@@ -21,12 +21,12 @@ func TestWebSocketJoinAndSnapshotBroadcast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial c1 failed: %v", err)
 	}
-	defer c1.Close()
+	defer func() { _ = c1.Close() }()
 	c2, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial c2 failed: %v", err)
 	}
-	defer c2.Close()
+	defer func() { _ = c2.Close() }()
 
 	_ = c1.SetReadDeadline(time.Now().Add(2 * time.Second))
 	_, _, _ = c1.ReadMessage() // hello
@@ -63,7 +63,7 @@ func TestWebSocketRequestIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial failed: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 	_, _, _ = c.ReadMessage() // hello
 

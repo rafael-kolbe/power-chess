@@ -35,9 +35,9 @@ func dialAndHello(t *testing.T, wsURL string) *websocket.Conn {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	t.Cleanup(func() { c.Close() })
+	t.Cleanup(func() { _ = c.Close() })
 	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, _, _ = c.ReadMessage() // hello
+	_, _, _ = c.ReadMessage()          // hello
 	_ = c.SetReadDeadline(time.Time{}) // clear deadline
 	return c
 }
@@ -181,7 +181,7 @@ func TestHandleHealthReturnsOK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("health request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
@@ -419,20 +419,20 @@ func TestHandleSubmitMoveRejectsIllegalMove(t *testing.T) {
 	_ = env
 }
 
-// --- handleActivateCard ---
+// --- handleIgniteCard ---
 
-func TestHandleActivateCardRequiresJoin(t *testing.T) {
+func TestHandleIgniteCardRequiresJoin(t *testing.T) {
 	_, wsURL := wsSetup(t)
 	c := dialAndHello(t, wsURL)
 
 	sendEnv(t, c, Envelope{
 		ID:      "ac1",
-		Type:    MessageActivateCard,
-		Payload: MustPayload(ActivateCardPayload{HandIndex: 0}),
+		Type:    MessageIgniteCard,
+		Payload: MustPayload(IgniteCardPayload{HandIndex: 0}),
 	})
 	env, found := drainUntilType(t, c, MessageError, 5)
 	if !found {
-		t.Fatal("expected error for activate_card without join")
+		t.Fatal("expected error for ignite_card without join")
 	}
 	var ep ErrorPayload
 	_ = json.Unmarshal(env.Payload, &ep)
@@ -441,7 +441,7 @@ func TestHandleActivateCardRequiresJoin(t *testing.T) {
 	}
 }
 
-func TestHandleActivateCardSucceeds(t *testing.T) {
+func TestHandleIgniteCardSucceeds(t *testing.T) {
 	t.Setenv("ADMIN_DEBUG_MATCH", "1")
 	_, wsURL := wsSetup(t)
 	cA, cB := joinTwoPlayers(t, wsURL, "920")
@@ -451,15 +451,15 @@ func TestHandleActivateCardSucceeds(t *testing.T) {
 	// knight-touch is at hand index 0 for white; ignition=0 so it resolves immediately.
 	sendEnv(t, cA, Envelope{
 		ID:      "ac2",
-		Type:    MessageActivateCard,
-		Payload: MustPayload(ActivateCardPayload{HandIndex: 0}),
+		Type:    MessageIgniteCard,
+		Payload: MustPayload(IgniteCardPayload{HandIndex: 0}),
 	})
 	if _, found := drainUntilType(t, cA, MessageAck, 10); !found {
-		t.Fatal("expected ack for activate_card")
+		t.Fatal("expected ack for ignite_card")
 	}
 }
 
-func TestHandleActivateCardRejectsInvalidIndex(t *testing.T) {
+func TestHandleIgniteCardRejectsInvalidIndex(t *testing.T) {
 	t.Setenv("ADMIN_DEBUG_MATCH", "1")
 	_, wsURL := wsSetup(t)
 	cA, cB := joinTwoPlayers(t, wsURL, "921")
@@ -468,8 +468,8 @@ func TestHandleActivateCardRejectsInvalidIndex(t *testing.T) {
 
 	sendEnv(t, cA, Envelope{
 		ID:      "ac3",
-		Type:    MessageActivateCard,
-		Payload: MustPayload(ActivateCardPayload{HandIndex: 99}),
+		Type:    MessageIgniteCard,
+		Payload: MustPayload(IgniteCardPayload{HandIndex: 99}),
 	})
 	env, found := drainUntilType(t, cA, MessageError, 10)
 	if !found {
@@ -567,6 +567,45 @@ func TestHandleQueueReactionRequiresJoin(t *testing.T) {
 	env, found := drainUntilType(t, c, MessageError, 5)
 	if !found {
 		t.Fatal("expected error for queue_reaction without join")
+	}
+	var ep ErrorPayload
+	_ = json.Unmarshal(env.Payload, &ep)
+	if ep.Code != ErrorJoinRequired {
+		t.Fatalf("expected join_required, got %s", ep.Code)
+	}
+}
+
+func TestHandleClientTraceRejectedWhenDebugDisabled(t *testing.T) {
+	_, wsURL := wsSetup(t)
+	c := dialAndHello(t, wsURL)
+	sendEnv(t, c, Envelope{
+		ID:      "ct1",
+		Type:    MessageClientTrace,
+		Payload: MustPayload(ClientTracePayload{Text: "hello"}),
+	})
+	env, found := drainUntilType(t, c, MessageError, 5)
+	if !found {
+		t.Fatal("expected error for client_trace when admin debug is off")
+	}
+	var ep ErrorPayload
+	_ = json.Unmarshal(env.Payload, &ep)
+	if ep.Code != ErrorDebugDisabled {
+		t.Fatalf("expected debug_disabled, got %s", ep.Code)
+	}
+}
+
+func TestHandleClientTraceRequiresJoinWhenDebugEnabled(t *testing.T) {
+	t.Setenv("ADMIN_DEBUG_MATCH", "1")
+	_, wsURL := wsSetup(t)
+	c := dialAndHello(t, wsURL)
+	sendEnv(t, c, Envelope{
+		ID:      "ct2",
+		Type:    MessageClientTrace,
+		Payload: MustPayload(ClientTracePayload{Text: "hello"}),
+	})
+	env, found := drainUntilType(t, c, MessageError, 5)
+	if !found {
+		t.Fatal("expected error for client_trace without join_match")
 	}
 	var ep ErrorPayload
 	_ = json.Unmarshal(env.Payload, &ep)
@@ -677,6 +716,79 @@ func TestJoinMatchRejectsInvalidRoomID(t *testing.T) {
 	_ = json.Unmarshal(env.Payload, &ep)
 	if ep.Code != ErrorInvalidPayload {
 		t.Fatalf("expected invalid_payload, got %s", ep.Code)
+	}
+}
+
+// --- set_reaction_mode ---
+
+func TestHandleSetReactionModeRequiresJoin(t *testing.T) {
+	_, wsURL := wsSetup(t)
+	c := dialAndHello(t, wsURL)
+	sendEnv(t, c, Envelope{
+		ID:      "srm1",
+		Type:    MessageSetReactionMode,
+		Payload: MustPayload(SetReactionModePayload{Mode: "off"}),
+	})
+	env, found := drainUntilType(t, c, MessageError, 5)
+	if !found {
+		t.Fatal("expected error for set_reaction_mode without join")
+	}
+	var ep ErrorPayload
+	_ = json.Unmarshal(env.Payload, &ep)
+	if ep.Code != ErrorJoinRequired {
+		t.Fatalf("expected join_required, got %s", ep.Code)
+	}
+}
+
+func TestHandleSetReactionModeSucceeds(t *testing.T) {
+	t.Setenv("ADMIN_DEBUG_MATCH", "1")
+	_, wsURL := wsSetup(t)
+	cA, cB := joinTwoPlayers(t, wsURL, "922")
+	applyDebugFixtureFromClient(t, cA)
+	confirmMulliganBoth(t, cA, cB)
+
+	sendEnv(t, cA, Envelope{
+		ID:      "srm2",
+		Type:    MessageSetReactionMode,
+		Payload: MustPayload(SetReactionModePayload{Mode: "auto"}),
+	})
+	if _, found := drainUntilType(t, cA, MessageAck, 10); !found {
+		t.Fatal("expected ack for set_reaction_mode")
+	}
+	_ = cB
+}
+
+// TestStateSnapshotIncludesReconnectFieldsWhenPeerDisconnects ensures the surviving peer receives
+// reconnect grace fields over WebSocket after the other socket closes (HUD banner + frozen clock).
+func TestStateSnapshotIncludesReconnectFieldsWhenPeerDisconnects(t *testing.T) {
+	t.Setenv("ADMIN_DEBUG_MATCH", "1")
+	_, wsURL := wsSetup(t)
+	cA, cB := joinTwoPlayers(t, wsURL, "924")
+	applyDebugFixtureFromClient(t, cA)
+	confirmMulliganBoth(t, cA, cB)
+
+	_ = cA.Close()
+
+	var snap StateSnapshotPayload
+	foundGrace := false
+	for i := 0; i < 25; i++ {
+		env, ok := drainUntilType(t, cB, MessageStateSnapshot, 8)
+		if !ok {
+			t.Fatalf("expected state_snapshot after peer disconnect (iter %d)", i)
+		}
+		if err := json.Unmarshal(env.Payload, &snap); err != nil {
+			t.Fatalf("unmarshal snapshot: %v", err)
+		}
+		if snap.ReconnectPendingFor == "A" && snap.ReconnectDeadlineUnixMs > 0 {
+			foundGrace = true
+			break
+		}
+	}
+	if !foundGrace {
+		t.Fatalf("expected reconnectPendingFor=A and reconnect deadline, last snap=%+v", snap)
+	}
+	if snap.MatchEnded {
+		t.Fatalf("did not expect match ended during grace, got %+v", snap)
 	}
 }
 

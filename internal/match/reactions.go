@@ -22,6 +22,25 @@ type ReactionAction struct {
 	Resolver EffectResolver
 }
 
+// ReactionStackEntry describes one queued reaction card for UI previews. The slice returned by
+// ReactionStackEntries is ordered bottom-first (first queued card first); server resolution is LIFO.
+type ReactionStackEntry struct {
+	Owner  gameplay.PlayerID
+	CardID gameplay.CardID
+}
+
+// ReactionStackEntries returns a copy of queued reaction cards from bottom of stack to top.
+func (e *Engine) ReactionStackEntries() []ReactionStackEntry {
+	if len(e.reactionStack) == 0 {
+		return nil
+	}
+	out := make([]ReactionStackEntry, 0, len(e.reactionStack))
+	for _, a := range e.reactionStack {
+		out = append(out, ReactionStackEntry{Owner: a.Owner, CardID: a.Card.CardID})
+	}
+	return out
+}
+
 // OpenReactionWindow starts a reaction phase constrained by allowed card types.
 func (e *Engine) OpenReactionWindow(trigger string, actor gameplay.PlayerID, eligible []gameplay.CardType) {
 	e.ReactionWindow = &ReactionWindow{
@@ -73,20 +92,30 @@ func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, target 
 			return errors.New("capture reaction chain must start with a Counter card")
 		}
 	}
-	if def.ID == CardBlockade {
-		if e.ReactionWindow.Trigger != "capture_attempt" || e.pendingMove == nil {
-			return errors.New("blockade requires an active capture_attempt chain")
+	if e.ReactionWindow.Trigger == "ignite_reaction" && len(e.reactionStack) == 0 {
+		if pid == e.ReactionWindow.Actor {
+			return errors.New("ignite reaction must be started by the opponent")
 		}
-		if pid != e.ReactionWindow.Actor {
-			return errors.New("blockade can only be played by the attacking player")
-		}
-		if len(e.reactionStack) == 0 || e.reactionStack[len(e.reactionStack)-1].Card.CardID != CardCounterattack {
-			return errors.New("blockade must respond directly to counterattack")
+		if def.Type != gameplay.CardTypeRetribution && def.Type != gameplay.CardTypeCounter {
+			return errors.New("ignite reaction must start with a Retribution or Counter card")
 		}
 	}
 	if len(e.reactionStack) > 0 {
 		prev := e.reactionStack[len(e.reactionStack)-1]
 		prevDef, ok := gameplay.CardDefinitionByID(prev.Card.CardID)
+		if e.ReactionWindow.Trigger == "ignite_reaction" {
+			if ok && prevDef.Type == gameplay.CardTypeRetribution && def.Type != gameplay.CardTypeRetribution {
+				return errors.New("only Retribution cards can respond to Retribution cards")
+			}
+			if ok && prevDef.Type == gameplay.CardTypePower && def.Type != gameplay.CardTypeRetribution {
+				return errors.New("only Retribution cards can respond after a Power reaction")
+			}
+		}
+		if e.ReactionWindow.Trigger == "capture_attempt" {
+			if ok && prevDef.Type == gameplay.CardTypeRetribution && def.Type != gameplay.CardTypeRetribution {
+				return errors.New("only Retribution cards can respond to Retribution cards")
+			}
+		}
 		if ok && prevDef.Type == gameplay.CardTypeCounter && def.Type != gameplay.CardTypeCounter {
 			return errors.New("only Counter cards can respond to Counter cards")
 		}
@@ -108,27 +137,174 @@ func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, target 
 	return nil
 }
 
-// ResolveReactionStack applies queued reactions in LIFO order and sends them to cooldown.
+// canExtendRetributionFollowUp reports whether pid may queue another Retribution after a
+// Retribution or legacy Power reaction, using ignition clearance rules shared by capture and ignite chains.
+func (e *Engine) canExtendRetributionFollowUp(pid gameplay.PlayerID, prevDef gameplay.CardDefinition) bool {
+	if prevDef.Type != gameplay.CardTypeRetribution && prevDef.Type != gameplay.CardTypePower {
+		return false
+	}
+	p := e.State.Players[pid]
+	if p == nil {
+		return false
+	}
+	ignitionOccupied := e.ReactionWindow != nil && e.State.Players[e.ReactionWindow.Actor].Ignition.Occupied
+	onCooldown := make(map[string]struct{}, len(p.Cooldowns))
+	for _, cd := range p.Cooldowns {
+		onCooldown[string(cd.Card.CardID)] = struct{}{}
+	}
+	for _, c := range p.Hand {
+		def, ok := gameplay.CardDefinitionByID(c.CardID)
+		if !ok {
+			continue
+		}
+		if prevDef.Type == gameplay.CardTypeRetribution && def.Type != gameplay.CardTypeRetribution {
+			continue
+		}
+		if prevDef.Type == gameplay.CardTypePower && def.Type != gameplay.CardTypeRetribution {
+			continue
+		}
+		allowed := false
+		for _, t := range e.ReactionWindow.EligibleTypes {
+			if def.Type == t {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			continue
+		}
+		if _, dup := onCooldown[string(c.CardID)]; dup {
+			continue
+		}
+		if p.Mana < def.Cost {
+			continue
+		}
+		if !ignitionOccupied || gameplay.CardClearsOpponentIgnitionForChain(c.CardID) {
+			return true
+		}
+	}
+	return false
+}
+
+// CanPlayerExtendIgniteChain reports whether pid can legally queue another card in the current
+// ignite_reaction chain (non-empty stack). Used to auto-resolve when the responding seat has no play.
+//
+// While the shared ignition slot remains occupied, the chain only continues if pid has a legal
+// follow-up that also clears or negates the opponent's ignited card (see
+// gameplay.CardClearsOpponentIgnitionForChain). If the slot is free, any legal follow-up suffices.
+func (e *Engine) CanPlayerExtendIgniteChain(pid gameplay.PlayerID) bool {
+	if e.ReactionWindow == nil || !e.ReactionWindow.Open || e.ReactionWindow.Trigger != "ignite_reaction" {
+		return false
+	}
+	if len(e.reactionStack) == 0 {
+		return false
+	}
+	prev := e.reactionStack[len(e.reactionStack)-1]
+	prevDef, ok := gameplay.CardDefinitionByID(prev.Card.CardID)
+	if !ok {
+		return false
+	}
+	if prevDef.Type == gameplay.CardTypeCounter {
+		return e.CanPlayerExtendCounterChain(pid)
+	}
+	return e.canExtendRetributionFollowUp(pid, prevDef)
+}
+
+// CanPlayerExtendCaptureReactionChain reports whether pid can extend a non-empty capture_attempt stack.
+func (e *Engine) CanPlayerExtendCaptureReactionChain(pid gameplay.PlayerID) bool {
+	if e.ReactionWindow == nil || !e.ReactionWindow.Open || e.ReactionWindow.Trigger != "capture_attempt" || len(e.reactionStack) == 0 {
+		return false
+	}
+	prev := e.reactionStack[len(e.reactionStack)-1]
+	prevDef, ok := gameplay.CardDefinitionByID(prev.Card.CardID)
+	if !ok {
+		return false
+	}
+	if prevDef.Type == gameplay.CardTypeCounter {
+		return e.CanPlayerExtendCounterChain(pid)
+	}
+	if prevDef.Type == gameplay.CardTypeRetribution {
+		return e.canExtendRetributionFollowUp(pid, prevDef)
+	}
+	return false
+}
+
+// CanPlayerExtendCounterChain reports whether pid can legally queue another Counter on a non-empty
+// capture_attempt or ignite_reaction stack. While the shared ignition slot is occupied, only Counters that negate a
+// stacked Counter (gameplay.CardNegatesOpponentCounterOnCaptureChain) allow the chain to continue.
+func (e *Engine) CanPlayerExtendCounterChain(pid gameplay.PlayerID) bool {
+	if e.ReactionWindow == nil || !e.ReactionWindow.Open {
+		return false
+	}
+	if e.ReactionWindow.Trigger != "capture_attempt" && e.ReactionWindow.Trigger != "ignite_reaction" {
+		return false
+	}
+	if len(e.reactionStack) == 0 {
+		return false
+	}
+	prev := e.reactionStack[len(e.reactionStack)-1]
+	prevDef, ok := gameplay.CardDefinitionByID(prev.Card.CardID)
+	if !ok || prevDef.Type != gameplay.CardTypeCounter {
+		return false
+	}
+	p := e.State.Players[pid]
+	if p == nil {
+		return false
+	}
+	ignitionOccupied := e.ReactionWindow != nil && e.State.Players[e.ReactionWindow.Actor].Ignition.Occupied
+	onCooldown := make(map[string]struct{}, len(p.Cooldowns))
+	for _, cd := range p.Cooldowns {
+		onCooldown[string(cd.Card.CardID)] = struct{}{}
+	}
+	for _, c := range p.Hand {
+		def, ok := gameplay.CardDefinitionByID(c.CardID)
+		if !ok || def.Type != gameplay.CardTypeCounter {
+			continue
+		}
+		allowed := false
+		for _, t := range e.ReactionWindow.EligibleTypes {
+			if def.Type == t {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			continue
+		}
+		if _, dup := onCooldown[string(c.CardID)]; dup {
+			continue
+		}
+		if p.Mana < def.Cost {
+			continue
+		}
+		if !ignitionOccupied || gameplay.CardNegatesOpponentCounterOnCaptureChain(c.CardID) {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveReactionStack applies queued reactions in LIFO order, one card at a time: each resolution
+// emits an activate_card broadcast (effect success/fail step) before SendCardToCooldown, so clients
+// can animate in stack order until the pile is empty.
 func (e *Engine) ResolveReactionStack() error {
 	if err := e.errIfOpeningBlocksGameplay(); err != nil {
 		return err
 	}
-	for i := len(e.reactionStack) - 1; i >= 0; i-- {
-		a := e.reactionStack[i]
-		if a.Card.CardID == CardBlockade {
-			if i-1 < 0 || e.reactionStack[i-1].Card.CardID != CardCounterattack {
-				return errors.New("blockade resolution requires preceding counterattack")
-			}
-			// Blockade negates counterattack and keeps attacker on original square.
-			e.pendingMove = nil
-			e.State.SendCardToCooldown(a.Owner, a.Card)
-			e.State.SendCardToCooldown(e.reactionStack[i-1].Owner, e.reactionStack[i-1].Card)
-			i--
-			continue
-		}
+	rwTrigger := ""
+	if e.ReactionWindow != nil {
+		rwTrigger = e.ReactionWindow.Trigger
+	}
+	for len(e.reactionStack) > 0 {
+		n := len(e.reactionStack)
+		a := e.reactionStack[n-1]
+		e.reactionStack = e.reactionStack[:n-1]
 		if err := a.Resolver.Apply(e, a.Owner, a.Target); err != nil {
 			return err
 		}
+		// Resolvers may later report fail paths; until then successful Apply implies effect succeeded.
+		success := true
+		e.appendActivationFX(a.Owner, a.Card.CardID, success)
 		e.State.SendCardToCooldown(a.Owner, a.Card)
 	}
 	if e.pendingMove != nil {
@@ -136,6 +312,20 @@ func (e *Engine) ResolveReactionStack() error {
 		e.pendingMove = nil
 		if err := e.applyMoveCore(pm.PlayerID, pm.Move); err != nil {
 			return err
+		}
+	}
+	// Delayed ignition (TurnsRemaining > 0) must keep burning after the reaction window; only
+	// ignition-0 cards finalize here (see Energy Gain, Continuous powers).
+	if rwTrigger == "ignite_reaction" && e.ReactionWindow != nil {
+		act := e.ReactionWindow.Actor
+		ig := &e.State.Players[act].Ignition
+		if ig.Occupied && ig.TurnsRemaining == 0 {
+			if err := e.State.ResolveIgnitionFor(act, true); err != nil {
+				return err
+			}
+			if err := e.processResolvedIgnitions(); err != nil {
+				return err
+			}
 		}
 	}
 	e.CloseReactionWindow()
@@ -147,9 +337,7 @@ func (e *Engine) PendingEffects() []PendingEffect {
 	out := []PendingEffect{}
 	for _, pid := range []gameplay.PlayerID{gameplay.PlayerA, gameplay.PlayerB} {
 		queue := e.pendingEffects[pid]
-		for _, pe := range queue {
-			out = append(out, pe)
-		}
+		out = append(out, queue...)
 	}
 	return out
 }
@@ -164,3 +352,10 @@ func (e *Engine) ReactionWindowSnapshot() (ReactionWindow, int, bool) {
 	return cp, len(e.reactionStack), true
 }
 
+// ReactionStackTopSnapshot returns the last queued reaction (most recent play), if the stack is non-empty.
+func (e *Engine) ReactionStackTopSnapshot() (ReactionAction, bool) {
+	if len(e.reactionStack) == 0 {
+		return ReactionAction{}, false
+	}
+	return e.reactionStack[len(e.reactionStack)-1], true
+}

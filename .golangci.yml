@@ -1,0 +1,25 @@
+# https://golangci-lint.run/docs/configuration/file/
+version: "2"
+
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    paths:
+      - vendor
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - unused
+  exclusions:
+    paths:
+      - vendor
+
+run:
+  timeout: 5m
