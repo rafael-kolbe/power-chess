@@ -82,7 +82,7 @@ export function buildMatchDebugFixturePayload() {
     test_environment: true,
     white: {
       deck: [...DEFAULT_DECK_20],
-      hand: ["knight-touch", "counterattack", "retaliate"],
+      hand: ["energy-gain", "bishop-touch", "rook-touch"],
       mana: 8,
       maxMana: 10,
       energizedMana: 0,

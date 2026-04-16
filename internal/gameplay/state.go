@@ -169,8 +169,12 @@ func (s *MatchState) StartTurn(pid PlayerID) error {
 	s.Started = true
 	p.ExtraManaGainedTurn = 0
 	s.addMana(pid, 1)
-	s.tickCooldowns(pid)
+	// Ignition burn is processed before decrementing cooldown rows so resolution order matches
+	// rules text (counter hits 0 → effect, then other recharge timers tick). Newly cooled cards
+	// are appended in Engine.processResolvedIgnitions after this method returns, so they are not
+	// decremented in the same StartTurn tick.
 	s.tickIgnition(pid)
+	s.tickCooldowns(pid)
 	return nil
 }
 
@@ -411,6 +415,14 @@ func (s *MatchState) addMana(pid PlayerID, amount int) {
 	if p.Mana > p.MaxMana {
 		p.Mana = p.MaxMana
 	}
+}
+
+// GrantManaFromCardEffect adds mana after a successful post-ignition effect resolution, capped at MaxMana.
+func (s *MatchState) GrantManaFromCardEffect(pid PlayerID, amount int) {
+	if amount <= 0 {
+		return
+	}
+	s.addMana(pid, amount)
 }
 
 func (s *MatchState) addEnergizedMana(pid PlayerID, amount int) {

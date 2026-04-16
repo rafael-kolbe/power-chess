@@ -196,8 +196,6 @@ import {
             room: "Room",
             you: "You",
             player: "Player",
-            youLabel: "You",
-            opponentLabel: "Opponent",
             passwordLabelInline: "Password",
             show: "show",
             hide: "hide",
@@ -334,8 +332,6 @@ import {
             room: "Sala",
             you: "Você",
             player: "Player",
-            youLabel: "Você",
-            opponentLabel: "Oponente",
             passwordLabelInline: "Senha",
             show: "mostrar",
             hide: "ocultar",
@@ -1032,14 +1028,13 @@ import {
     }
 
     /**
-     * @param {string} roleKey i18n key: youLabel or opponentLabel
-     * @param {string} [name] server snapshot display name for that seat
+     * Match HUD seat line: server display name only (no role prefix).
+     * @param {string} [name] snapshot display name for that seat
+     * @returns {string}
      */
-    function playerRoleLabel(roleKey, name) {
-        const role = t(roleKey);
+    function playerDisplayNameLabel(name) {
         const n = name && String(name).trim();
-        if (!n) return role;
-        return `${role} (${n})`;
+        return n || "-";
     }
 
     /**
@@ -1048,19 +1043,13 @@ import {
     function syncPlayerRoleLabels(snapshot) {
         const snap = snapshot !== undefined ? snapshot : lastSnapshot;
         if (!playerEl) return;
-        const isA = playerEl.value === "A";
         const top = document.getElementById("playerBLabel");
         const bottom = document.getElementById("playerALabel");
         if (!top || !bottom) return;
         const nameA = snap?.playerAName ?? "";
         const nameB = snap?.playerBName ?? "";
-        if (isA) {
-            top.textContent = playerRoleLabel("opponentLabel", nameB);
-            bottom.textContent = playerRoleLabel("youLabel", nameA);
-        } else {
-            top.textContent = playerRoleLabel("youLabel", nameB);
-            bottom.textContent = playerRoleLabel("opponentLabel", nameA);
-        }
+        top.textContent = playerDisplayNameLabel(nameB);
+        bottom.textContent = playerDisplayNameLabel(nameA);
     }
 
     /**
@@ -1290,19 +1279,13 @@ import {
                 }
 
                 if (snapshotEl) snapshotEl.textContent = JSON.stringify(nextSnap, null, 2);
-                // Defer board render when animations will play before the board should update:
-                //  - reaction stack clearing (shouldRunReactionStackResolve)
-                //  - activate_card event already buffered (card with ignition=0 queued+resolved atomically;
-                //    server never sends an intermediate stackSize>0 snapshot, so the reaction check alone
-                //    would miss this case)
+                // Defer board render only for reaction-stack resolution (capture/ignite chains).
+                // Do not defer for pending activate_card alone: the move must show first, then
+                // runTurnStartResourceSequence (ignition tick → cooldown → other CDs), then activate_card FX.
                 // prevReceivedSnapshot tracks the last-received snapshot synchronously so rapid bursts
                 // of snapshots still see the correct transition.
                 const willReactionResolve = shouldRunReactionStackResolve(prevReceivedSnapshot, nextSnap);
-                const activationFxInFlight =
-                    pendingActivateCardPayloads.length > 0 ||
-                    activationFxQueue.length > 0 ||
-                    activationFxWorkerPromise !== null;
-                const willDeferBoard = willReactionResolve || activationFxInFlight;
+                const willDeferBoard = willReactionResolve;
                 prevReceivedSnapshot = nextSnap;
                 if (!willDeferBoard) {
                     renderBoard(nextSnap.board);
@@ -1321,10 +1304,42 @@ import {
 
                     const doReactionResolve = shouldRunReactionStackResolve(prevSnap, nextSnap);
                     if (!doReactionResolve) {
-                        flushPendingActivationFx(null);
+                        /** @type {object | null} */
+                        let ignitionCooldownDeferral = null;
+                        if (turnChanged) {
+                            send("client_fx_hold", {});
+                            turnResourceAnimBlocking = true;
+                            try {
+                                ignitionCooldownDeferral = await runTurnStartResourceSequence(prevSnap, nextSnap, {
+                                    deferCooldownUntilAfterActivate: true,
+                                });
+                            } finally {
+                                turnResourceAnimBlocking = false;
+                                send("client_fx_release", {});
+                            }
+                        }
+                        const deferAttached = flushPendingActivationFx(null, ignitionCooldownDeferral);
                         await waitActivationFxWorkerIdle();
-                        // Board was deferred because of pending activate_card payloads: render now
-                        // that activation animations have finished.
+                        if (
+                            ignitionCooldownDeferral?.deferCooldownAfterActivation &&
+                            !deferAttached
+                        ) {
+                            await applyIgnitionResolveThenCooldownOdometers(ignitionCooldownDeferral);
+                            const pid = ignitionCooldownDeferral.turnStarter;
+                            const isSelf = pid === playerEl.value;
+                            const clearedIgnitionCardEl = isSelf ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
+                            const clearedIgnitionCounterEl = isSelf ? pmEl.ignitionCounterSelf : pmEl.ignitionCounterOpp;
+                            if (clearedIgnitionCardEl) {
+                                clearedIgnitionCardEl.innerHTML = "";
+                                delete clearedIgnitionCardEl.dataset.cardId;
+                                clearedIgnitionCardEl.classList.remove("pm-ignition-staged");
+                                clearedIgnitionCardEl
+                                    .querySelectorAll(".pm-ignition-staged-overlay")
+                                    .forEach((el) => el.remove());
+                            }
+                            if (clearedIgnitionCounterEl) clearedIgnitionCounterEl.classList.add("hidden");
+                            renderIgnitionZone(nextSnap);
+                        }
                         if (willDeferBoard) {
                             renderBoard(nextSnap.board);
                         }
@@ -1353,7 +1368,7 @@ import {
                         blockGameplayInputForEffects(effectBlockMs);
                     }
 
-                    if (turnChanged) {
+                    if (turnChanged && doReactionResolve) {
                         send("client_fx_hold", {});
                         turnResourceAnimBlocking = true;
                         try {
@@ -2434,19 +2449,85 @@ import {
     }
 
     /**
-     * Animates ignition counter tick, then immediately shows the card in cooldown, then animates
-     * other cooldown counter ticks for that player. All before playmat DOM is replaced.
+     * Runs cooldown odometer tasks (excluding the arriving-from-ignition card) for the turn starter.
+     * @param {object} ctx
+     * @param {{ cardId: string, from: string, to: string }[]} ctx.cooldownTasks
+     * @param {HTMLElement | null | undefined} ctx.cdContainer
+     * @param {object} ctx.nextSnap
+     * @param {string} ctx.localPID
+     */
+    async function runTurnStartCooldownOdometersLoop(ctx) {
+        const { cooldownTasks, cdContainer, nextSnap, localPID } = ctx;
+        const delayMs = 200;
+        const animMs = 700;
+        for (let i = 0; i < cooldownTasks.length; i++) {
+            const task = cooldownTasks[i];
+            const taskWrap = cdContainer?.querySelector(
+                `[data-card-id="${escapeCardIdForSelector(String(task.cardId))}"]`,
+            );
+            const turnsEl = taskWrap?.querySelector(".pm-cooldown-turns");
+            if (turnsEl) {
+                await odometerFlip(turnsEl, task.from, task.to, animMs);
+            }
+            if (task.to === "0t") {
+                taskWrap?.remove();
+                const localSelf = nextSnap.players?.find((p) => p.playerId === localPID);
+                let localOpp = nextSnap.players?.find((p) => p.playerId !== localPID);
+                if (!localOpp) localOpp = emptyOppPlaymatStub(localPID);
+                if (localSelf) {
+                    renderBanishZone(localSelf, localOpp);
+                    renderDeckZone(localSelf, localOpp);
+                }
+            }
+            if (i < cooldownTasks.length - 1) await sleep(delayMs);
+        }
+    }
+
+    /**
+     * After activate_card outcome (payload success/fail): place resolved ignition card in cooldown, then tick other cooldown odometers.
+     * @param {object} ctx
+     */
+    async function applyIgnitionResolveThenCooldownOdometers(ctx) {
+        const { nextSnap, localPID, cdContainer, prevCD, nextCD, arrivingIgnitionCardId, cooldownTasks } = ctx;
+        const arrivingEntry = nextCD.find((e) => e.cardId === arrivingIgnitionCardId);
+        const intermediateList = [
+            ...prevCD.filter((e) => e.cardId !== arrivingIgnitionCardId),
+            ...(arrivingEntry ? [arrivingEntry] : []),
+        ];
+        if (cdContainer) {
+            renderCooldownList(cdContainer, sortCooldownEntriesForDisplay(intermediateList));
+        }
+        if (!nextCD.find((e) => e.cardId === arrivingIgnitionCardId)) {
+            const localSelf = nextSnap.players?.find((p) => p.playerId === localPID);
+            let localOpp = nextSnap.players?.find((p) => p.playerId !== localPID);
+            if (!localOpp) localOpp = emptyOppPlaymatStub(localPID);
+            if (localSelf) {
+                renderBanishZone(localSelf, localOpp);
+                renderDeckZone(localSelf, localOpp);
+            }
+        }
+        await runTurnStartCooldownOdometersLoop(ctx);
+        if (cdContainer) {
+            renderCooldownList(cdContainer, sortCooldownEntriesForDisplay(nextCD));
+        }
+    }
+
+    /**
+     * Animates ignition counter at turn start; optionally defers cooldown odometers until after activate_card.
+     * When deferCooldownUntilAfterActivate: keeps the card in the ignition slot until runEffectActivationClientSequence
+     * finishes the effect glow, then moves to cooldown and runs other recharge odometers.
      * @param {object | null} prevSnap
      * @param {object} nextSnap
-     * @returns {Promise<void>}
+     * @param {{ deferCooldownUntilAfterActivate?: boolean }} [options]
+     * @returns {Promise<object | null>} deferral context for flushPendingActivationFx, or null
      */
-    async function runTurnStartResourceSequence(prevSnap, nextSnap) {
-        if (!prevSnap || !nextSnap) return;
+    async function runTurnStartResourceSequence(prevSnap, nextSnap, options) {
+        if (!prevSnap || !nextSnap) return null;
         const localPID = playerEl.value;
         const turnStarter = nextSnap.turnPlayer;
-        if (!turnStarter || prevSnap.turnPlayer === nextSnap.turnPlayer) return;
+        if (!turnStarter || prevSnap.turnPlayer === nextSnap.turnPlayer) return null;
 
-        const delayMs = 200;
+        const deferCooldownUntilAfterActivate = !!options?.deferCooldownUntilAfterActivate;
         const animMs = 700;
 
         const prevTurnStarterHud = hudForSeat(prevSnap, turnStarter);
@@ -2477,14 +2558,13 @@ import {
             }
         }
 
-        // cooldownTasks stores only card data; DOM elements are looked up lazily so that an
-        // intermediate renderCooldownList call (after the ignition fly) doesn't leave stale refs.
         /** @type {{ cardId: string, from: string, to: string }[]} */
         const cooldownTasks = [];
         const prevStarter = prevSnap.players?.find((p) => p.playerId === turnStarter);
         const nextStarter = nextSnap.players?.find((p) => p.playerId === turnStarter);
         const cdContainer = turnStarter === localPID ? pmEl.cooldownCardsSelf : pmEl.cooldownCardsOpp;
-        let prevCD = [], nextCD = [];
+        let prevCD = [],
+            nextCD = [];
         if (prevStarter && nextStarter) {
             prevCD = sortCooldownEntriesForDisplay(prevStarter.cooldownPreview || []);
             nextCD = sortCooldownEntriesForDisplay(nextStarter.cooldownPreview || []);
@@ -2498,9 +2578,6 @@ import {
                     to: `${nEntry.turnsRemaining}t`,
                 });
             }
-            // Cards that left cooldown entirely this turn (hit 0 turns → returned to deck).
-            // The server removes them from cooldownPreview atomically, so nextCD never contains
-            // them; we must detect their absence and animate the final N→0 tick.
             for (const pEntry of prevCD) {
                 if (arrivingIgnitionCardId && pEntry.cardId === arrivingIgnitionCardId) continue;
                 if (nextCD.find((n) => n.cardId === pEntry.cardId)) continue;
@@ -2513,24 +2590,37 @@ import {
             }
         }
 
+        /** @type {object | null} */
+        let deferral = null;
+
         if (ignitionOdometer) {
             await odometerFlip(ignitionOdometer.el, ignitionOdometer.from, ignitionOdometer.to, animMs);
-            const resolved = !!prevTurnStarterHud?.ignitionOn && !nextTurnStarterHud?.ignitionOn;
-            if (resolved && ignitionOdometer.to === "0t" && arrivingIgnitionCardId) {
-                // Clear the ignition slot immediately: the server already removed the card.
-                renderIgnitionZone(nextSnap);
-                if (cdContainer) {
-                    // Show arriving ignition card in cooldown at its final counter value.
-                    // Other cooldown cards keep their prevSnap values so their odometer animations still work.
+            const resolved =
+                !!prevTurnStarterHud?.ignitionOn &&
+                !nextTurnStarterHud?.ignitionOn &&
+                ignitionOdometer.to === "0t" &&
+                !!arrivingIgnitionCardId;
+            if (resolved) {
+                if (deferCooldownUntilAfterActivate) {
+                    deferral = {
+                        deferCooldownAfterActivation: true,
+                        turnStarter,
+                        arrivingIgnitionCardId,
+                        cooldownTasks,
+                        cdContainer,
+                        nextSnap,
+                        prevCD,
+                        nextCD,
+                        localPID,
+                    };
+                } else if (cdContainer) {
+                    renderIgnitionZone(nextSnap);
                     const arrivingEntry = nextCD.find((e) => e.cardId === arrivingIgnitionCardId);
                     const intermediateList = [
                         ...prevCD.filter((e) => e.cardId !== arrivingIgnitionCardId),
                         ...(arrivingEntry ? [arrivingEntry] : []),
                     ];
-                    renderCooldownList(cdContainer, intermediateList);
-                    // Card with 0 cooldown skipped the cooldown queue entirely → immediately show its
-                    // destination (banished for Continuous cards, deck for others) without waiting
-                    // for all cooldown countdown animations to complete.
+                    renderCooldownList(cdContainer, sortCooldownEntriesForDisplay(intermediateList));
                     if (!nextCD.find((e) => e.cardId === arrivingIgnitionCardId)) {
                         const localSelf = nextSnap.players?.find((p) => p.playerId === localPID);
                         let localOpp = nextSnap.players?.find((p) => p.playerId !== localPID);
@@ -2541,34 +2631,24 @@ import {
                         }
                     }
                 }
+            } else if (nextTurnStarterHud?.ignitionOn) {
+                renderIgnitionZone(nextSnap);
             }
         }
 
-        for (let i = 0; i < cooldownTasks.length; i++) {
-            const task = cooldownTasks[i];
-            // Lazy DOM lookup: elements may have been recreated by the intermediate renderCooldownList.
-            const taskWrap = cdContainer?.querySelector(
-                `[data-card-id="${escapeCardIdForSelector(String(task.cardId))}"]`,
-            );
-            const turnsEl = taskWrap?.querySelector(".pm-cooldown-turns");
-            if (turnsEl) {
-                await odometerFlip(turnsEl, task.from, task.to, animMs);
+        if (!deferral) {
+            await runTurnStartCooldownOdometersLoop({
+                cooldownTasks,
+                cdContainer,
+                nextSnap,
+                localPID,
+            });
+            if (cdContainer && (prevCD.length > 0 || nextCD.length > 0)) {
+                renderCooldownList(cdContainer, sortCooldownEntriesForDisplay(nextCD));
             }
-            // Card reached 0t: remove it from cooldown DOM and immediately show its destination
-            // (banished for Continuous cards, deck for others) rather than waiting until renderPlaymat
-            // at the very end of enqueueSnapshotApply.
-            if (task.to === "0t") {
-                taskWrap?.remove();
-                const localSelf = nextSnap.players?.find((p) => p.playerId === localPID);
-                let localOpp = nextSnap.players?.find((p) => p.playerId !== localPID);
-                if (!localOpp) localOpp = emptyOppPlaymatStub(localPID);
-                if (localSelf) {
-                    renderBanishZone(localSelf, localOpp);
-                    renderDeckZone(localSelf, localOpp);
-                }
-            }
-            if (i < cooldownTasks.length - 1) await sleep(delayMs);
         }
+
+        return deferral;
     }
 
     /**
@@ -3012,6 +3092,34 @@ import {
         el.remove();
     }
 
+    /** @param {string} pid "A" | "B" */
+    function manaBarElForPlayerId(pid) {
+        if (pid === "A") return document.getElementById("manaBarA");
+        if (pid === "B") return document.getElementById("manaBarB");
+        return null;
+    }
+
+    /**
+     * Short blue pulse on the mana bar when Energy Gain's effect activation succeeds (+4 mana).
+     * Runs after activate_card (post-ignition burn), not when the card enters the ignition slot.
+     * Awaited so the next queued activate_card / reaction FX waits until this finishes.
+     * @param {HTMLElement | null} manaBarEl
+     * @returns {Promise<void>}
+     */
+    async function playManaBarEnergyGainGlow(manaBarEl) {
+        if (!manaBarEl) return;
+        manaBarEl.classList.add("pm-mana-gain-flash");
+        await new Promise((resolve) => {
+            const done = () => {
+                manaBarEl.removeEventListener("animationend", done);
+                manaBarEl.classList.remove("pm-mana-gain-flash");
+                resolve(undefined);
+            };
+            manaBarEl.addEventListener("animationend", done, { once: true });
+            window.setTimeout(done, 900);
+        });
+    }
+
     /**
      * Buffers a server `activate_card` until the matching snapshot apply runs (so banner can precede FX).
      * @param {object} payload
@@ -3023,17 +3131,31 @@ import {
     /**
      * Drains buffered `activate_card` payloads into the activation FX worker queue.
      * @param {object | null} layoutSnap snapshot to use for DOM/wrap lookup (pre-resolve); omit for non-reaction FX.
+     * @param {object | null} [cooldownDeferral] from runTurnStartResourceSequence when ignition resolved with deferred cooldown odometers.
+     * @returns {boolean} true if deferral was attached to a queued payload (activate_card will run cooldown odometers).
      */
-    function flushPendingActivationFx(layoutSnap) {
+    function flushPendingActivationFx(layoutSnap, cooldownDeferral) {
         if (pendingActivateCardPayloads.length === 0) {
-            return;
+            return false;
         }
         const batch = pendingActivateCardPayloads;
         pendingActivateCardPayloads = [];
+        let rem = cooldownDeferral?.deferCooldownAfterActivation ? cooldownDeferral : null;
+        let attached = false;
         for (const pl of batch) {
-            const wrapped = layoutSnap ? { ...pl, _layoutSnap: layoutSnap } : pl;
+            const wrapped = layoutSnap ? { ...pl, _layoutSnap: layoutSnap } : { ...pl };
+            if (
+                rem &&
+                String(pl.playerId || "") === rem.turnStarter &&
+                String(pl.cardId || "") === rem.arrivingIgnitionCardId
+            ) {
+                wrapped._cooldownOdometerDeferral = rem;
+                attached = true;
+                rem = null;
+            }
             enqueueServerActivationFx(wrapped);
         }
+        return attached;
     }
 
     /**
@@ -3075,23 +3197,24 @@ import {
     }
 
     /**
-     * Runs activation glow for server `activate_card` (effect resolution after reaction pile / ignition),
-     * then immediately renders the card in cooldown so it appears before the next card's animation.
+     * Runs activation glow for server `activate_card` (effect resolution after reaction pile / ignition).
+     * Glow (and optional mana pulse) runs while the card still occupies the ignition slot; only after those
+     * finish is the slot cleared, the card shown in cooldown, and other recharge odometers applied.
      * @param {object} payload
      */
     async function runEffectActivationClientSequence(payload) {
         send("client_fx_hold", {});
         try {
-                    const pid = String(payload.playerId || "");
-                    const cid = String(payload.cardId || "");
-                    if (
-                        ignitionBlueHold &&
-                        ignitionBlueHold.owner === pid &&
-                        ignitionBlueHold.cardId === cid
-                    ) {
-                        ignitionBlueHold = null;
-                    }
-                    const localPID = playerEl.value;
+            const pid = String(payload.playerId || "");
+            const cid = String(payload.cardId || "");
+            if (
+                ignitionBlueHold &&
+                ignitionBlueHold.owner === pid &&
+                ignitionBlueHold.cardId === cid
+            ) {
+                ignitionBlueHold = null;
+            }
+            const localPID = playerEl.value;
             const isSelf = pid === localPID;
             const layoutSnap = payload._layoutSnap || lastSnapshot;
             let wrap = reactionStackCardWrap(layoutSnap, localPID, cid, pid);
@@ -3100,14 +3223,16 @@ import {
             }
             const typeLower = String(payload.cardType || getCardDef(cid)?.type || "").toLowerCase();
             const success = !!payload.success;
-            blockGameplayInputForEffects(1600);
-            await playEffectActivationGlow(wrap, typeLower, success);
-            // Immediately render card in cooldown so it appears before the next card's animation starts.
+            const cooldownDeferral = payload._cooldownOdometerDeferral;
             const cooldownContainer = isSelf ? pmEl.cooldownCardsSelf : pmEl.cooldownCardsOpp;
             const pidSnap = lastSnapshot?.players?.find((p) => p.playerId === pid);
-            if (cooldownContainer && pidSnap) {
-                renderCooldownList(cooldownContainer, pidSnap.cooldownPreview || []);
-            }
+            blockGameplayInputForEffects(2000);
+            const glowPromise = playEffectActivationGlow(wrap, typeLower, success);
+            const manaBarPromise =
+                success && cid === "energy-gain"
+                    ? playManaBarEnergyGainGlow(manaBarElForPlayerId(pid))
+                    : Promise.resolve();
+            await Promise.all([glowPromise, manaBarPromise]);
             const clearedIgnitionCardEl = isSelf ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
             const clearedIgnitionCounterEl = isSelf ? pmEl.ignitionCounterSelf : pmEl.ignitionCounterOpp;
             if (clearedIgnitionCardEl) {
@@ -3120,6 +3245,12 @@ import {
             }
             if (clearedIgnitionCounterEl) {
                 clearedIgnitionCounterEl.classList.add("hidden");
+            }
+            if (cooldownDeferral) {
+                await applyIgnitionResolveThenCooldownOdometers(cooldownDeferral);
+                if (lastSnapshot) renderIgnitionZone(lastSnapshot);
+            } else if (cooldownContainer && pidSnap) {
+                renderCooldownList(cooldownContainer, pidSnap.cooldownPreview || []);
             }
         } finally {
             send("client_fx_release", {});
@@ -4922,11 +5053,11 @@ import {
             });
             inRoomLabelEl.append(` | ${t("passwordLabelInline")}: `, value, " (", toggle, ")");
         }
-        const youRoom =
-            authUser && authUser.username
-                ? `${t("you")}: ${authUser.username} (${t("player")} ${playerEl.value})`
-                : `${t("you")}: ${t("player")} ${playerEl.value}`;
-        inRoomLabelEl.append(` | ${youRoom}`);
+        const selfRoom =
+            authUser && authUser.username && String(authUser.username).trim()
+                ? String(authUser.username).trim()
+                : `${t("player")} ${playerEl.value}`;
+        inRoomLabelEl.append(` | ${selfRoom}`);
     }
 
     /**

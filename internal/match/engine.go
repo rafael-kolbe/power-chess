@@ -26,6 +26,7 @@ const (
 	CardKnightTouch    gameplay.CardID = "knight-touch"
 	CardRookTouch      gameplay.CardID = "rook-touch"
 	CardBishopTouch    gameplay.CardID = "bishop-touch"
+	CardEnergyGain     gameplay.CardID = "energy-gain"
 	CardDoubleTurn     gameplay.CardID = "double-turn"
 	CardStopRightThere gameplay.CardID = "stop-right-there"
 	CardExtinguish     gameplay.CardID = "extinguish"
@@ -354,6 +355,9 @@ func (e *Engine) SubmitMove(pid gameplay.PlayerID, m chess.Move) error {
 	}
 
 	if e.isCaptureAttempt(pid, m) {
+		if !e.moveWouldApplyAuthoritatively(pid, m) {
+			return fmt.Errorf("illegal move")
+		}
 		e.pendingMove = &PendingMoveAction{PlayerID: pid, Move: m}
 		e.OpenReactionWindow("capture_attempt", pid, []gameplay.CardType{gameplay.CardTypeCounter})
 		return nil
@@ -514,6 +518,20 @@ func (e *Engine) isStandardLegalMove(m chess.Move) bool {
 		}
 	}
 	return false
+}
+
+// moveWouldApplyAuthoritatively reports whether applyAuthorizedMove would accept m (including
+// king-in-check rules) without mutating engine state. Used so capture_attempt is not opened for
+// pseudo-legal or pinned captures that are still illegal chess.
+func (e *Engine) moveWouldApplyAuthoritatively(pid gameplay.PlayerID, m chess.Move) bool {
+	if e.isStandardLegalMove(m) {
+		return true
+	}
+	if !e.canUseAugmentedMovement(pid, m) {
+		return false
+	}
+	cp := e.Chess.Clone()
+	return cp.ApplyPseudoLegalMove(m) == nil
 }
 
 // PendingMoveAction represents a not-yet-applied move waiting for reaction window resolution.

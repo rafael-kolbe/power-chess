@@ -530,6 +530,17 @@ button:disabled {
   flex-direction: column-reverse;
 }
 
+/*
+ * Seat A stack is always name → mana → capture in DOM (bottom band for viewer A, top for viewer B).
+ * Seat B stack is always capture → mana → name in DOM (top band for viewer A, bottom for viewer B).
+ * Board column-reverse swaps which stack is top/bottom; reverse each stack so both viewers see:
+ * own band: name → mana → capture; opponent band: capture → mana → name.
+ */
+.board-wrap.board-wrap-perspective-b .player-a-stack,
+.board-wrap.board-wrap-perspective-b .player-b-stack {
+  flex-direction: column-reverse;
+}
+
 .side-clock {
   padding: 8px 10px;
   font-size: 14px;
@@ -586,6 +597,27 @@ button:disabled {
 
 .bar.mana-bar .fill {
   background: linear-gradient(180deg, #5eb0ff, #2a7ccc);
+}
+
+/* Energy Gain (+4): mana bar pulse after successful effect activation (activate_card), not on entering ignition */
+.bar.mana-bar.pm-mana-gain-flash {
+  overflow: visible;
+  z-index: 4;
+  animation: pm-mana-gain-bar-glow 0.75s ease-out forwards;
+}
+
+@keyframes pm-mana-gain-bar-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 rgb(100 190 255 / 0%),
+      inset 0 1px 0 rgb(255 255 255 / 5%);
+  }
+  45% {
+    box-shadow:
+      0 0 16px 5px rgb(120 200 255 / 55%),
+      inset 0 1px 0 rgb(255 255 255 / 8%);
+  }
 }
 
 .bar.energized-bar .fill {

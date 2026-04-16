@@ -246,7 +246,6 @@ func (c *Client) readLoop() {
 			c.sendError(ErrorActionFailed, err.Error())
 			continue
 		}
-		c.server.matchDebugLogLine(clientDebugLogRoomID(c), fmt.Sprintf("ok type=%s id=%s player=%s", env.Type, env.ID, c.playerID))
 	}
 }
 
@@ -306,7 +305,7 @@ func (c *Client) handle(env Envelope) error {
 	}
 }
 
-// handleClientTrace appends browser debug text to the server process log when ADMIN_DEBUG_MATCH is enabled.
+// handleClientTrace accepts batched browser debug text when ADMIN_DEBUG_MATCH is enabled (no server logging).
 func (c *Client) handleClientTrace(env Envelope) error {
 	if !c.server.adminDebugMatch {
 		return protocolError{code: ErrorDebugDisabled, message: "admin_debug_match_disabled"}
@@ -318,12 +317,6 @@ func (c *Client) handleClientTrace(env Envelope) error {
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		return err
 	}
-	text := strings.TrimSpace(p.Text)
-	if text == "" {
-		return c.sendAck(env, "ok", "", "")
-	}
-	line := compactClientTraceLogLine(text)
-	log.Printf("client_trace room=%s player=%s %s", c.room.RoomID, c.playerID, line)
 	return c.sendAck(env, "ok", "", "")
 }
 
@@ -508,7 +501,7 @@ func (c *Client) handleJoinMatch(env Envelope) error {
 		if env.ID != "" && !room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
-		selected, assignErr := room.assignJoinPlayer(p)
+		selected, assignErr := room.assignJoinPlayer(p, c.authUserID)
 		if assignErr != nil {
 			return assignErr
 		}

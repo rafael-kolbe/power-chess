@@ -429,6 +429,32 @@ func TestCaptureTriggerWindowOpensAutomaticallyAndDefersMove(t *testing.T) {
 	}
 }
 
+// TestCaptureAttemptRejectedWhenPinnedCaptureWouldExposeKing ensures capture_attempt does not open
+// when the capture is pseudo-visible but illegal (absolute pin); the player can submit another move.
+func TestCaptureAttemptRejectedWhenPinnedCaptureWouldExposeKing(t *testing.T) {
+	state, _ := gameplay.NewMatchState(testDeckWith(gameplay.CardInstance{InstanceID: "f", CardID: "double-turn", ManaCost: 1, Ignition: 1, Cooldown: 1}), testDeckWith(gameplay.CardInstance{InstanceID: "f2", CardID: "double-turn", ManaCost: 1, Ignition: 1, Cooldown: 1}))
+	board := chess.NewEmptyGame(chess.White)
+	// a-file pin: Ka1, Ra2 vs Qa8. Rook captures horizontally on rank-2 (e.g. h2) leaving the a-file open.
+	board.SetPiece(chess.Pos{Row: 7, Col: 0}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 6, Col: 0}, chess.Piece{Type: chess.Rook, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 0}, chess.Piece{Type: chess.Queen, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 7}, chess.Piece{Type: chess.Knight, Color: chess.Black})
+
+	e := NewEngine(state, board)
+	markInPlayForTest(state)
+	illegalCapture := chess.Move{From: chess.Pos{Row: 6, Col: 0}, To: chess.Pos{Row: 6, Col: 7}}
+	if err := e.SubmitMove(gameplay.PlayerA, illegalCapture); err == nil {
+		t.Fatal("expected illegal pinned capture to be rejected before capture_attempt")
+	}
+	if e.ReactionWindow != nil && e.ReactionWindow.Open && e.ReactionWindow.Trigger == "capture_attempt" {
+		t.Fatal("capture_attempt window must not open for an illegal capture")
+	}
+	if e.pendingMove != nil {
+		t.Fatal("pending move must not be set when capture is rejected")
+	}
+}
+
 func TestEnPassantCaptureOpensCaptureTriggerWindow(t *testing.T) {
 	state, _ := gameplay.NewMatchState(testDeckWith(gameplay.CardInstance{InstanceID: "f", CardID: "double-turn", ManaCost: 1, Ignition: 1, Cooldown: 1}), testDeckWith(gameplay.CardInstance{InstanceID: "f2", CardID: "double-turn", ManaCost: 1, Ignition: 1, Cooldown: 1}))
 	board := chess.NewEmptyGame(chess.Black)
@@ -1014,5 +1040,89 @@ func TestRookTouchMovementGrantExpiresAfterOwnerTurn(t *testing.T) {
 	}
 	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 1, Col: 1}, To: chess.Pos{Row: 1, Col: 7}}); err == nil {
 		t.Fatal("rook-touch grant should expire after owner turn")
+	}
+}
+
+func TestEnergyGainResolverGrantsManaViaProcessResolvedIgnitions(t *testing.T) {
+	eg := gameplay.CardInstance{InstanceID: "eg1", CardID: CardEnergyGain, ManaCost: 0, Ignition: 1, Cooldown: 2}
+	state, err := gameplay.NewMatchState(testDeckWith(eg), testDeckWith(eg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Players[gameplay.PlayerA].Mana = 2
+	state.Players[gameplay.PlayerA].MaxMana = 10
+	state.Players[gameplay.PlayerA].Ignition = gameplay.IgnitionSlot{
+		Occupied:        true,
+		Card:            eg,
+		TurnsRemaining:  0,
+		ActivationOwner: gameplay.PlayerA,
+	}
+	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	markInPlayForTest(state)
+
+	if err := state.ResolveIgnitionFor(gameplay.PlayerA, true); err != nil {
+		t.Fatalf("resolve ignition: %v", err)
+	}
+	if err := e.processResolvedIgnitions(); err != nil {
+		t.Fatalf("process resolved ignitions: %v", err)
+	}
+	if state.Players[gameplay.PlayerA].Mana != 6 {
+		t.Fatalf("expected mana 2+4=6, got %d", state.Players[gameplay.PlayerA].Mana)
+	}
+}
+
+func TestEnergyGainDoesNotGrantManaOnFailedResolution(t *testing.T) {
+	eg := gameplay.CardInstance{InstanceID: "eg1", CardID: CardEnergyGain, ManaCost: 0, Ignition: 1, Cooldown: 2}
+	state, err := gameplay.NewMatchState(testDeckWith(eg), testDeckWith(eg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Players[gameplay.PlayerA].Mana = 3
+	state.Players[gameplay.PlayerA].MaxMana = 10
+	state.Players[gameplay.PlayerA].Ignition = gameplay.IgnitionSlot{
+		Occupied:        true,
+		Card:            eg,
+		TurnsRemaining:  0,
+		ActivationOwner: gameplay.PlayerA,
+	}
+	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	markInPlayForTest(state)
+
+	if err := state.ResolveIgnitionFor(gameplay.PlayerA, false); err != nil {
+		t.Fatalf("resolve ignition: %v", err)
+	}
+	if err := e.processResolvedIgnitions(); err != nil {
+		t.Fatalf("process resolved ignitions: %v", err)
+	}
+	if state.Players[gameplay.PlayerA].Mana != 3 {
+		t.Fatalf("failed resolution should not add mana, got %d", state.Players[gameplay.PlayerA].Mana)
+	}
+}
+
+func TestEnergyGainManaCappedAtMaxMana(t *testing.T) {
+	eg := gameplay.CardInstance{InstanceID: "eg1", CardID: CardEnergyGain, ManaCost: 0, Ignition: 1, Cooldown: 2}
+	state, err := gameplay.NewMatchState(testDeckWith(eg), testDeckWith(eg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Players[gameplay.PlayerA].Mana = 8
+	state.Players[gameplay.PlayerA].MaxMana = 10
+	state.Players[gameplay.PlayerA].Ignition = gameplay.IgnitionSlot{
+		Occupied:        true,
+		Card:            eg,
+		TurnsRemaining:  0,
+		ActivationOwner: gameplay.PlayerA,
+	}
+	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	markInPlayForTest(state)
+
+	if err := state.ResolveIgnitionFor(gameplay.PlayerA, true); err != nil {
+		t.Fatalf("resolve ignition: %v", err)
+	}
+	if err := e.processResolvedIgnitions(); err != nil {
+		t.Fatalf("process resolved ignitions: %v", err)
+	}
+	if state.Players[gameplay.PlayerA].Mana != 10 {
+		t.Fatalf("expected mana capped at max 10, got %d", state.Players[gameplay.PlayerA].Mana)
 	}
 }

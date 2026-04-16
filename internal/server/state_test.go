@@ -34,8 +34,9 @@ func TestMarkRequestOnce(t *testing.T) {
 	}
 }
 
-// TestJoinSeatBlockedDuringReconnectGrace ensures a third party cannot take the vacant seat while the grace timer runs.
-func TestJoinSeatBlockedDuringReconnectGrace(t *testing.T) {
+// TestJoinSeatReconnectDuringDisconnectGrace ensures the same seat may be reclaimed during the
+// grace window (e.g. browser refresh), while a different authenticated account cannot steal it.
+func TestJoinSeatReconnectDuringDisconnectGrace(t *testing.T) {
 	room, err := NewRoomSession("room-join-grace")
 	if err != nil {
 		t.Fatalf(newRoomFailedFmt, err)
@@ -43,11 +44,27 @@ func TestJoinSeatBlockedDuringReconnectGrace(t *testing.T) {
 	syncDisconnectBudgetForTest(room, time.Minute)
 	room.RegisterPlayerConnection(gameplay.PlayerA)
 	room.RegisterPlayerConnection(gameplay.PlayerB)
+	room.authUIDByPlayer[gameplay.PlayerA] = 9001
 	room.HandlePlayerDisconnect(gameplay.PlayerA)
 
-	_, err = room.joinSeat(gameplay.PlayerA)
-	if err == nil {
-		t.Fatalf("expected joinSeat to reject while reconnect timer is pending for A")
+	if _, err := room.joinSeat(gameplay.PlayerA, 9001); err != nil {
+		t.Fatalf("expected same account to rejoin seat A during grace, got %v", err)
+	}
+	if _, err := room.joinSeat(gameplay.PlayerA, 9002); err == nil {
+		t.Fatalf("expected different account to be rejected for seat A during grace")
+	}
+
+	room2, err := NewRoomSession("room-join-grace-guest")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	syncDisconnectBudgetForTest(room2, time.Minute)
+	room2.RegisterPlayerConnection(gameplay.PlayerA)
+	room2.RegisterPlayerConnection(gameplay.PlayerB)
+	room2.authUIDByPlayer[gameplay.PlayerA] = 0
+	room2.HandlePlayerDisconnect(gameplay.PlayerA)
+	if _, err := room2.joinSeat(gameplay.PlayerA, 0); err != nil {
+		t.Fatalf("expected guest to rejoin seat A during grace, got %v", err)
 	}
 }
 
