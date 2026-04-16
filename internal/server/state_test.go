@@ -752,3 +752,23 @@ func TestRequestRematchSwapsSides(t *testing.T) {
 		t.Fatalf("expected display names swapped with seats, got A=%q B=%q", snap.PlayerAName, snap.PlayerBName)
 	}
 }
+
+// TestGameplayStateServiceOpenClose validates open/closed match state transitions.
+func TestGameplayStateServiceOpenClose(t *testing.T) {
+	room, err := NewRoomSession("room-gameplay-state-service")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	svc := NewGameplayStateService(room)
+	if !svc.IsOpen() {
+		t.Fatalf("new match should start as open")
+	}
+	svc.Close(gameplay.PlayerA, "checkmate")
+	if svc.IsOpen() {
+		t.Fatalf("match should be closed after Close")
+	}
+	snap := room.SnapshotSafe()
+	if !snap.MatchEnded || snap.Winner != string(gameplay.PlayerA) || snap.EndReason != "checkmate" {
+		t.Fatalf("unexpected close state snapshot: %+v", snap)
+	}
+}

@@ -165,8 +165,13 @@ Fluxo típico de ativação:
 
 ## Qualidade e commits
 
-- Toda funcionalidade nova ou bugfix relevante deve incluir **testes**.  
-- Commits na **`branch feature/<feature-name>`** quando a entrega estiver **coesa** e **`go test ./...`** (e E2E quando aplicável) estiver verde.
+- Toda funcionalidade nova ou bugfix relevante deve incluir **testes**.
+- **Padrão obrigatório no backend: TDD (Test-Driven Development)**.
+- Ciclo padrão por alteração de comportamento no backend:
+  1. escrever primeiro um teste que falha (**red**);
+  2. implementar o mínimo para passar (**green**);
+  3. refatorar mantendo a suíte verde (**refactor**).
+- Commits na **`branch feature/<feature-name>`** quando a entrega estiver **coesa** e **`go test ./...`** estiver verde.
 
 ### Política de push (Git)
 

@@ -39,7 +39,7 @@ type Engine struct {
 	pendingEffects map[gameplay.PlayerID][]PendingEffect
 	resolvers      map[gameplay.CardID]EffectResolver
 	ReactionWindow *ReactionWindow
-	reactionStack  []ReactionAction
+	reactions      *ReactionRuntime
 	pendingMove    *PendingMoveAction
 	// pendingActivationFX holds server→client activate_card events (effect step after ignition reaches 0).
 	pendingActivationFX []ActivationFXEvent
@@ -75,7 +75,7 @@ func NewEngine(state *gameplay.MatchState, board *chess.Game) *Engine {
 		Chess:          board,
 		pendingEffects: map[gameplay.PlayerID][]PendingEffect{},
 		resolvers:      DefaultResolvers(),
-		reactionStack:  []ReactionAction{},
+		reactions:      NewReactionRuntime(),
 		pendingMove:    nil,
 	}
 }

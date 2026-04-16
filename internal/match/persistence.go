@@ -36,7 +36,7 @@ func (e *Engine) ExportState() PersistedEngineState {
 		Chess:          *e.Chess.Clone(),
 		Match:          *e.State,
 		ReactionWindow: nil,
-		ReactionStack:  make([]PersistedReactionAction, 0, len(e.reactionStack)),
+		ReactionStack:  make([]PersistedReactionAction, 0, e.reactions.Len()),
 		PendingMove:    nil,
 	}
 	for _, pid := range []gameplay.PlayerID{gameplay.PlayerA, gameplay.PlayerB} {
@@ -52,7 +52,7 @@ func (e *Engine) ExportState() PersistedEngineState {
 		rw.EligibleTypes = append([]gameplay.CardType(nil), rw.EligibleTypes...)
 		out.ReactionWindow = &rw
 	}
-	for _, ra := range e.reactionStack {
+	for _, ra := range e.reactions.Actions() {
 		out.ReactionStack = append(out.ReactionStack, PersistedReactionAction{
 			Owner:  ra.Owner,
 			Card:   ra.Card,
@@ -97,7 +97,7 @@ func NewEngineFromState(snapshot PersistedEngineState) (*Engine, error) {
 		if !ok {
 			return nil, errors.New("missing resolver for persisted reaction stack")
 		}
-		e.reactionStack = append(e.reactionStack, ReactionAction{
+		e.reactions.Push(ReactionAction{
 			Owner:    ra.Owner,
 			Card:     ra.Card,
 			Target:   ra.Target,
