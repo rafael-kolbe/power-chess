@@ -10,6 +10,19 @@ import {
     let seq = 1;
     let lastSnapshot = null;
     let selectedFrom = null;
+    /**
+     * Two-step targeting: after `ignite_card` (hand→ignition), server sets `ignitionTargeting.awaitingTargetChoice`;
+     * then the player picks a square and sends `submit_ignition_targets`.
+     * @type {{ stage: "placed" | "picking", cardId: string } | null}
+     */
+    let igniteTargetFlow = null;
+    /**
+     * Keeps blue dotted targets until the matching `activate_card` is processed (success or fail).
+     * @type {{ owner: string, cardId: string, pieces: { row: number, col: number }[] } | null}
+     */
+    let ignitionBlueHold = null;
+    /** After clicking/dragging a board piece to move, suppress enchanted-piece card hover until mouse leaves the square. */
+    let boardEnchantHoverSuppressed = false;
     let highlightedMoves = [];
     let draggingFrom = null;
     /** When true, block outgoing game actions during turn-start resource animation. */
@@ -95,6 +108,8 @@ import {
     const reactionPassBtnEl = document.getElementById("reactionPassBtn");
     const coordsInSquaresEl = document.getElementById("coordsInSquares");
     const coordsInSquaresTextEl = document.getElementById("coordsInSquaresText");
+    const effectTurnsAlwaysVisibleEl = document.getElementById("effectTurnsAlwaysVisible");
+    const effectTurnsToggleTextEl = document.getElementById("effectTurnsToggleText");
     const manaFillA = document.getElementById("manaFillA");
     const manaFillB = document.getElementById("manaFillB");
     const manaLabelA = document.getElementById("manaLabelA");
@@ -197,6 +212,9 @@ import {
             toggleOff: "Off",
             coordsLabel: "Coords",
             coordsInSquares: "Coords in squares",
+            effectTurnsLabel: "Effect turns",
+            effectTurnsAlways: "Always",
+            effectTurnsHover: "Hover",
             submitMove: "Submit move",
             activateCard: "Activate card",
             resolvePending: "Resolve pending effect",
@@ -332,6 +350,9 @@ import {
             toggleOff: "Desligado",
             coordsLabel: "Coords",
             coordsInSquares: "Coordenadas nas casas",
+            effectTurnsLabel: "Turnos do efeito",
+            effectTurnsAlways: "Sempre",
+            effectTurnsHover: "Hover",
             submitMove: "Enviar jogada",
             activateCard: "Ativar carta",
             resolvePending: "Resolver efeito pendente",
@@ -803,6 +824,7 @@ import {
         if (pmEl.drawBtn) pmEl.drawBtn.textContent = t("drawFromDeck");
         if (lastSnapshot) renderMulliganBar(lastSnapshot);
         updateCoordsToggleLabel();
+        updateEffectTurnsToggleLabel();
         updateReactionModeOptions();
         updateReactionModeLabel();
         if (reactionPassBtnEl) reactionPassBtnEl.textContent = t("reactionPassOk");
@@ -1001,6 +1023,12 @@ import {
     function updateCoordsToggleLabel() {
         if (!coordsInSquaresEl || !coordsInSquaresTextEl) return;
         coordsInSquaresTextEl.textContent = `${t("coordsLabel")}: ${coordsInSquaresEl.checked ? t("toggleOn") : t("toggleOff")}`;
+    }
+
+    function updateEffectTurnsToggleLabel() {
+        if (!effectTurnsAlwaysVisibleEl || !effectTurnsToggleTextEl) return;
+        const mode = effectTurnsAlwaysVisibleEl.checked ? t("effectTurnsAlways") : t("effectTurnsHover");
+        effectTurnsToggleTextEl.textContent = `${t("effectTurnsLabel")}: ${mode}`;
     }
 
     /**
@@ -1218,6 +1246,9 @@ import {
                 pendingJoinAttempt = null;
                 const nextSnap = msg.payload;
                 lastSnapshot = nextSnap;
+                maybeAdvanceIgniteTargetFlow(nextSnap);
+                maybeClearIgniteTargetFlow(nextSnap);
+                syncIgnitionBlueHoldFromSnapshot(nextSnap);
                 const viewer = nextSnap.viewerPlayerId;
                 if ((viewer === "A" || viewer === "B") && playerEl && playerEl.value !== viewer) {
                     playerEl.value = viewer;
@@ -1427,6 +1458,91 @@ import {
         return `${file}${rank}`;
     }
 
+    /** Locked ignition target squares from snapshot (top-level + reaction window mirror). */
+    function boardIgnitionTargetPieces(snapshot) {
+        const out = [];
+        const igt = snapshot?.ignitionTargeting;
+        if (Array.isArray(igt?.target_pieces)) out.push(...igt.target_pieces);
+        const rw = snapshot?.reactionWindow;
+        if (Array.isArray(rw?.target_pieces)) {
+            for (const tp of rw.target_pieces) {
+                if (!out.some((x) => Number(x.row) === Number(tp.row) && Number(x.col) === Number(tp.col))) {
+                    out.push(tp);
+                }
+            }
+        }
+        return out;
+    }
+
+    function syncIgnitionBlueHoldFromSnapshot(snapshot) {
+        const pieces = boardIgnitionTargetPieces(snapshot);
+        const igt = snapshot?.ignitionTargeting;
+        const rw = snapshot?.reactionWindow;
+        const owner = igt?.owner || rw?.targetingOwner;
+        const cardId = igt?.cardId || rw?.targetingCardId;
+        if (pieces.length > 0 && owner && cardId) {
+            ignitionBlueHold = {
+                owner: String(owner),
+                cardId: String(cardId),
+                pieces: pieces.map((tp) => ({ row: Number(tp.row), col: Number(tp.col) })),
+            };
+        }
+    }
+
+    function maybeAdvanceIgniteTargetFlow(snapshot) {
+        if (!igniteTargetFlow || igniteTargetFlow.stage !== "placed") return;
+        const igt = snapshot?.ignitionTargeting;
+        const self = playerEl.value;
+        if (!igt || igt.owner !== self || String(igt.cardId || "") !== igniteTargetFlow.cardId) return;
+        if (igt.awaitingTargetChoice) igniteTargetFlow.stage = "picking";
+    }
+
+    function maybeClearIgniteTargetFlow(snapshot) {
+        if (!igniteTargetFlow) return;
+        const igt = snapshot?.ignitionTargeting;
+        const self = playerEl.value;
+        if (
+            igt?.owner === self &&
+            Array.isArray(igt.target_pieces) &&
+            igt.target_pieces.length > 0 &&
+            !igt.awaitingTargetChoice
+        ) {
+            igniteTargetFlow = null;
+            return;
+        }
+        const selfHud = snapshot?.players?.find((p) => p.playerId === self);
+        if (selfHud && !selfHud.ignitionOn && igniteTargetFlow) {
+            igniteTargetFlow = null;
+        }
+    }
+
+    function ignitionDottedPiecesForUI(snapshot) {
+        const fromSnap = boardIgnitionTargetPieces(snapshot);
+        if (fromSnap.length > 0) return fromSnap;
+        if (!ignitionBlueHold) return [];
+        const matchPl = (pl) =>
+            String(pl.playerId || "") === ignitionBlueHold.owner &&
+            String(pl.cardId || "") === ignitionBlueHold.cardId;
+        const pending =
+            pendingActivateCardPayloads.some(matchPl) ||
+            activationFxQueue.some(matchPl) ||
+            activationFxWorkerPromise !== null;
+        if (pending) return ignitionBlueHold.pieces;
+        return [];
+    }
+
+    function pieceActivePowerAura(snapshot, r, c) {
+        const fx = snapshot?.activePieceEffects;
+        if (!Array.isArray(fx)) return null;
+        for (const e of fx) {
+            if (Number(e.turnsRemaining || 0) <= 0) continue;
+            if (Number(e.row) !== r || Number(e.col) !== c) continue;
+            const t = String(getCardDef(e.cardId)?.type || "").toLowerCase();
+            if (t === "power") return e;
+        }
+        return null;
+    }
+
     function fileLetterFromDisplayEdge(displayRow, displayCol) {
         const { col } = displayToLogical(displayRow, displayCol);
         return String.fromCharCode(97 + col);
@@ -1533,15 +1649,51 @@ import {
         return false;
     }
 
+    /** Merges knight-pattern destinations when `activePieceEffects` grants knight-touch on this square. */
+    function mergeKnightTouchGrant(out, board, from, color, snapshot) {
+        if (!snapshot) return out;
+        const localPid = playerEl.value;
+        const fx = snapshot.activePieceEffects;
+        if (!Array.isArray(fx)) return out;
+        const src = parseCode(pieceAt(board, from.row, from.col));
+        if (!src || src.type === "N" || src.type === "K") return out;
+        const localColor = localPid === "A" ? "w" : "b";
+        if (color !== localColor) return out;
+        const has = fx.some(
+            (e) =>
+                e.owner === localPid &&
+                String(e.cardId || "") === "knight-touch" &&
+                Number(e.turnsRemaining || 0) > 0 &&
+                Number(e.row) === from.row &&
+                Number(e.col) === from.col,
+        );
+        if (!has) return out;
+        const jumps = [
+            [-2, -1],
+            [-2, 1],
+            [-1, -2],
+            [-1, 2],
+            [1, -2],
+            [1, 2],
+            [2, -1],
+            [2, 1],
+        ];
+        for (const [dr, dc] of jumps) {
+            pushIfValidMove(out, board, color, from.row + dr, from.col + dc);
+        }
+        return out;
+    }
+
     /**
      * computeMoves returns pseudo-legal destinations for highlighting. En passant uses server snapshot.
      * @param {string[][]} board
      * @param {{row:number,col:number}} from logical coords
      * @param {{valid?:boolean,targetRow?:number,targetCol?:number,pawnRow?:number,pawnCol?:number}} [ep]
      * @param {{whiteKingSide?:boolean,whiteQueenSide?:boolean,blackKingSide?:boolean,blackQueenSide?:boolean}} [castlingRights]
+     * @param {object} [snapshot] match snapshot for movement grants (defaults to lastSnapshot)
      * @returns {{row:number,col:number}[]}
      */
-    function computeMoves(board, from, ep, castlingRights) {
+    function computeMoves(board, from, ep, castlingRights, snapshot = lastSnapshot) {
         const srcCode = pieceAt(board, from.row, from.col);
         const src = parseCode(srcCode);
         if (!src) return [];
@@ -1574,7 +1726,9 @@ import {
                     }
                 }
             }
-            return out.filter((m) => inBounds(m.row, m.col));
+            return mergeKnightTouchGrant(out, board, from, color, snapshot).filter((m) =>
+                inBounds(m.row, m.col),
+            );
         }
 
         if (type === "N") {
@@ -1598,7 +1752,7 @@ import {
                 [1, -1],
                 [1, 1],
             ]);
-            return out;
+            return mergeKnightTouchGrant(out, board, from, color, snapshot);
         }
         if (type === "R") {
             slidingMoves(out, board, color, from, [
@@ -1607,7 +1761,7 @@ import {
                 [0, -1],
                 [0, 1],
             ]);
-            return out;
+            return mergeKnightTouchGrant(out, board, from, color, snapshot);
         }
         if (type === "Q") {
             slidingMoves(out, board, color, from, [
@@ -1620,7 +1774,7 @@ import {
                 [0, -1],
                 [0, 1],
             ]);
-            return out;
+            return mergeKnightTouchGrant(out, board, from, color, snapshot);
         }
         if (type === "K") {
             const opponentColor = color === "w" ? "b" : "w";
@@ -1683,7 +1837,7 @@ import {
                 }
             }
         }
-        return out;
+        return mergeKnightTouchGrant(out, board, from, color, snapshot);
     }
 
     function isOwnPiece(code) {
@@ -1939,6 +2093,21 @@ import {
     function getCardDef(cardId) {
         const catalog = getLocalizedCardCatalog(locale);
         return catalog.find((c) => c.id === cardId) || null;
+    }
+
+    /** Builds the payload expected by {@link showCardPreview} from a localized catalog row. */
+    function cardDataFromCatalogRow(def) {
+        if (!def) return null;
+        return {
+            id: def.id,
+            type: def.type,
+            name: def.name,
+            description: def.description,
+            example: def.example,
+            mana: def.mana,
+            ignition: def.ignition,
+            cooldown: def.cooldown,
+        };
     }
 
     /**
@@ -2691,7 +2860,7 @@ import {
             case "retribution":
                 return `rgba(220, 85, 105, ${a})`;
             case "counter":
-                return `rgba(245, 205, 95, ${a})`;
+                return `rgba(255, 115, 190, ${a})`;
             default:
                 return `rgba(200, 210, 230, ${success ? 0.8 : 0.55})`;
         }
@@ -2799,9 +2968,16 @@ import {
     async function runEffectActivationClientSequence(payload) {
         send("client_fx_hold", {});
         try {
-            const pid = String(payload.playerId || "");
-            const cid = String(payload.cardId || "");
-            const localPID = playerEl.value;
+                    const pid = String(payload.playerId || "");
+                    const cid = String(payload.cardId || "");
+                    if (
+                        ignitionBlueHold &&
+                        ignitionBlueHold.owner === pid &&
+                        ignitionBlueHold.cardId === cid
+                    ) {
+                        ignitionBlueHold = null;
+                    }
+                    const localPID = playerEl.value;
             const isSelf = pid === localPID;
             const layoutSnap = payload._layoutSnap || lastSnapshot;
             let wrap = reactionStackCardWrap(layoutSnap, localPID, cid, pid);
@@ -3141,6 +3317,9 @@ import {
         fillOne(selfHud, true);
         fillOne(oppHud, false);
         renderReactionStagedIfAny(snapshot, localPID);
+        if (pmEl.ignitionSelf) {
+            pmEl.ignitionSelf.classList.toggle("pm-ignition-targeting", !!igniteTargetFlow);
+        }
     }
 
     function renderCooldownZone(self, opp) {
@@ -3380,10 +3559,27 @@ import {
         return true;
     }
 
+    function cardRequiresTargetPieces(cardId) {
+        return (Number(getCardDef(cardId)?.targets) || 0) > 0;
+    }
+
     function sendHandCardAction(snapshot, handIndex) {
         if (!isGameplayInputOpen()) return;
         if (isReactionWindowOpen(snapshot)) {
             send("queue_reaction", { handIndex });
+            return;
+        }
+        const self = hudForSeat(snapshot, playerEl.value);
+        const hand = self?.hand || [];
+        const entry = hand[handIndex];
+        const cardId = String(entry?.cardId || "");
+        if (cardRequiresTargetPieces(cardId)) {
+            send("ignite_card", { handIndex });
+            igniteTargetFlow = { stage: "placed", cardId };
+            selectedFrom = null;
+            highlightedMoves = [];
+            if (snapshot?.board) renderBoard(snapshot.board);
+            if (lastSnapshot) renderPlaymat(lastSnapshot);
             return;
         }
         send("ignite_card", { handIndex });
@@ -4053,11 +4249,14 @@ import {
         if (!boardFrameEl) return;
         const moveSet = boardMoveKeySet();
         const selectedKey = selectedFrom ? posKey(selectedFrom.row, selectedFrom.col) : null;
+        const dotted = ignitionDottedPiecesForUI(lastSnapshot);
+        const targetKeySet = new Set(dotted.map((tp) => posKey(tp.row, tp.col)));
         for (const sq of boardFrameEl.querySelectorAll(".sq[data-row]")) {
             const r = +sq.dataset.row;
             const c = +sq.dataset.col;
             sq.classList.toggle("selected", selectedKey === posKey(r, c));
             sq.classList.toggle("move", moveSet.has(posKey(r, c)));
+            sq.classList.toggle("target-selected", targetKeySet.has(posKey(r, c)));
         }
     }
 
@@ -4137,10 +4336,20 @@ import {
     function renderBoard(board) {
         if (!boardFrameEl) return;
         syncBoardPerspectiveClass();
+        if (pmPreviewCard && boardFrameEl.contains(pmPreviewCard)) {
+            hideCardPreview();
+        }
+        boardEnchantHoverSuppressed = false;
         boardFrameEl.innerHTML = "";
         boardFrameEl.classList.toggle("show-inner-coords", coordsInSquaresEl && coordsInSquaresEl.checked);
+        boardFrameEl.classList.toggle(
+            "effect-duration-badges-hover-only",
+            !!(effectTurnsAlwaysVisibleEl && !effectTurnsAlwaysVisibleEl.checked),
+        );
         const moveSet = boardMoveKeySet();
         const selectedKey = selectedFrom ? posKey(selectedFrom.row, selectedFrom.col) : null;
+        const dotted = ignitionDottedPiecesForUI(lastSnapshot);
+        const targetKeySet = new Set(dotted.map((tp) => posKey(tp.row, tp.col)));
         const ep = lastSnapshot?.enPassant;
         const pendingCap = lastSnapshot?.pendingCapture;
         const capToR = Number(pendingCap?.toRow ?? -1);
@@ -4188,6 +4397,11 @@ import {
                 if (code) sq.classList.add("piece");
                 if (selectedKey === posKey(r, c)) sq.classList.add("selected");
                 if (moveSet.has(posKey(r, c))) sq.classList.add("move");
+                if (targetKeySet.has(posKey(r, c))) sq.classList.add("target-selected");
+                const auraFx = code ? pieceActivePowerAura(lastSnapshot, r, c) : null;
+                if (auraFx) {
+                    sq.classList.add("piece-effect-aura-power");
+                }
                 if (pendingCap?.active && capToR === r && capToC === c) {
                     sq.classList.add("capture-threat-target");
                 }
@@ -4203,16 +4417,54 @@ import {
                     img.draggable = false;
                     sq.appendChild(img);
                 }
+                if (auraFx) {
+                    const turnsLeft = Math.max(Number(auraFx.turnsRemaining || 0), 0);
+                    const turnBadge = document.createElement("span");
+                    turnBadge.className = "sq-effect-turn-badge";
+                    turnBadge.textContent = `${turnsLeft}t`;
+                    sq.appendChild(turnBadge);
+                }
                 sq.title = code ? `${code} ${logicalToAlgebraic(r, c)}` : logicalToAlgebraic(r, c);
                 sq.dataset.row = String(r);
                 sq.dataset.col = String(c);
                 sq.dataset.code = code;
                 sq.draggable = !!(code && isOwnPiece(code) && canInteractChessPieces());
 
+                if (auraFx && code) {
+                    sq.addEventListener("mouseenter", () => {
+                        if (boardEnchantHoverSuppressed) return;
+                        const data = cardDataFromCatalogRow(getCardDef(auraFx.cardId));
+                        if (data) showCardPreview(data, sq);
+                    });
+                    sq.addEventListener("mousemove", () => {
+                        if (pmPreviewCard === sq) positionCardPreview(sq);
+                    });
+                    sq.addEventListener("mouseleave", () => {
+                        if (pmPreviewCard === sq) hideCardPreview();
+                        boardEnchantHoverSuppressed = false;
+                    });
+                    sq.addEventListener("mousedown", () => {
+                        if (!isOwnPiece(code) || !canInteractChessPieces()) return;
+                        boardEnchantHoverSuppressed = true;
+                        hideCardPreview();
+                    });
+                }
+
                 sq.addEventListener("click", () => {
                     if (!lastSnapshot?.board || !gameStarted) return;
+                    if (igniteTargetFlow?.stage === "picking") {
+                        const clickedCodeForTarget = sq.dataset.code || "";
+                        if (!clickedCodeForTarget || !isOwnPiece(clickedCodeForTarget)) return;
+                        send("submit_ignition_targets", {
+                            target_pieces: [{ row: r, col: c }],
+                        });
+                        igniteTargetFlow = null;
+                        return;
+                    }
                     const clickedCode = sq.dataset.code || "";
                     if (clickedCode && isOwnPiece(clickedCode) && canInteractChessPieces()) {
+                        boardEnchantHoverSuppressed = true;
+                        hideCardPreview();
                         selectedFrom = logical;
                         highlightedMoves = computeMoves(
                             lastSnapshot.board,
@@ -4238,6 +4490,8 @@ import {
                         ev.preventDefault();
                         return;
                     }
+                    boardEnchantHoverSuppressed = true;
+                    hideCardPreview();
                     const dt = ev.dataTransfer;
                     if (!dt) {
                         ev.preventDefault();
@@ -4844,6 +5098,12 @@ import {
     if (coordsInSquaresEl) {
         coordsInSquaresEl.addEventListener("change", () => {
             updateCoordsToggleLabel();
+            if (lastSnapshot?.board) renderBoard(lastSnapshot.board);
+        });
+    }
+    if (effectTurnsAlwaysVisibleEl) {
+        effectTurnsAlwaysVisibleEl.addEventListener("change", () => {
+            updateEffectTurnsToggleLabel();
             if (lastSnapshot?.board) renderBoard(lastSnapshot.board);
         });
     }

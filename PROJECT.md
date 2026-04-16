@@ -172,6 +172,7 @@ Fluxo típico de ativação:
   2. implementar o mínimo para passar (**green**);
   3. refatorar mantendo a suíte verde (**refactor**).
 - Commits na **`branch feature/<feature-name>`** quando a entrega estiver **coesa** e **`go test ./...`** estiver verde.
+- Para implementação de efeitos de cartas, usar branch no padrão **`feature/<card-id>`** (ex.: `feature/knight-touch`) e entregar uma carta por vez.
 
 ### Política de push (Git)
 
@@ -231,3 +232,29 @@ Ordem aproximada; itens podem ser paralelizados onde fizer sentido.
 - `CardDefinition` + efeitos parametrizados + `CardInstance` (zona: mão, ignição, recarga, deck, banido).  
 - Pipeline: validar → consumir recursos → aplicar efeitos → emitir eventos → validar pós-estado.  
 - Estado temporário (buffs, janelas) com expiração por turno.
+
+### Padrão de implementação de efeitos (escalável)
+
+Aplicar este padrão para todas as novas cartas, evitando lógica espalhada e `if/else` por carta no fluxo principal.
+
+1. **Resolver dedicado por carta**  
+   - Criar um resolver próprio em `internal/match/` (ex.: `resolver_knight_touch.go`).  
+   - Registrar no `DefaultResolvers()` sem alterar o pipeline central.
+
+2. **Estado de efeito genérico no runtime**  
+   - Modelar efeitos temporários como estado estruturado e serializável (ex.: `MovementGrant`).  
+   - Persistir no snapshot do engine (`persistence.go`) para suportar reconexão/restauração.
+
+3. **Capacidades por composição, não substituição**  
+   - Efeitos devem **adicionar capacidades** à peça/jogador (ex.: novo padrão de movimento), sem remover comportamento nativo, salvo quando o texto da carta exigir.
+
+4. **Pontos únicos de aplicação**  
+   - Fluxo central (`SubmitMove`/`applyMoveCore`/resolução de pilha) só consulta serviços/estados genéricos.  
+   - Regras específicas ficam encapsuladas em resolver + tipos de estado do efeito.
+
+5. **Ciclo de vida explícito**  
+   - Definir claramente: criação do efeito, manutenção (ex.: acompanhar posição da peça), expiração por turno/condição e limpeza quando alvo deixa de ser válido.
+
+6. **TDD obrigatório por carta**  
+   - Antes da implementação: testes RED cobrindo ativação, uso do efeito, interação com regras-base e expiração.  
+   - Depois: GREEN mínimo + REFACTOR mantendo cobertura.

@@ -17,5 +17,6 @@ func DefaultResolvers() map[gameplay.CardID]EffectResolver {
 	for _, def := range gameplay.InitialCardCatalog() {
 		m[def.ID] = noopResolver{}
 	}
+	m[CardKnightTouch] = knightTouchResolver{}
 	return m
 }

@@ -501,7 +501,55 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 				Owner:  string(ent.Owner),
 			})
 		}
+		if tOwner, tCardID, tPieces, hasTargets := r.Engine.IgnitionTargetSnapshot(); hasTargets {
+			rwPayload.TargetingOwner = string(tOwner)
+			rwPayload.TargetingCardID = string(tCardID)
+			for _, tp := range tPieces {
+				rwPayload.TargetPieces = append(rwPayload.TargetPieces, TargetPiecePayload{
+					Row: tp.Row,
+					Col: tp.Col,
+				})
+			}
+		}
 		payload.ReactionWindow = rwPayload
+	}
+	for _, pid := range []gameplay.PlayerID{gameplay.PlayerA, gameplay.PlayerB} {
+		p := s.Players[pid]
+		if !p.Ignition.Occupied {
+			continue
+		}
+		def, ok := gameplay.CardDefinitionByID(p.Ignition.Card.CardID)
+		if !ok || def.Targets == 0 {
+			continue
+		}
+		igt := IgnitionTargetingSnapshot{
+			Owner:  string(pid),
+			CardID: string(p.Ignition.Card.CardID),
+		}
+		if _, tp, has := r.Engine.IgnitionTargetsForPlayer(pid); has {
+			for _, pos := range tp {
+				igt.TargetPieces = append(igt.TargetPieces, TargetPiecePayload{
+					Row: pos.Row,
+					Col: pos.Col,
+				})
+			}
+		} else {
+			igt.AwaitingTargetChoice = true
+		}
+		payload.IgnitionTargeting = igt
+		break
+	}
+	for _, g := range r.Engine.CloneMovementGrants() {
+		if g.RemainingOwnerTurns <= 0 {
+			continue
+		}
+		payload.ActivePieceEffects = append(payload.ActivePieceEffects, ActivePieceEffectSnapshot{
+			Owner:          string(g.Owner),
+			CardID:         string(g.SourceCardID),
+			Row:            g.Target.Row,
+			Col:            g.Target.Col,
+			TurnsRemaining: g.RemainingOwnerTurns,
+		})
 	}
 	if pm, ok := r.Engine.PendingMove(); ok {
 		payload.PendingCapture = PendingCaptureState{
@@ -613,4 +661,3 @@ func (r *RoomSession) SetPlayerDisplayNameUnsafe(pid gameplay.PlayerID, name str
 	}
 	r.displayNameByPlayer[pid] = strings.TrimSpace(name)
 }
-

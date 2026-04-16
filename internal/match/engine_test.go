@@ -123,7 +123,11 @@ func TestIgniteReactionResolveClearsIgnitionAfterOpponentRetributionResponse(t *
 	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{stopThere}
 	state.Players[gameplay.PlayerA].Mana = 10
 	state.Players[gameplay.PlayerB].Mana = 10
-	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
+	e := NewEngine(state, board)
 	markInPlayForTest(state)
 
 	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
@@ -131,6 +135,9 @@ func TestIgniteReactionResolveClearsIgnitionAfterOpponentRetributionResponse(t *
 	}
 	if !state.Players[gameplay.PlayerA].Ignition.Occupied {
 		t.Fatalf("expected ignition slot occupied")
+	}
+	if err := e.SubmitIgnitionTargets(gameplay.PlayerA, []chess.Pos{{Row: 6, Col: 4}}); err != nil {
+		t.Fatalf("submit ignition targets: %v", err)
 	}
 	rw, _, ok := e.ReactionWindowSnapshot()
 	if !ok || rw.Trigger != "ignite_reaction" {
@@ -181,11 +188,15 @@ func TestIgnitionZeroNeedsReactionResolveBeforeNextActivation(t *testing.T) {
 	board := chess.NewEmptyGame(chess.White)
 	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
 	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
 	e := NewEngine(state, board)
 	markInPlayForTest(state)
 
 	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
 		t.Fatalf("first ignition-0 activate failed: %v", err)
+	}
+	if err := e.SubmitIgnitionTargets(gameplay.PlayerA, []chess.Pos{{Row: 6, Col: 4}}); err != nil {
+		t.Fatalf("submit ignition targets: %v", err)
 	}
 	if !state.Players[gameplay.PlayerA].Ignition.Occupied {
 		t.Fatalf("ignition slot should stay occupied while ignite reaction window is open")
@@ -231,6 +242,29 @@ func TestIgniteReactionRejectsActorStartingChain(t *testing.T) {
 	e.OpenReactionWindow("ignite_reaction", gameplay.PlayerA, []gameplay.CardType{gameplay.CardTypeRetribution})
 	if err := e.QueueReactionCard(gameplay.PlayerA, 0, EffectTarget{}); err == nil {
 		t.Fatal("expected actor cannot open ignite_reaction chain")
+	}
+}
+
+func TestActivateCardWithTargetsLocksKnightTouchTargetForSnapshot(t *testing.T) {
+	knight := gameplay.CardInstance{InstanceID: "k1", CardID: CardKnightTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
+	state, _ := gameplay.NewMatchState(testDeckWith(knight), testDeckWith(knight))
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{knight}
+	state.Players[gameplay.PlayerA].Mana = 10
+	e := NewEngine(state, chess.NewGame())
+	markInPlayForTest(state)
+	target := chess.Pos{Row: 6, Col: 4}
+	if err := e.ActivateCardWithTargets(gameplay.PlayerA, 0, []chess.Pos{target}); err != nil {
+		t.Fatalf("activate with target failed: %v", err)
+	}
+	owner, cardID, pieces, ok := e.IgnitionTargetSnapshot()
+	if !ok {
+		t.Fatal("expected ignition target snapshot to be present")
+	}
+	if owner != gameplay.PlayerA || cardID != CardKnightTouch {
+		t.Fatalf("unexpected snapshot metadata: owner=%s card=%s", owner, cardID)
+	}
+	if len(pieces) != 1 || pieces[0] != target {
+		t.Fatalf("unexpected target pieces snapshot: %+v", pieces)
 	}
 }
 
@@ -451,10 +485,17 @@ func TestIgniteReactionEligibleRetributionOnlyUntilMaybeCaptureAttempt(t *testin
 	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{stopThere}
 	state.Players[gameplay.PlayerA].Mana = 10
 	state.Players[gameplay.PlayerB].Mana = 10
-	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
+	e := NewEngine(state, board)
 	markInPlayForTest(state)
 	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
 		t.Fatalf("activate: %v", err)
+	}
+	if err := e.SubmitIgnitionTargets(gameplay.PlayerA, []chess.Pos{{Row: 6, Col: 4}}); err != nil {
+		t.Fatalf("submit ignition targets: %v", err)
 	}
 	rw, _, ok := e.ReactionWindowSnapshot()
 	if !ok || rw.Trigger != "ignite_reaction" {
@@ -695,5 +736,74 @@ func TestProcessResolvedIgnitionsEmitsActivationFXEvents(t *testing.T) {
 	}
 	if len(e.PullActivationFXEvents()) != 0 {
 		t.Fatal("expected PullActivationFXEvents to drain")
+	}
+}
+
+func TestKnightTouchGrantsKnightPatternForOneOwnerTurn(t *testing.T) {
+	kt := gameplay.CardInstance{InstanceID: "kt1", CardID: CardKnightTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
+	filler := gameplay.CardInstance{InstanceID: "f1", CardID: CardDoubleTurn, ManaCost: 1, Ignition: 1, Cooldown: 1}
+	state, err := gameplay.NewMatchState(testDeckWith(kt), testDeckWith(filler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.CurrentTurn = gameplay.PlayerA
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{kt}
+	state.Players[gameplay.PlayerA].Mana = 10
+	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{}
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 4, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White}) // e4
+	board.SetPiece(chess.Pos{Row: 1, Col: 0}, chess.Piece{Type: chess.Pawn, Color: chess.Black}) // a7
+	e := NewEngine(state, board)
+	markInPlayForTest(state)
+
+	if err := e.ActivateCardWithTargets(gameplay.PlayerA, 0, []chess.Pos{{Row: 4, Col: 4}}); err != nil {
+		t.Fatalf("activate knight-touch with target failed: %v", err)
+	}
+	if err := e.ResolveReactionStack(); err != nil {
+		t.Fatalf("resolve ignite chain failed: %v", err)
+	}
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 4, Col: 4}, To: chess.Pos{Row: 2, Col: 5}}); err != nil {
+		t.Fatalf("target pawn should gain knight movement on owner turn: %v", err)
+	}
+	if board.PieceAt(chess.Pos{Row: 2, Col: 5}).Type != chess.Pawn || board.PieceAt(chess.Pos{Row: 2, Col: 5}).Color != chess.White {
+		t.Fatalf("expected white pawn moved to f6 with knight pattern")
+	}
+	// B plays a7->a6 to hand turn back to A.
+	if err := e.SubmitMove(gameplay.PlayerB, chess.Move{From: chess.Pos{Row: 1, Col: 0}, To: chess.Pos{Row: 2, Col: 0}}); err != nil {
+		t.Fatalf("black reply move failed: %v", err)
+	}
+	// Grant must expire after A's previous turn, so knight-like jump is now illegal.
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 2, Col: 5}, To: chess.Pos{Row: 0, Col: 6}}); err == nil {
+		t.Fatal("knight-touch movement grant should expire on next owner turn")
+	}
+}
+
+func TestKnightTouchKeepsNativePieceMovement(t *testing.T) {
+	kt := gameplay.CardInstance{InstanceID: "kt1", CardID: CardKnightTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
+	state, err := gameplay.NewMatchState(testDeckWith(kt), testDeckWith(kt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.CurrentTurn = gameplay.PlayerA
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{kt}
+	state.Players[gameplay.PlayerA].Mana = 10
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 4, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White}) // e4
+	e := NewEngine(state, board)
+	markInPlayForTest(state)
+
+	if err := e.ActivateCardWithTargets(gameplay.PlayerA, 0, []chess.Pos{{Row: 4, Col: 4}}); err != nil {
+		t.Fatalf("activate knight-touch with target failed: %v", err)
+	}
+	if err := e.ResolveReactionStack(); err != nil {
+		t.Fatalf("resolve ignite chain failed: %v", err)
+	}
+	// Native pawn movement must remain available (accumulated, not replaced).
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 4, Col: 4}, To: chess.Pos{Row: 3, Col: 4}}); err != nil {
+		t.Fatalf("native pawn move should remain legal under knight-touch: %v", err)
 	}
 }

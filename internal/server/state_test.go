@@ -412,6 +412,9 @@ func TestAutoFinalizeIgniteWhenNextCannotExtend(t *testing.T) {
 		if err := room.Engine.ActivateCard(gameplay.PlayerA, 0); err != nil {
 			return err
 		}
+		if err := room.Engine.SubmitIgnitionTargets(gameplay.PlayerA, []chess.Pos{{Row: 6, Col: 4}}); err != nil {
+			return err
+		}
 		if err := room.maybeAutoResolveIgniteReactionUnsafe(); err != nil {
 			return err
 		}

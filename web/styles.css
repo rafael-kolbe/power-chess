@@ -739,6 +739,53 @@ button:disabled {
   box-shadow: inset 0 0 0 3px rgb(255 225 120 / 95%);
 }
 
+.sq.target-selected {
+  box-shadow: inset 0 0 0 3px rgb(80 170 255 / 98%);
+}
+
+.sq.target-selected::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border: 2px dotted rgb(105 190 255 / 95%);
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.sq.piece-effect-aura-power {
+  box-shadow:
+    inset 0 0 0 2px rgb(86 214 132 / 92%),
+    0 0 10px 2px rgb(86 214 132 / 40%);
+}
+
+/* Turns remaining for on-board card effects (effect_duration); bottom-right of square. */
+.sq .sq-effect-turn-badge {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  z-index: 2;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  color: #fff;
+  text-shadow:
+    0 0 4px rgb(0 0 0 / 90%),
+    0 1px 2px rgb(0 0 0 / 75%);
+  pointer-events: none;
+  letter-spacing: 0.02em;
+}
+
+/* Match header: "Effect turns" = Hover — badge only while pointer is over the enchanted square. */
+.board-frame.effect-duration-badges-hover-only .sq .sq-effect-turn-badge {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.board-frame.effect-duration-badges-hover-only .sq.piece-effect-aura-power:hover .sq-effect-turn-badge {
+  opacity: 1;
+}
+
 .sq .sq-coord {
   position: absolute;
   bottom: 2px;
@@ -2193,6 +2240,38 @@ pre {
 
 .pm-zone--ignition.pm-ignition-activating {
   animation: pm-ignition-activate 0.6s ease-out forwards;
+}
+
+.pm-zone--ignition.pm-ignition-targeting {
+  position: relative;
+}
+
+.pm-zone--ignition.pm-ignition-targeting::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 16px;
+  border: 2px solid rgb(247 209 90 / 88%);
+  box-shadow:
+    0 0 0 1px rgb(255 235 170 / 78%),
+    0 0 18px 6px rgb(250 205 90 / 36%);
+  animation: pm-ignition-target-ring 1.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes pm-ignition-target-ring {
+  0% {
+    transform: scale(0.98);
+    opacity: 0.72;
+  }
+  50% {
+    transform: scale(1.02);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.98);
+    opacity: 0.72;
+  }
 }
 
 /* Reaction stack resolve — full-width banner (see showResolvingEffectsBanner in app.js). */

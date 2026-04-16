@@ -27,6 +27,8 @@ For backend code changes, follow this order:
 
 Do not start backend implementation from production code first when behavior is changing.
 
+For card-effect workstreams, branch naming must follow `feature/<card-id>` (for example `feature/knight-touch`) and the team should deliver one card at a time under the same TDD cycle.
+
 ## Go test locations
 
 | Package | File | What it covers |

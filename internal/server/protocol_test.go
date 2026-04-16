@@ -42,3 +42,17 @@ func TestJoinMatchPayloadUnmarshalsNumericRoomID(t *testing.T) {
 		t.Fatalf("room id: want 42 got %q", p.RoomID)
 	}
 }
+
+func TestIgniteCardPayloadUnmarshalsTargetPieces(t *testing.T) {
+	var p IgniteCardPayload
+	raw := []byte(`{"handIndex":1,"target_pieces":[{"row":6,"col":4}]}`)
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.HandIndex != 1 {
+		t.Fatalf("hand index: want 1 got %d", p.HandIndex)
+	}
+	if len(p.TargetPieces) != 1 || p.TargetPieces[0].Row != 6 || p.TargetPieces[0].Col != 4 {
+		t.Fatalf("target pieces mismatch: %+v", p.TargetPieces)
+	}
+}

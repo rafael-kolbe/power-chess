@@ -19,8 +19,11 @@ type CardDefinition struct {
 	Cost        int
 	Ignition    int
 	Cooldown    int
-	Example     string
-	Limit       int
+	Targets     int
+	// EffectDuration is how many of the owner's turns an on-board effect lasts (e.g. movement grant). Zero means unused / instant for this card.
+	EffectDuration int
+	Example        string
+	Limit          int
 	// MaybeCaptureAttemptOnIgnition marks whether this Power or Continuous card's
 	// resolved ignition can directly cause a capture (card-driven "maybe capture attempt"),
 	// distinct from chess `capture_attempt`. When true, the server includes Counter in
@@ -34,7 +37,7 @@ const DefaultCardLimit = 3
 // InitialCardCatalog mirrors Cards.md and is the single source of truth for initial cards.
 func InitialCardCatalog() []CardDefinition {
 	return []CardDefinition{
-		{ID: "knight-touch", Name: "Knight Touch", Type: CardTypePower, Description: "Give any piece you control, except the king or a knight, the ability to move as if it were a knight for one turn.", Cost: 3, Ignition: 0, Cooldown: 2, Example: "1. You have a pawn on e4.\n2. You activate \"Knight Touch\".\n3. You move the pawn to f6.", Limit: DefaultCardLimit},
+		{ID: "knight-touch", Name: "Knight Touch", Type: CardTypePower, Description: "Give any piece you control, except the king or a knight, the ability to move as if it were a knight for one turn.", Cost: 3, Ignition: 0, Cooldown: 2, Targets: 1, EffectDuration: 1, Example: "1. You have a pawn on e4.\n2. You activate \"Knight Touch\".\n3. You move the pawn to f6.", Limit: DefaultCardLimit},
 		{ID: "double-turn", Name: "Double Turn", Type: CardTypePower, Description: "Give yourself 1 extra move for one turn.", Cost: 4, Ignition: 1, Cooldown: 5, Example: "1. You have a pawn on e4.\n2. You activate \"Double Turn\".\n3. Ignition succeeds the next turn.\n4. Next turn you move the pawn to e5.\n5. Then you capture a pawn on f6 with the pawn on e5.", Limit: DefaultCardLimit},
 		{ID: "mana-burn", Name: "Mana Burn", Type: CardTypeRetribution, Description: "Target an ignited card from your opponent, burn x mana from your opponent, x being the mana cost of the target card.", Cost: 1, Ignition: 0, Cooldown: 3, Example: "1. Opponent activates \"Knight Touch\"\n2. You activate Mana Burn as retribution.\n3. You burn 3 mana from your opponent.", Limit: DefaultCardLimit},
 		{ID: "energy-gain", Name: "Energy Gain", Type: CardTypePower, Description: "Gain 4 mana.", Cost: 0, Ignition: 1, Cooldown: 2, Example: "1. You currently have 2 mana.\n2. You activate \"Energy Gain\".\n3. Ignition succeeds the next turn.\n4. You gain 4 mana.", Limit: DefaultCardLimit},
@@ -67,6 +70,12 @@ func CardDefinitionByID(id CardID) (CardDefinition, bool) {
 		}
 	}
 	return CardDefinition{}, false
+}
+
+// CardRequiresTargetPieces reports whether a card requires one or more board-piece targets at ignite time.
+func CardRequiresTargetPieces(id CardID) bool {
+	def, ok := CardDefinitionByID(id)
+	return ok && def.Targets > 0
 }
 
 // StarterDeck currently uses exactly 20 initial cards from Cards.md.

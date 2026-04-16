@@ -15,6 +15,8 @@
  * @property {number} mana
  * @property {number} ignition
  * @property {number} cooldown
+ * @property {number} [targets]
+ * @property {number} [effectDuration]
  * @property {string} name
  * @property {string} description
  * @property {string} example
@@ -186,11 +188,15 @@ const PT = {
 /**
  * Returns catalog rows for createPowerCard for the given locale.
  * @param {string} [locale]
- * @returns {Array<{ type: string, name: string, description: string, example: string, mana: number, ignition: number, cooldown: number }>}
+ * @returns {Array<{ type: string, name: string, description: string, example: string, mana: number, ignition: number, cooldown: number, targets?: number, effectDuration?: number }>}
  */
 function getLocalizedCardCatalog(locale) {
   const loc = locale === "pt-BR" ? "pt-BR" : "en-US";
   return CARD_ROWS.map((row) => {
+    const stats = {
+      targets: row.targets ?? 0,
+      effectDuration: row.effectDuration ?? 0,
+    };
     if (loc === "en-US") {
       return {
         id: row.id,
@@ -200,7 +206,8 @@ function getLocalizedCardCatalog(locale) {
         example: row.example,
         mana: row.mana,
         ignition: row.ignition,
-        cooldown: row.cooldown
+        cooldown: row.cooldown,
+        ...stats,
       };
     }
     const text = PT[row.id];
@@ -214,7 +221,8 @@ function getLocalizedCardCatalog(locale) {
         example: row.example,
         mana: row.mana,
         ignition: row.ignition,
-        cooldown: row.cooldown
+        cooldown: row.cooldown,
+        ...stats,
       };
     }
     return {
@@ -225,7 +233,8 @@ function getLocalizedCardCatalog(locale) {
       example: text.example,
       mana: row.mana,
       ignition: row.ignition,
-      cooldown: row.cooldown
+      cooldown: row.cooldown,
+      ...stats,
     };
   });
 }

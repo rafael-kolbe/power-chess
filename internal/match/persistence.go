@@ -9,12 +9,21 @@ import (
 
 // PersistedEngineState is a JSON-serializable snapshot of engine runtime state.
 type PersistedEngineState struct {
-	Chess          chess.Game                `json:"chess"`
-	Match          gameplay.MatchState       `json:"match"`
-	PendingEffects []PersistedPendingEffect  `json:"pendingEffects"`
-	ReactionWindow *ReactionWindow           `json:"reactionWindow,omitempty"`
-	ReactionStack  []PersistedReactionAction `json:"reactionStack"`
-	PendingMove    *PendingMoveAction        `json:"pendingMove,omitempty"`
+	Chess               chess.Game                    `json:"chess"`
+	Match               gameplay.MatchState           `json:"match"`
+	PendingEffects      []PersistedPendingEffect      `json:"pendingEffects"`
+	ReactionWindow      *ReactionWindow               `json:"reactionWindow,omitempty"`
+	ReactionStack       []PersistedReactionAction     `json:"reactionStack"`
+	PendingMove         *PendingMoveAction            `json:"pendingMove,omitempty"`
+	MovementGrants      []MovementGrant               `json:"movementGrants,omitempty"`
+	IgnitionTargetLocks []PersistedIgnitionTargetLock `json:"ignitionTargetLocks,omitempty"`
+}
+
+// PersistedIgnitionTargetLock stores locked ignite target squares for resume-after-reconnect.
+type PersistedIgnitionTargetLock struct {
+	Owner  gameplay.PlayerID `json:"owner"`
+	CardID gameplay.CardID   `json:"cardId"`
+	Pieces []chess.Pos       `json:"pieces"`
 }
 
 // PersistedPendingEffect stores pending effect metadata without function pointers.
@@ -63,6 +72,22 @@ func (e *Engine) ExportState() PersistedEngineState {
 		pm := *e.pendingMove
 		out.PendingMove = &pm
 	}
+	out.MovementGrants = append(out.MovementGrants, e.movementGrants...)
+	for _, pid := range []gameplay.PlayerID{gameplay.PlayerA, gameplay.PlayerB} {
+		cardID, ok := e.ignitionTargetCard[pid]
+		if !ok {
+			continue
+		}
+		pieces := append([]chess.Pos(nil), e.ignitionTargets[pid]...)
+		if len(pieces) == 0 {
+			continue
+		}
+		out.IgnitionTargetLocks = append(out.IgnitionTargetLocks, PersistedIgnitionTargetLock{
+			Owner:  pid,
+			CardID: cardID,
+			Pieces: pieces,
+		})
+	}
 	return out
 }
 
@@ -81,6 +106,7 @@ func NewEngineFromState(snapshot PersistedEngineState) (*Engine, error) {
 		pm := *snapshot.PendingMove
 		e.pendingMove = &pm
 	}
+	e.movementGrants = append([]MovementGrant(nil), snapshot.MovementGrants...)
 	for _, pe := range snapshot.PendingEffects {
 		resolver, ok := e.resolvers[pe.CardID]
 		if !ok {
@@ -103,6 +129,16 @@ func NewEngineFromState(snapshot PersistedEngineState) (*Engine, error) {
 			Target:   ra.Target,
 			Resolver: resolver,
 		})
+	}
+	for _, lock := range snapshot.IgnitionTargetLocks {
+		if lock.Owner != gameplay.PlayerA && lock.Owner != gameplay.PlayerB {
+			return nil, errors.New("invalid ignition target lock owner")
+		}
+		if lock.CardID == "" || len(lock.Pieces) == 0 {
+			return nil, errors.New("invalid ignition target lock payload")
+		}
+		e.ignitionTargetCard[lock.Owner] = lock.CardID
+		e.ignitionTargets[lock.Owner] = append([]chess.Pos(nil), lock.Pieces...)
 	}
 	return e, nil
 }

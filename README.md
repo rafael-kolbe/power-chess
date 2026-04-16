@@ -110,6 +110,8 @@ go test ./...
 - **Cada funcionalidade grande** deve ser **commitada** de forma coesa e **enviada** para `origin/main` (`git push origin main`) quando estiver pronta e com testes passando.  
 - Antes de commitar: `go test ./...`.
 - Para mudanças de backend: seguir ciclo TDD (red -> green -> refactor).
+- Para desenvolvimento de efeitos de carta: criar branch no padrão `feature/<card-id>` (ex.: `feature/knight-touch`) e implementar uma carta por vez.
+- Padrão arquitetural para efeitos escaláveis (resolver por carta + estado genérico serializável + composição de capacidades) documentado em `PROJECT.md`.
 
 ## Telemetria e persistência
 

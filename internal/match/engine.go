@@ -2,6 +2,7 @@ package match
 
 import (
 	"errors"
+	"fmt"
 
 	"power-chess/internal/chess"
 	"power-chess/internal/gameplay"
@@ -43,6 +44,12 @@ type Engine struct {
 	pendingMove    *PendingMoveAction
 	// pendingActivationFX holds server→client activate_card events (effect step after ignition reaches 0).
 	pendingActivationFX []ActivationFXEvent
+	// movementGrants stores active movement modifiers granted by resolved card effects.
+	movementGrants []MovementGrant
+	// ignitionTargets stores locked piece targets for the currently ignited card owner.
+	ignitionTargets map[gameplay.PlayerID][]chess.Pos
+	// ignitionTargetCard stores which card owns ignitionTargets for each seat.
+	ignitionTargetCard map[gameplay.PlayerID]gameplay.CardID
 }
 
 // ActivationFXEvent is one ignition resolution for client animations (glow + fly to cooldown).
@@ -68,6 +75,11 @@ func (e *Engine) appendActivationFX(owner gameplay.PlayerID, id gameplay.CardID,
 	})
 }
 
+// CloneMovementGrants returns a shallow copy of active movement grants for snapshots and persistence.
+func (e *Engine) CloneMovementGrants() []MovementGrant {
+	return append([]MovementGrant(nil), e.movementGrants...)
+}
+
 // NewEngine wires chess state, gameplay state and card resolvers into a single match runtime.
 func NewEngine(state *gameplay.MatchState, board *chess.Game) *Engine {
 	return &Engine{
@@ -77,6 +89,11 @@ func NewEngine(state *gameplay.MatchState, board *chess.Game) *Engine {
 		resolvers:      DefaultResolvers(),
 		reactions:      NewReactionRuntime(),
 		pendingMove:    nil,
+		ignitionTargets: map[gameplay.PlayerID][]chess.Pos{
+			gameplay.PlayerA: {},
+			gameplay.PlayerB: {},
+		},
+		ignitionTargetCard: map[gameplay.PlayerID]gameplay.CardID{},
 	}
 }
 
@@ -110,6 +127,11 @@ func (e *Engine) DrawCard(pid gameplay.PlayerID) error {
 
 // ActivateCard validates reaction constraints (if any) and delegates activation to gameplay state.
 func (e *Engine) ActivateCard(pid gameplay.PlayerID, handIndex int) error {
+	return e.ActivateCardWithTargets(pid, handIndex, nil)
+}
+
+// ActivateCardWithTargets validates optional target pieces and delegates activation to gameplay state.
+func (e *Engine) ActivateCardWithTargets(pid gameplay.PlayerID, handIndex int, targetPieces []chess.Pos) error {
 	if err := e.errIfOpeningBlocksGameplay(); err != nil {
 		return err
 	}
@@ -130,14 +152,140 @@ func (e *Engine) ActivateCard(pid gameplay.PlayerID, handIndex int) error {
 	if def.Type != gameplay.CardTypePower && def.Type != gameplay.CardTypeContinuous {
 		return errors.New("only Power and Continuous cards can be activated in normal turn flow")
 	}
+	if len(targetPieces) > 0 && def.Targets == 0 {
+		return errors.New("target_pieces not allowed for this card")
+	}
+	// Cards that require piece targets: first ignite_card may move hand→ignition only; targets follow via SubmitIgnitionTargets.
+	if def.Targets > 0 && len(targetPieces) == 0 {
+		if err := e.State.ActivateCard(pid, handIndex); err != nil {
+			return err
+		}
+		e.lockIgnitionTargetPieces(pid, def.ID, nil)
+		return nil
+	}
+	if len(targetPieces) > 0 {
+		if err := e.validateIgnitionTargetPieces(pid, def.ID, targetPieces); err != nil {
+			return err
+		}
+	}
 	if err := e.State.ActivateCard(pid, handIndex); err != nil {
 		return err
 	}
+	e.lockIgnitionTargetPieces(pid, def.ID, targetPieces)
 	if err := e.processResolvedIgnitions(); err != nil {
 		return err
 	}
 	e.maybeOpenIgniteReactionWindow(pid)
 	return nil
+}
+
+// SubmitIgnitionTargets validates and locks board targets for the ignited card that requires Targets,
+// then opens ignite_reaction when the catalog allows retribution against this ignition.
+func (e *Engine) SubmitIgnitionTargets(pid gameplay.PlayerID, targetPieces []chess.Pos) error {
+	if err := e.errIfOpeningBlocksGameplay(); err != nil {
+		return err
+	}
+	if e.State.CurrentTurn != pid {
+		return errors.New("not your turn")
+	}
+	if e.ReactionWindow != nil && e.ReactionWindow.Open {
+		return errors.New("cannot submit ignition targets during a reaction window")
+	}
+	p := e.State.Players[pid]
+	if !p.Ignition.Occupied {
+		return errors.New("ignition slot is empty")
+	}
+	card := p.Ignition.Card
+	def, ok := gameplay.CardDefinitionByID(card.CardID)
+	if !ok || def.Targets == 0 {
+		return errors.New("this ignition does not require targets")
+	}
+	if _, locked := e.ignitionTargetCard[pid]; locked {
+		return errors.New("ignition targets already submitted")
+	}
+	if err := e.validateIgnitionTargetPieces(pid, card.CardID, targetPieces); err != nil {
+		return err
+	}
+	e.lockIgnitionTargetPieces(pid, card.CardID, targetPieces)
+	e.maybeOpenIgniteReactionWindow(pid)
+	return nil
+}
+
+func (e *Engine) lockIgnitionTargetPieces(pid gameplay.PlayerID, cardID gameplay.CardID, targetPieces []chess.Pos) {
+	if len(targetPieces) == 0 {
+		e.ignitionTargets[pid] = nil
+		delete(e.ignitionTargetCard, pid)
+		return
+	}
+	copied := make([]chess.Pos, len(targetPieces))
+	copy(copied, targetPieces)
+	e.ignitionTargets[pid] = copied
+	e.ignitionTargetCard[pid] = cardID
+}
+
+// consumeIgnitionTargets returns and clears locked ignition targets for a specific owner/card.
+func (e *Engine) consumeIgnitionTargets(pid gameplay.PlayerID, cardID gameplay.CardID) []chess.Pos {
+	lockedCardID, ok := e.ignitionTargetCard[pid]
+	if !ok || lockedCardID != cardID {
+		return nil
+	}
+	targets := e.ignitionTargets[pid]
+	delete(e.ignitionTargetCard, pid)
+	e.ignitionTargets[pid] = nil
+	out := make([]chess.Pos, len(targets))
+	copy(out, targets)
+	return out
+}
+
+func (e *Engine) validateIgnitionTargetPieces(pid gameplay.PlayerID, cardID gameplay.CardID, targetPieces []chess.Pos) error {
+	def, ok := gameplay.CardDefinitionByID(cardID)
+	if !ok || def.Targets == 0 || len(targetPieces) == 0 {
+		return nil
+	}
+	if len(targetPieces) != def.Targets {
+		return errors.New("invalid target_pieces count for card")
+	}
+	playerColor := toColor(pid)
+	for _, pos := range targetPieces {
+		if pos.Row < 0 || pos.Row > 7 || pos.Col < 0 || pos.Col > 7 {
+			return errors.New("target piece out of board bounds")
+		}
+		piece := e.Chess.PieceAt(pos)
+		if piece.IsEmpty() {
+			return errors.New("target piece square is empty")
+		}
+		if piece.Color != playerColor {
+			return errors.New("target piece must belong to the activating player")
+		}
+	}
+	return nil
+}
+
+// IgnitionTargetSnapshot returns locked target metadata for reaction-window/snapshot rendering.
+func (e *Engine) IgnitionTargetSnapshot() (gameplay.PlayerID, gameplay.CardID, []chess.Pos, bool) {
+	for _, pid := range []gameplay.PlayerID{gameplay.PlayerA, gameplay.PlayerB} {
+		cardID, targets, ok := e.IgnitionTargetsForPlayer(pid)
+		if !ok {
+			continue
+		}
+		return pid, cardID, targets, true
+	}
+	return "", "", nil, false
+}
+
+// IgnitionTargetsForPlayer returns locked ignition piece coordinates for one seat, if any.
+func (e *Engine) IgnitionTargetsForPlayer(pid gameplay.PlayerID) (gameplay.CardID, []chess.Pos, bool) {
+	cardID, ok := e.ignitionTargetCard[pid]
+	if !ok {
+		return "", nil, false
+	}
+	targets := e.ignitionTargets[pid]
+	if len(targets) == 0 {
+		return "", nil, false
+	}
+	copied := make([]chess.Pos, len(targets))
+	copy(copied, targets)
+	return cardID, copied, true
 }
 
 // maybeOpenIgniteReactionWindow opens ignite_reaction for the opponent when a Power or Continuous
@@ -157,6 +305,12 @@ func (e *Engine) maybeOpenIgniteReactionWindow(activator gameplay.PlayerID) {
 	}
 	if cardDef.Type != gameplay.CardTypePower && cardDef.Type != gameplay.CardTypeContinuous {
 		return
+	}
+	if cardDef.Targets > 0 {
+		lockCard, ok := e.ignitionTargetCard[activator]
+		if !ok || lockCard != card.CardID || len(e.ignitionTargets[activator]) != cardDef.Targets {
+			return
+		}
 	}
 	eligible := []gameplay.CardType{gameplay.CardTypeRetribution}
 	if gameplay.MaybeCaptureAttemptOnIgnition(card.CardID) {
@@ -242,6 +396,8 @@ func (e *Engine) processResolvedIgnitions() error {
 		}
 		e.appendActivationFX(evCopy.Owner, evCopy.Card.CardID, evCopy.Success)
 		e.State.SendCardToCooldown(evCopy.Owner, evCopy.Card)
+		e.ignitionTargets[evCopy.Owner] = nil
+		delete(e.ignitionTargetCard, evCopy.Owner)
 	}
 	return nil
 }
@@ -258,6 +414,7 @@ func (e *Engine) ActivatePlayerSkill(pid gameplay.PlayerID) error {
 	if err := e.State.ActivateSpecialAbility(pid); err != nil {
 		return err
 	}
+	e.expireMovementGrantsAfterOwnerTurn(pid)
 	e.Chess.Turn = color.Opponent()
 	return e.StartTurn(e.State.CurrentTurn)
 }
@@ -295,6 +452,7 @@ func pieceRefFromChessPiece(p chess.Piece) (gameplay.PieceRef, bool) {
 // applyMoveCore applies a validated move without opening capture trigger windows.
 // It is used by normal non-capture flow and pending-move finalization.
 func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
+	e.pruneStaleMovementGrants()
 	captureForMana := e.isCaptureAttempt(pid, m)
 	var captured gameplay.PieceRef
 	haveCaptured := false
@@ -316,15 +474,17 @@ func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 			}
 		}
 	}
-	if err := e.Chess.ApplyMove(m); err != nil {
+	if err := e.applyAuthorizedMove(pid, m); err != nil {
 		return err
 	}
+	e.advanceMovementGrantPosition(pid, m.From, m.To)
 	if haveCaptured {
 		e.State.AddToGraveyard(pid, captured)
 	}
 	if captureForMana {
 		e.State.GrantManaForChessCapture(pid)
 	}
+	e.expireMovementGrantsAfterOwnerTurn(pid)
 	if err := e.State.EndTurn(pid); err != nil {
 		return err
 	}
@@ -332,6 +492,28 @@ func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 		return err
 	}
 	return nil
+}
+
+// applyAuthorizedMove executes a move through normal chess legality, or through pseudo-legal
+// application when an active effect grants an extra movement pattern for this piece.
+func (e *Engine) applyAuthorizedMove(pid gameplay.PlayerID, m chess.Move) error {
+	if e.isStandardLegalMove(m) {
+		return e.Chess.ApplyMove(m)
+	}
+	if e.canUseAugmentedMovement(pid, m) {
+		return e.Chess.ApplyPseudoLegalMove(m)
+	}
+	return fmt.Errorf("illegal move")
+}
+
+// isStandardLegalMove checks whether m is currently legal under standard chess rules.
+func (e *Engine) isStandardLegalMove(m chess.Move) bool {
+	for _, cand := range e.Chess.LegalMovesFrom(m.From) {
+		if cand.To == m.To {
+			return true
+		}
+	}
+	return false
 }
 
 // PendingMoveAction represents a not-yet-applied move waiting for reaction window resolution.

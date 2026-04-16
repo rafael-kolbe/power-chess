@@ -19,14 +19,16 @@ import (
 )
 
 type metadataRow struct {
-	ID          string `json:"id"`
-	Type        string `json:"type"`
-	Mana        int    `json:"mana"`
-	Ignition    int    `json:"ignition"`
-	Cooldown    int    `json:"cooldown"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Example     string `json:"example"`
+	ID             string `json:"id"`
+	Type           string `json:"type"`
+	Mana           int    `json:"mana"`
+	Ignition       int    `json:"ignition"`
+	Cooldown       int    `json:"cooldown"`
+	Targets        int    `json:"targets"`
+	EffectDuration int    `json:"effectDuration"`
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	Example        string `json:"example"`
 }
 
 func main() {
@@ -42,14 +44,16 @@ func main() {
 	rows := make([]metadataRow, len(cat))
 	for i, c := range cat {
 		rows[i] = metadataRow{
-			ID:          string(c.ID),
-			Type:        strings.ToLower(string(c.Type)),
-			Mana:        c.Cost,
-			Ignition:    c.Ignition,
-			Cooldown:    c.Cooldown,
-			Name:        c.Name,
-			Description: c.Description,
-			Example:     c.Example,
+			ID:             string(c.ID),
+			Type:           strings.ToLower(string(c.Type)),
+			Mana:           c.Cost,
+			Ignition:       c.Ignition,
+			Cooldown:       c.Cooldown,
+			Targets:        c.Targets,
+			EffectDuration: c.EffectDuration,
+			Name:           c.Name,
+			Description:    c.Description,
+			Example:        c.Example,
 		}
 	}
 

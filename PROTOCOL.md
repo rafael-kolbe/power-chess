@@ -308,6 +308,20 @@ Move uma carta da **mão** para a **zona de ignição** do jogador (paga mana, a
 { "id": "req-4", "type": "ignite_card", "payload": { "handIndex": 0 } }
 ```
 
+- Cartas com `targets` > 0 no catálogo podem usar **só** `handIndex` no primeiro passo (mão → ignição); o snapshot expõe `ignitionTargeting.awaitingTargetChoice` até o jogador enviar os alvos.
+
+### `submit_ignition_targets`
+
+Trava as casas-alvo no tabuleiro para a carta que **já está** na zona de ignição e que exige alvos (`targets` > 0). Só depois disso o servidor pode abrir `ignite_reaction` para o oponente.
+
+```json
+{
+  "id": "req-4a",
+  "type": "submit_ignition_targets",
+  "payload": { "target_pieces": [{ "row": 6, "col": 4 }] }
+}
+```
+
 ### `draw_card`
 
 Compra uma carta do deck pagando 2 mana. Só permitido no próprio turno, fora de janelas de reação abertas, com pelo menos 1 slot vazio na mão.
