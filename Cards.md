@@ -138,6 +138,8 @@ Give any piece you control, except the king or a rook, the ability to move as if
 ## Cost: 3
 ## Ignition: 0
 ## Cooldown: 2
+## Targets: 1
+## Effect duration: 1
 ## Example:
 ```
 1. You have a knight on b2.
@@ -152,6 +154,8 @@ Give any piece you control, except the king or a bishop, the ability to move as 
 ## Cost: 3
 ## Ignition: 0
 ## Cooldown: 2
+## Targets: 1
+## Effect duration: 1
 ## Example:
 ```
 1. You have a rook on b2.

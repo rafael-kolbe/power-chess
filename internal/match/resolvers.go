@@ -19,5 +19,6 @@ func DefaultResolvers() map[gameplay.CardID]EffectResolver {
 	}
 	m[CardKnightTouch] = knightTouchResolver{}
 	m[CardBishopTouch] = bishopTouchResolver{}
+	m[CardRookTouch] = rookTouchResolver{}
 	return m
 }

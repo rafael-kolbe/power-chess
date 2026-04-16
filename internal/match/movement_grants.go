@@ -13,6 +13,8 @@ const (
 	MovementGrantKnightPattern MovementGrantKind = "knight_pattern"
 	// MovementGrantBishopPattern grants additional bishop-line movement (one diagonal step for pawns).
 	MovementGrantBishopPattern MovementGrantKind = "bishop_pattern"
+	// MovementGrantRookPattern grants additional rook-line movement (one orthogonal step for pawns).
+	MovementGrantRookPattern MovementGrantKind = "rook_pattern"
 )
 
 // MovementGrant stores one active piece movement modifier owned by a player.
@@ -65,6 +67,8 @@ func (e *Engine) movementGrantMatchesMove(grant MovementGrant, m chess.Move) boo
 		return (dr == 2 && dc == 1) || (dr == 1 && dc == 2)
 	case MovementGrantBishopPattern:
 		return bishopTouchMovePatternLegal(e.Chess, moving, m.From, m.To)
+	case MovementGrantRookPattern:
+		return rookTouchMovePatternLegal(e.Chess, moving, m.From, m.To)
 	default:
 		return false
 	}
@@ -91,6 +95,39 @@ func bishopTouchMovePatternLegal(g *chess.Game, moving chess.Piece, from, to che
 	stepR := dr / adr
 	stepC := dc / adc
 	for r, c, i := from.Row+stepR, from.Col+stepC, 1; i < adr; i, r, c = i+1, r+stepR, c+stepC {
+		if !g.PieceAt(chess.Pos{Row: r, Col: c}).IsEmpty() {
+			return false
+		}
+	}
+	return true
+}
+
+// rookTouchMovePatternLegal reports whether from->to follows rook lines: sliding with a clear path
+// for non-pawns, or exactly one orthogonal step for pawns (empty or enemy capture).
+func rookTouchMovePatternLegal(g *chess.Game, moving chess.Piece, from, to chess.Pos) bool {
+	dr := to.Row - from.Row
+	dc := to.Col - from.Col
+	adr := absInt(dr)
+	adc := absInt(dc)
+	if !((adr > 0 && adc == 0) || (adc > 0 && adr == 0)) {
+		return false
+	}
+	dest := g.PieceAt(to)
+	if !dest.IsEmpty() && dest.Color == moving.Color {
+		return false
+	}
+	if moving.Type == chess.Pawn {
+		return adr+adc == 1
+	}
+	var stepR, stepC int
+	if adr > 0 {
+		stepR = dr / adr
+	}
+	if adc > 0 {
+		stepC = dc / adc
+	}
+	steps := adr + adc
+	for r, c, i := from.Row+stepR, from.Col+stepC, 1; i < steps; i, r, c = i+1, r+stepR, c+stepC {
 		if !g.PieceAt(chess.Pos{Row: r, Col: c}).IsEmpty() {
 			return false
 		}

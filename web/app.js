@@ -1732,10 +1732,59 @@ import {
         return out;
     }
 
-    /** Applies knight-touch and bishop-touch movement hints; dedupes overlapping destinations. */
+    /** Merges rook-pattern destinations when `activePieceEffects` grants rook-touch on this square. */
+    function mergeRookTouchGrant(out, board, from, color, snapshot) {
+        if (!snapshot) return out;
+        const localPid = playerEl.value;
+        const fx = snapshot.activePieceEffects;
+        if (!Array.isArray(fx)) return out;
+        const src = parseCode(pieceAt(board, from.row, from.col));
+        if (!src || src.type === "R" || src.type === "K") return out;
+        const localColor = localPid === "A" ? "w" : "b";
+        if (color !== localColor) return out;
+        const has = fx.some(
+            (e) =>
+                e.owner === localPid &&
+                String(e.cardId || "") === "rook-touch" &&
+                Number(e.turnsRemaining || 0) > 0 &&
+                Number(e.row) === from.row &&
+                Number(e.col) === from.col,
+        );
+        if (!has) return out;
+        const maxSteps = src.type === "P" ? 1 : 8;
+        const orth = [
+            [-1, 0],
+            [1, 0],
+            [0, -1],
+            [0, 1],
+        ];
+        for (const [dr, dc] of orth) {
+            let r = from.row + dr;
+            let c = from.col + dc;
+            let traveled = 0;
+            while (inBounds(r, c) && traveled < maxSteps) {
+                const dst = parseCode(pieceAt(board, r, c));
+                if (!dst) {
+                    out.push({ row: r, col: c });
+                    traveled++;
+                    r += dr;
+                    c += dc;
+                    continue;
+                }
+                if (dst.color !== color) {
+                    out.push({ row: r, col: c });
+                }
+                break;
+            }
+        }
+        return out;
+    }
+
+    /** Applies knight-touch, bishop-touch, and rook-touch movement hints; dedupes overlapping destinations. */
     function mergePowerMovementGrants(out, board, from, color, snapshot) {
         mergeKnightTouchGrant(out, board, from, color, snapshot);
         mergeBishopTouchGrant(out, board, from, color, snapshot);
+        mergeRookTouchGrant(out, board, from, color, snapshot);
         const seen = new Set();
         let w = 0;
         for (let i = 0; i < out.length; i++) {

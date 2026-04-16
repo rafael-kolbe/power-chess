@@ -912,3 +912,107 @@ func TestBishopTouchMovementGrantExpiresAfterOwnerTurn(t *testing.T) {
 		t.Fatal("bishop-touch grant should expire after owner turn")
 	}
 }
+
+func TestRookTouchGrantsRookSlideForKnight(t *testing.T) {
+	rt := gameplay.CardInstance{InstanceID: "rt1", CardID: CardRookTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
+	filler := gameplay.CardInstance{InstanceID: "f1", CardID: CardDoubleTurn, ManaCost: 1, Ignition: 1, Cooldown: 1}
+	state, err := gameplay.NewMatchState(testDeckWith(rt), testDeckWith(filler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.CurrentTurn = gameplay.PlayerA
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{rt}
+	state.Players[gameplay.PlayerA].Mana = 10
+	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{}
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	// Knight on b2 (rank 2 file b), clear b-file to b7.
+	board.SetPiece(chess.Pos{Row: 6, Col: 1}, chess.Piece{Type: chess.Knight, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 1, Col: 0}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
+	e := NewEngine(state, board)
+	markInPlayForTest(state)
+
+	if err := e.ActivateCardWithTargets(gameplay.PlayerA, 0, []chess.Pos{{Row: 6, Col: 1}}); err != nil {
+		t.Fatalf("activate rook-touch with target failed: %v", err)
+	}
+	if err := e.ResolveReactionStack(); err != nil {
+		t.Fatalf("resolve ignite chain failed: %v", err)
+	}
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 1}, To: chess.Pos{Row: 1, Col: 1}}); err != nil {
+		t.Fatalf("knight should move as rook along a clear file: %v", err)
+	}
+	if board.PieceAt(chess.Pos{Row: 1, Col: 1}).Type != chess.Knight {
+		t.Fatal("expected knight on b7")
+	}
+}
+
+func TestRookTouchPawnLimitedToOneOrthogonalStep(t *testing.T) {
+	rt := gameplay.CardInstance{InstanceID: "rt1", CardID: CardRookTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
+	filler := gameplay.CardInstance{InstanceID: "f1", CardID: CardDoubleTurn, ManaCost: 1, Ignition: 1, Cooldown: 1}
+	state, err := gameplay.NewMatchState(testDeckWith(rt), testDeckWith(filler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.CurrentTurn = gameplay.PlayerA
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{rt}
+	state.Players[gameplay.PlayerA].Mana = 10
+	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{}
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 4, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 1, Col: 0}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
+	e := NewEngine(state, board)
+	markInPlayForTest(state)
+
+	if err := e.ActivateCardWithTargets(gameplay.PlayerA, 0, []chess.Pos{{Row: 4, Col: 4}}); err != nil {
+		t.Fatalf("activate rook-touch with target failed: %v", err)
+	}
+	if err := e.ResolveReactionStack(); err != nil {
+		t.Fatalf("resolve ignite chain failed: %v", err)
+	}
+	// Two steps on the same rank or file must be rejected for a pawn.
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 4, Col: 4}, To: chess.Pos{Row: 2, Col: 4}}); err == nil {
+		t.Fatal("rook-touch pawn should not slide two squares on a file")
+	}
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 4, Col: 4}, To: chess.Pos{Row: 3, Col: 4}}); err != nil {
+		t.Fatalf("rook-touch pawn should allow one orthogonal step: %v", err)
+	}
+}
+
+func TestRookTouchMovementGrantExpiresAfterOwnerTurn(t *testing.T) {
+	rt := gameplay.CardInstance{InstanceID: "rt1", CardID: CardRookTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
+	filler := gameplay.CardInstance{InstanceID: "f1", CardID: CardDoubleTurn, ManaCost: 1, Ignition: 1, Cooldown: 1}
+	state, err := gameplay.NewMatchState(testDeckWith(rt), testDeckWith(filler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.CurrentTurn = gameplay.PlayerA
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{rt}
+	state.Players[gameplay.PlayerA].Mana = 10
+	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{}
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 1}, chess.Piece{Type: chess.Knight, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 1, Col: 0}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
+	e := NewEngine(state, board)
+	markInPlayForTest(state)
+
+	if err := e.ActivateCardWithTargets(gameplay.PlayerA, 0, []chess.Pos{{Row: 6, Col: 1}}); err != nil {
+		t.Fatalf("activate rook-touch with target failed: %v", err)
+	}
+	if err := e.ResolveReactionStack(); err != nil {
+		t.Fatalf("resolve ignite chain failed: %v", err)
+	}
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 1}, To: chess.Pos{Row: 1, Col: 1}}); err != nil {
+		t.Fatalf("first rook-line move should succeed: %v", err)
+	}
+	if err := e.SubmitMove(gameplay.PlayerB, chess.Move{From: chess.Pos{Row: 1, Col: 0}, To: chess.Pos{Row: 2, Col: 0}}); err != nil {
+		t.Fatalf("black reply failed: %v", err)
+	}
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 1, Col: 1}, To: chess.Pos{Row: 1, Col: 7}}); err == nil {
+		t.Fatal("rook-touch grant should expire after owner turn")
+	}
+}
