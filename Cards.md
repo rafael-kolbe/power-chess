@@ -78,7 +78,7 @@ Swap positions of one piece you control with one piece your opponent controls up
 # Mind Control
 ## Type: Power 
 ## Description
-Target a piece your opponent controls, except the king or a queen, and take control of it for three turns. If the piece is captured, move it to your opponent's graveyard.
+Target a piece your opponent controls, except the king or a queen, and take control of it for three turns. If the piece is captured, it goes to your opponent's captures.
 ## Cost: 7
 ## Ignition: 2
 ## Cooldown: 10

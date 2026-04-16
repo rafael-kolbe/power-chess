@@ -5,10 +5,10 @@ package gameplay
 type CardType string
 
 const (
-	CardTypePower      CardType = "Power"
+	CardTypePower       CardType = "Power"
 	CardTypeRetribution CardType = "Retribution"
-	CardTypeCounter    CardType = "Counter"
-	CardTypeContinuous CardType = "Continuous"
+	CardTypeCounter     CardType = "Counter"
+	CardTypeContinuous  CardType = "Continuous"
 )
 
 type CardDefinition struct {
@@ -21,6 +21,12 @@ type CardDefinition struct {
 	Cooldown    int
 	Example     string
 	Limit       int
+	// MaybeCaptureAttemptOnIgnition marks whether this Power or Continuous card's
+	// resolved ignition can directly cause a capture (card-driven "maybe capture attempt"),
+	// distinct from chess `capture_attempt`. When true, the server includes Counter in
+	// ignite_reaction eligibleTypes alongside Retribution. Keep false until resolvers
+	// implement ignition-driven captures (e.g. Backstab).
+	MaybeCaptureAttemptOnIgnition bool
 }
 
 const DefaultCardLimit = 3
@@ -33,7 +39,7 @@ func InitialCardCatalog() []CardDefinition {
 		{ID: "mana-burn", Name: "Mana Burn", Type: CardTypeRetribution, Description: "Target an ignited card from your opponent, burn x mana from your opponent, x being the mana cost of the target card.", Cost: 1, Ignition: 0, Cooldown: 3, Example: "1. Opponent activates \"Knight Touch\"\n2. You activate Mana Burn as retribution.\n3. You burn 3 mana from your opponent.", Limit: DefaultCardLimit},
 		{ID: "energy-gain", Name: "Energy Gain", Type: CardTypePower, Description: "Gain 4 mana.", Cost: 0, Ignition: 1, Cooldown: 2, Example: "1. You currently have 2 mana.\n2. You activate \"Energy Gain\".\n3. Ignition succeeds the next turn.\n4. You gain 4 mana.", Limit: DefaultCardLimit},
 		{ID: "piece-swap", Name: "Piece Swap", Type: CardTypePower, Description: "Swap positions of one piece you control with one piece your opponent controls up to 2 squares apart, except the king.", Cost: 6, Ignition: 1, Cooldown: 6, Example: "1. You control a pawn on a3.\n2. You activate \"Piece Swap\".\n3. Ignition succeeds the next turn.\n4. Opponent controls a rook on a1.\n5. Next turn you swap the pawn on a3 with the rook on a1.\n6. The pawn on a3 is now on a1 and the rook on a1 is now on a3.\n7. The pawn now on a1 can promote.", Limit: DefaultCardLimit},
-		{ID: "mind-control", Name: "Mind Control", Type: CardTypePower, Description: "Target a piece your opponent controls, except the king or a queen, and take control of it for three turns. If the piece is captured, move it to your opponent's graveyard.", Cost: 7, Ignition: 2, Cooldown: 10, Example: "1. You activate \"Mind Control\".\n2. Ignition succeeds 2 turns later.\n3. Opponent controls a rook on a1.\n4. You take control of the rook on a1 for 3 turns.", Limit: DefaultCardLimit},
+		{ID: "mind-control", Name: "Mind Control", Type: CardTypePower, Description: "Target a piece your opponent controls, except the king or a queen, and take control of it for three turns. If the piece is captured, it goes to your opponent's captures.", Cost: 7, Ignition: 2, Cooldown: 10, Example: "1. You activate \"Mind Control\".\n2. Ignition succeeds 2 turns later.\n3. Opponent controls a rook on a1.\n4. You take control of the rook on a1 for 3 turns.", Limit: DefaultCardLimit},
 		{ID: "zip-line", Name: "Zip Line", Type: CardTypePower, Description: "Target a piece you control, except the king, move it to an empty square in the same row.", Cost: 4, Ignition: 0, Cooldown: 4, Example: "1. You control a bishop on b2.\n2. You activate \"Zip Line\".\n3. The bishop on b2 moves to g2.", Limit: DefaultCardLimit},
 		{ID: "sacrifice-of-the-masses", Name: "Sacrifice of the Masses", Type: CardTypePower, Description: "Target a pawn you control, sacrifice it to gain 6 mana and draw 2 cards.", Cost: 0, Ignition: 0, Cooldown: 10, Example: "1. You control a pawn on a3.\n2. You activate \"Sacrifice of the Masses\".\n3. The pawn on a3 is sacrificed and you gain 6 mana and draw 2 cards.", Limit: DefaultCardLimit},
 		{ID: "archmage-arsenal", Name: "Archmage Arsenal", Type: CardTypePower, Description: "Search your deck for a \"Power\" card that costs 3 mana or less, except \"Archmage Arsenal\", add it to your hand.", Cost: 1, Ignition: 0, Cooldown: 2, Example: "1. You activate \"Archmage Arsenal\".\n2. You search for \"Knight Touch\" in your deck and add it to your hand.", Limit: DefaultCardLimit},

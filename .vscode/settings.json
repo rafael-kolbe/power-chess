@@ -1,0 +1,42 @@
+{
+  "cSpell.language": "en,pt,pt-BR",
+  "cSpell.dictionaries": [
+    "en_US",
+    "pt",
+    "pt_BR"
+  ],
+  "cSpell.dictionaryDefinitions": [
+    {
+      "name": "pt_BR",
+      "path": "${workspaceFolder}/.vscode/cspell-pt-br-words.txt",
+      "addWords": true
+    }
+  ],
+  "cSpell.enabledLanguageIds": [
+    "markdown",
+    "plaintext",
+    "javascript",
+    "typescript",
+    "json",
+    "html",
+    "css",
+    "scss",
+    "yaml",
+    "go"
+  ],
+  "cSpell.userWords": [],
+  "ltex.language": "en-US,pt-BR",
+  "ltex.enabled": [
+    "markdown",
+    "plaintext"
+  ],
+  "spellright.language": [
+    "en_US",
+    "pt_BR"
+  ],
+  "spellright.documentTypes": [
+    "markdown",
+    "plaintext",
+    "latex"
+  ]
+}

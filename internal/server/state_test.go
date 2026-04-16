@@ -34,81 +34,6 @@ func TestMarkRequestOnce(t *testing.T) {
 	}
 }
 
-// TestDisconnectFreezePreservesMainClockInSnapshot exposes frozen main turn time during reconnect grace.
-func TestDisconnectFreezePreservesMainClockInSnapshot(t *testing.T) {
-	room, err := NewRoomSession("room-freeze-main")
-	if err != nil {
-		t.Fatalf(newRoomFailedFmt, err)
-	}
-	syncDisconnectBudgetForTest(room, time.Minute)
-	room.Engine.State.MulliganPhaseActive = false
-	room.Engine.State.Started = true
-	room.RegisterPlayerConnection(gameplay.PlayerA)
-	room.RegisterPlayerConnection(gameplay.PlayerB)
-
-	remaining := 40 * time.Second
-	room.stateM.Lock()
-	room.turnDeadline = time.Now().UTC().Add(remaining)
-	room.turnDeadlineFor = gameplay.PlayerA
-	room.stateM.Unlock()
-
-	room.HandlePlayerDisconnect(gameplay.PlayerA)
-
-	snap := room.SnapshotForPlayerSafe(gameplay.PlayerB)
-	if snap.TurnMainDeadlineUnixMs == 0 || snap.TurnMainPausedRemainingMs != 0 {
-		t.Fatalf("expected TurnMainDeadlineUnixMs during grace, got deadline=%d paused=%d",
-			snap.TurnMainDeadlineUnixMs, snap.TurnMainPausedRemainingMs)
-	}
-	gotRem := time.Until(time.UnixMilli(snap.TurnMainDeadlineUnixMs))
-	slack := 2500 * time.Millisecond
-	if gotRem < remaining-slack || gotRem > remaining+slack {
-		t.Fatalf("frozen main remaining want ~%v got %v", remaining, gotRem)
-	}
-
-	room.RegisterPlayerConnection(gameplay.PlayerA)
-	snap2 := room.SnapshotForPlayerSafe(gameplay.PlayerB)
-	if snap2.TurnMainDeadlineUnixMs == 0 {
-		t.Fatalf("expected resumed TurnMainDeadlineUnixMs after reconnect")
-	}
-	gotRem2 := time.Until(time.UnixMilli(snap2.TurnMainDeadlineUnixMs))
-	if gotRem2 < remaining-slack || gotRem2 > remaining+slack {
-		t.Fatalf("resumed main remaining want ~%v got %v", remaining, gotRem2)
-	}
-}
-
-// TestDisconnectFreezePreservesPausedMainTurn mirrors a main turn paused for capture/ignite reaction during opponent disconnect.
-func TestDisconnectFreezePreservesPausedMainTurn(t *testing.T) {
-	room, err := NewRoomSession("room-freeze-paused")
-	if err != nil {
-		t.Fatalf(newRoomFailedFmt, err)
-	}
-	syncDisconnectBudgetForTest(room, time.Minute)
-	room.Engine.State.MulliganPhaseActive = false
-	room.Engine.State.Started = true
-	room.RegisterPlayerConnection(gameplay.PlayerA)
-	room.RegisterPlayerConnection(gameplay.PlayerB)
-
-	room.stateM.Lock()
-	room.pausedTurnRemaining = 30 * time.Second
-	room.turnDeadlineFor = gameplay.PlayerA
-	room.turnDeadline = time.Time{}
-	room.stateM.Unlock()
-
-	room.HandlePlayerDisconnect(gameplay.PlayerA)
-
-	snap := room.SnapshotForPlayerSafe(gameplay.PlayerB)
-	if snap.TurnMainPausedRemainingMs != 30000 || snap.TurnMainDeadlineUnixMs != 0 {
-		t.Fatalf("expected paused main 30000ms in snapshot, got deadline=%d paused=%d",
-			snap.TurnMainDeadlineUnixMs, snap.TurnMainPausedRemainingMs)
-	}
-
-	room.RegisterPlayerConnection(gameplay.PlayerA)
-	snap2 := room.SnapshotForPlayerSafe(gameplay.PlayerB)
-	if snap2.TurnMainPausedRemainingMs != 30000 {
-		t.Fatalf("want resumed paused 30000ms, got %d", snap2.TurnMainPausedRemainingMs)
-	}
-}
-
 // TestJoinSeatBlockedDuringReconnectGrace ensures a third party cannot take the vacant seat while the grace timer runs.
 func TestJoinSeatBlockedDuringReconnectGrace(t *testing.T) {
 	room, err := NewRoomSession("room-join-grace")
@@ -354,7 +279,6 @@ func TestIgniteReactionSkippedWhenOpponentReactionOff(t *testing.T) {
 		if err := room.maybeAutoResolveIgniteReactionUnsafe(); err != nil {
 			return err
 		}
-		room.pauseMainTurnIfReactionWindowOpenUnsafe(time.Now())
 		return nil
 	}); err != nil {
 		t.Fatalf("execute failed: %v", err)
@@ -363,11 +287,11 @@ func TestIgniteReactionSkippedWhenOpponentReactionOff(t *testing.T) {
 	if ok && rw.Open {
 		t.Fatalf("expected ignite reaction window closed, got %+v", rw)
 	}
-	if !s.IgnitionSlot.Occupied {
+	if !s.Players[gameplay.PlayerA].Ignition.Occupied {
 		t.Fatalf("expected double-turn to stay in ignition while burning (ignition 1)")
 	}
-	if s.IgnitionSlot.TurnsRemaining != 1 {
-		t.Fatalf("expected 1 burn turn remaining, got %d", s.IgnitionSlot.TurnsRemaining)
+	if s.Players[gameplay.PlayerA].Ignition.TurnsRemaining != 1 {
+		t.Fatalf("expected 1 burn turn remaining, got %d", s.Players[gameplay.PlayerA].Ignition.TurnsRemaining)
 	}
 }
 
@@ -396,7 +320,6 @@ func TestIgniteReactionWindowWhenOpponentReactionOn(t *testing.T) {
 		if err := room.maybeAutoResolveIgniteReactionUnsafe(); err != nil {
 			return err
 		}
-		room.pauseMainTurnIfReactionWindowOpenUnsafe(time.Now())
 		return nil
 	}); err != nil {
 		t.Fatalf("execute failed: %v", err)
@@ -404,9 +327,6 @@ func TestIgniteReactionWindowWhenOpponentReactionOn(t *testing.T) {
 	rw, _, ok := room.Engine.ReactionWindowSnapshot()
 	if !ok || !rw.Open || rw.Trigger != "ignite_reaction" {
 		t.Fatalf("expected open ignite_reaction window, got ok=%v rw=%+v", ok, rw)
-	}
-	if room.pausedTurnRemaining <= 0 || !room.turnDeadline.IsZero() {
-		t.Fatalf("expected main turn clock paused for ignite reaction, paused=%v deadline=%v", room.pausedTurnRemaining, room.turnDeadline)
 	}
 }
 
@@ -428,16 +348,14 @@ func TestResolveIgniteReactionPathKeepsDelayedBurn(t *testing.T) {
 	room.RegisterPlayerConnection(gameplay.PlayerA)
 	room.RegisterPlayerConnection(gameplay.PlayerB)
 
-	now := time.Now()
 	if err := room.Execute(func() error {
-		room.resetTurnDeadlineUnsafe(now)
+		room.resetReactionBudgetsUnsafe()
 		if err := room.Engine.ActivateCard(gameplay.PlayerB, 0); err != nil {
 			return err
 		}
 		if err := room.maybeAutoResolveIgniteReactionUnsafe(); err != nil {
 			return err
 		}
-		room.pauseMainTurnIfReactionWindowOpenUnsafe(now)
 		return nil
 	}); err != nil {
 		t.Fatalf("activate phase: %v", err)
@@ -452,17 +370,16 @@ func TestResolveIgniteReactionPathKeepsDelayedBurn(t *testing.T) {
 			return err
 		}
 		room.reactionDeadline = time.Time{}
-		room.resumeMainTurnAfterReactionUnsafe(time.Now())
 		return nil
 	}); err != nil {
 		t.Fatalf("resolve phase: %v", err)
 	}
 
-	if !s.IgnitionSlot.Occupied {
+	if !s.Players[gameplay.PlayerB].Ignition.Occupied {
 		t.Fatal("delayed ignition card should remain in slot after empty resolve_reactions-style path")
 	}
-	if s.IgnitionSlot.TurnsRemaining != 1 {
-		t.Fatalf("expected 1 burn turn remaining, got %d", s.IgnitionSlot.TurnsRemaining)
+	if s.Players[gameplay.PlayerB].Ignition.TurnsRemaining != 1 {
+		t.Fatalf("expected 1 burn turn remaining, got %d", s.Players[gameplay.PlayerB].Ignition.TurnsRemaining)
 	}
 	if len(s.Players[gameplay.PlayerB].Cooldowns) != 0 {
 		t.Fatal("card must not enter cooldown before ignition burn finishes")
@@ -490,16 +407,14 @@ func TestAutoFinalizeIgniteWhenNextCannotExtend(t *testing.T) {
 	room.RegisterPlayerConnection(gameplay.PlayerA)
 	room.RegisterPlayerConnection(gameplay.PlayerB)
 
-	now := time.Now()
 	if err := room.Execute(func() error {
-		room.resetTurnDeadlineUnsafe(now)
+		room.resetReactionBudgetsUnsafe()
 		if err := room.Engine.ActivateCard(gameplay.PlayerA, 0); err != nil {
 			return err
 		}
 		if err := room.maybeAutoResolveIgniteReactionUnsafe(); err != nil {
 			return err
 		}
-		room.pauseMainTurnIfReactionWindowOpenUnsafe(now)
 		return nil
 	}); err != nil {
 		t.Fatalf("activate: %v", err)
@@ -543,16 +458,14 @@ func TestIgniteChainFinalizesOnZeroReactionDeadline(t *testing.T) {
 	room.RegisterPlayerConnection(gameplay.PlayerA)
 	room.RegisterPlayerConnection(gameplay.PlayerB)
 
-	now := time.Now()
 	if err := room.Execute(func() error {
-		room.resetTurnDeadlineUnsafe(now)
+		room.resetReactionBudgetsUnsafe()
 		if err := room.Engine.ActivateCard(gameplay.PlayerB, 0); err != nil {
 			return err
 		}
 		if err := room.maybeAutoResolveIgniteReactionUnsafe(); err != nil {
 			return err
 		}
-		room.pauseMainTurnIfReactionWindowOpenUnsafe(now)
 		return nil
 	}); err != nil {
 		t.Fatalf("activate: %v", err)
@@ -580,11 +493,79 @@ func TestIgniteChainFinalizesOnZeroReactionDeadline(t *testing.T) {
 	if ok && rw.Open {
 		t.Fatalf("expected reaction window closed, got %+v", rw)
 	}
-	if !s.IgnitionSlot.Occupied {
+	if !s.Players[gameplay.PlayerB].Ignition.Occupied {
 		t.Fatal("delayed ignition card should remain in slot after reaction resolve")
 	}
-	if s.IgnitionSlot.TurnsRemaining != 1 {
-		t.Fatalf("expected 1 burn turn remaining on energy-gain, got %d", s.IgnitionSlot.TurnsRemaining)
+	if s.Players[gameplay.PlayerB].Ignition.TurnsRemaining != 1 {
+		t.Fatalf("expected 1 burn turn remaining on energy-gain, got %d", s.Players[gameplay.PlayerB].Ignition.TurnsRemaining)
+	}
+}
+
+// TestSnapshotOpenReactionWindowAfterChainStartClearsDeadline ensures the in-room reaction deadline
+// is cleared while a non-empty stack is pending (budget carried in reactionBudgetRemaining) and
+// the snapshot still exposes an open reaction window for HUD/animation.
+func TestSnapshotOpenReactionWindowAfterChainStartClearsDeadline(t *testing.T) {
+	room, err := NewRoomSession("room-snap-react-deadline-budget")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	s := room.Engine.State
+	s.MulliganPhaseActive = false
+	s.Started = true
+	s.CurrentTurn = gameplay.PlayerB
+	eg := gameplay.CardInstance{InstanceID: "e1", CardID: "energy-gain", ManaCost: 0, Ignition: 1, Cooldown: 2}
+	ret := gameplay.CardInstance{InstanceID: "r1", CardID: "retaliate", ManaCost: 2, Ignition: 0, Cooldown: 9}
+	s.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{eg}
+	s.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{ret}
+	s.Players[gameplay.PlayerA].Mana = 10
+	s.Players[gameplay.PlayerB].Mana = 10
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	room.RegisterPlayerConnection(gameplay.PlayerB)
+
+	if err := room.Execute(func() error {
+		room.resetReactionBudgetsUnsafe()
+		if err := room.Engine.ActivateCard(gameplay.PlayerB, 0); err != nil {
+			return err
+		}
+		if err := room.maybeAutoResolveIgniteReactionUnsafe(); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+	if err := room.Execute(func() error {
+		if err := room.Engine.QueueReactionCard(gameplay.PlayerA, 0, match.EffectTarget{}); err != nil {
+			return err
+		}
+		// Same as NoteReactionChainExtendedUnsafe after a queue: responder has an absolute deadline;
+		// noteReactionChainStartedUnsafe then clears it and carries remaining time for the timeout loop.
+		room.reactionDeadline = time.Now().Add(20 * time.Second)
+		room.reactionDeadlineFor = gameplay.PlayerB
+		room.noteReactionChainStartedUnsafe()
+		return nil
+	}); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	if room.reactionBudgetRemaining < 0 {
+		t.Fatalf("expected non-negative reaction budget after chain start, got %v", room.reactionBudgetRemaining)
+	}
+	if !room.reactionDeadline.IsZero() {
+		t.Fatal("expected room reaction deadline cleared until timeout tick re-arms")
+	}
+
+	var snap StateSnapshotPayload
+	if err := room.Execute(func() error {
+		snap = room.SnapshotForPlayer(gameplay.PlayerA)
+		return nil
+	}); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if !snap.ReactionWindow.Open || snap.ReactionWindow.StackSize == 0 {
+		t.Fatalf("expected open reaction window with queued stack in snapshot, got %+v", snap.ReactionWindow)
+	}
+	if room.reactionBudgetRemaining <= 0 {
+		t.Fatalf("expected positive carried reaction budget, got %v", room.reactionBudgetRemaining)
 	}
 }
 
@@ -617,7 +598,6 @@ func TestCaptureReactionWindowWhenOpponentReactionOn(t *testing.T) {
 		if err := room.maybeAutoResolveCaptureReactionUnsafe(); err != nil {
 			return err
 		}
-		room.pauseMainTurnIfReactionWindowOpenUnsafe(time.Now())
 		return nil
 	}); err != nil {
 		t.Fatalf("execute failed: %v", err)
@@ -625,78 +605,6 @@ func TestCaptureReactionWindowWhenOpponentReactionOn(t *testing.T) {
 	rw, _, ok := room.Engine.ReactionWindowSnapshot()
 	if !ok || !rw.Open || rw.Trigger != "capture_attempt" {
 		t.Fatalf("expected open capture_attempt window, got ok=%v rw=%+v", ok, rw)
-	}
-	if room.pausedTurnRemaining <= 0 || !room.turnDeadline.IsZero() {
-		t.Fatalf("expected main turn clock paused for capture reaction, paused=%v deadline=%v", room.pausedTurnRemaining, room.turnDeadline)
-	}
-}
-
-// TestResolveTurnTimeoutIfExpiredAddsStrikeAndPassesTurn validates timeout strike and turn handoff.
-func TestResolveTurnTimeoutIfExpiredAddsStrikeAndPassesTurn(t *testing.T) {
-	room, err := NewRoomSession("room-turn-timeout")
-	if err != nil {
-		t.Fatalf(newRoomFailedFmt, err)
-	}
-	room.Engine.State.TurnSeconds = 1
-	room.RegisterPlayerConnection(gameplay.PlayerA)
-	room.RegisterPlayerConnection(gameplay.PlayerB)
-
-	// First call initializes deadline.
-	resolved, err := room.ResolveTurnTimeoutIfExpired(time.Now())
-	if err != nil {
-		t.Fatalf("init timeout failed: %v", err)
-	}
-	if resolved {
-		t.Fatalf("first pass should not resolve timeout")
-	}
-
-	time.Sleep(1100 * time.Millisecond)
-	resolved, err = room.ResolveTurnTimeoutIfExpired(time.Now())
-	if err != nil {
-		t.Fatalf("timeout resolve failed: %v", err)
-	}
-	if !resolved {
-		t.Fatalf("expected timeout resolution")
-	}
-	s := room.SnapshotSafe()
-	if s.TurnPlayer != string(gameplay.PlayerB) {
-		t.Fatalf("expected turn passed to B, got %+v", s)
-	}
-	strikesA := -1
-	for _, p := range s.Players {
-		if p.PlayerID == string(gameplay.PlayerA) {
-			strikesA = p.Strikes
-			break
-		}
-	}
-	if strikesA != 1 {
-		t.Fatalf("expected A to have 1 strike, got %+v", s.Players)
-	}
-}
-
-// TestResolveTurnTimeoutIfExpiredLosesOnThirdStrike validates strike-limit end condition.
-func TestResolveTurnTimeoutIfExpiredLosesOnThirdStrike(t *testing.T) {
-	room, err := NewRoomSession("room-turn-timeout-loss")
-	if err != nil {
-		t.Fatalf(newRoomFailedFmt, err)
-	}
-	room.Engine.State.Players[gameplay.PlayerA].Strikes = 2
-	room.Engine.State.TurnSeconds = 1
-	room.RegisterPlayerConnection(gameplay.PlayerA)
-	room.RegisterPlayerConnection(gameplay.PlayerB)
-
-	_, _ = room.ResolveTurnTimeoutIfExpired(time.Now())
-	time.Sleep(1100 * time.Millisecond)
-	resolved, err := room.ResolveTurnTimeoutIfExpired(time.Now())
-	if err != nil {
-		t.Fatalf("timeout loss resolve failed: %v", err)
-	}
-	if !resolved {
-		t.Fatalf("expected timeout loss resolution")
-	}
-	s := room.SnapshotSafe()
-	if !s.MatchEnded || s.Winner != string(gameplay.PlayerB) || s.EndReason != "strike_limit" {
-		t.Fatalf("expected strike_limit win for B, got %+v", s)
 	}
 }
 
@@ -738,35 +646,60 @@ func TestResolveMulliganTimeoutIfExpiredAutoKeeps(t *testing.T) {
 	if s.TurnPlayer != string(gameplay.PlayerA) {
 		t.Fatalf("expected first chess turn for white (A), got %s", s.TurnPlayer)
 	}
-	if s.TurnMainDeadlineUnixMs == 0 {
-		t.Fatalf("expected TurnMainDeadlineUnixMs after mulligan resolution, got 0")
-	}
 }
 
-// TestSetDebugPauseResumePreservesPausedTurnRemaining ensures debug pause does not inflate the
-// frozen main-turn slice (that slice must stay capped by the pre-pause budget).
-func TestSetDebugPauseResumePreservesPausedTurnRemaining(t *testing.T) {
-	room, err := NewRoomSession("room-debug-pause-paused-main")
+// TestNoteReactionChainSavesBudgetForNextLink ensures reaction time is not reset to a full
+// segment when the first card is queued (budget carries to the next responder).
+func TestNoteReactionChainSavesBudgetForNextLink(t *testing.T) {
+	room, err := NewRoomSession("room-react-budget")
 	if err != nil {
 		t.Fatalf(newRoomFailedFmt, err)
 	}
-	room.RegisterPlayerConnection(gameplay.PlayerA)
-	room.RegisterPlayerConnection(gameplay.PlayerB)
 	room.stateM.Lock()
-	room.Engine.State.MulliganPhaseActive = false
+	defer room.stateM.Unlock()
+	room.reactionTimeout = 30 * time.Second
+	room.reactionDeadline = time.Now().Add(20 * time.Second)
+	room.noteReactionChainStartedUnsafe()
+	if room.reactionBudgetRemaining < 19*time.Second || room.reactionBudgetRemaining > 21*time.Second {
+		t.Fatalf("expected ~20s carried budget, got %v", room.reactionBudgetRemaining)
+	}
+	if !room.reactionDeadline.IsZero() {
+		t.Fatalf("expected reaction deadline cleared while chain pending")
+	}
+}
+
+// TestRematchBothVotesDealsOpeningHands ensures rematch runs the same opening as game one:
+// mulligan active with three cards per hand after BeginOpeningPhase.
+func TestRematchBothVotesDealsOpeningHands(t *testing.T) {
+	room, err := NewRoomSession("room-rematch-hands")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	room.stateM.Lock()
+	room.matchEnded = true
+	room.connectedByPlayer[gameplay.PlayerA] = 1
+	room.connectedByPlayer[gameplay.PlayerB] = 1
 	room.Engine.State.Started = true
-	room.Engine.State.CurrentTurn = gameplay.PlayerA
-	room.pausedTurnRemaining = 25 * time.Second
-	room.turnDeadlineFor = gameplay.PlayerA
-	room.turnDeadline = time.Time{}
-	t0 := time.Date(2020, 1, 1, 12, 0, 0, 0, time.UTC)
-	room.setDebugPauseUnsafe(true, t0)
-	room.setDebugPauseUnsafe(false, t0.Add(10*time.Second))
-	got := room.pausedTurnRemaining
+	room.Engine.State.MulliganPhaseActive = false
 	room.stateM.Unlock()
-	want := 25 * time.Second
-	if got != want {
-		t.Fatalf("pausedTurnRemaining want %v got %v", want, got)
+
+	if _, err := room.RequestRematch(gameplay.PlayerA); err != nil {
+		t.Fatalf("rematch A: %v", err)
+	}
+	accepted, err := room.RequestRematch(gameplay.PlayerB)
+	if err != nil {
+		t.Fatalf("rematch B: %v", err)
+	}
+	if !accepted {
+		t.Fatal("expected rematch accepted")
+	}
+	s := room.Engine.State
+	if !s.MulliganPhaseActive {
+		t.Fatal("expected mulligan phase after rematch")
+	}
+	if len(s.Players[gameplay.PlayerA].Hand) != 3 || len(s.Players[gameplay.PlayerB].Hand) != 3 {
+		t.Fatalf("expected 3 cards per hand after rematch, got A=%d B=%d",
+			len(s.Players[gameplay.PlayerA].Hand), len(s.Players[gameplay.PlayerB].Hand))
 	}
 }
 

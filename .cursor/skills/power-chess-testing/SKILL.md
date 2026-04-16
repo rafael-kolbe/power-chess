@@ -1,6 +1,6 @@
 ---
 name: power-chess-testing
-description: Manages, runs, extends, and troubleshoots the Power Chess test suite (Go unit tests, WebSocket integration tests, and Playwright E2E tests). Use when adding tests, fixing failing tests, checking coverage, or asked about the testing strategy, test structure, or test commands.
+description: Manages, runs, extends, and troubleshoots the Power Chess backend test suite (Go unit tests and WebSocket integration tests). Use when adding tests, fixing failing tests, checking coverage, or asked about the testing strategy, test structure, or test commands.
 ---
 
 # Power Chess Testing
@@ -10,9 +10,6 @@ description: Manages, runs, extends, and troubleshoots the Power Chess test suit
 ```bash
 # All Go tests (unit + integration)
 go test ./...
-
-# Playwright E2E (server auto-started by playwright.config.js)
-npm run test:e2e
 
 # Coverage profile
 go test ./... -coverprofile=coverage.out
@@ -29,7 +26,7 @@ Before any commit: run `go test ./...` first. Only commit when all tests pass.
 | `internal/gameplay` | `turn_coverage_test.go` | `GrantCaptureBonusMana`, `ConsumeCardFromHand`, `EndTurn`, `StartTurn`, `SelectPlayerSkill`, `tickCooldowns`, `EnterMulliganPhaseWithoutShuffle` |
 | `internal/match` | `engine_coverage_test.go` | `EndTurn`, `ActivatePlayerSkill`, `PendingEffects`, `ReactionWindowSnapshot`, `EffectResolver` implementations |
 | `internal/server` | `ws_integration_test.go` | Original WebSocket integration tests |
-| `internal/server` | `ws_handlers_test.go` | New handler tests: confirm_mulligan, submit_move, activate_card, draw_card, leave_match, debug_match_fixture |
+| `internal/server` | `ws_handlers_test.go` | New handler tests: confirm_mulligan, submit_move, ignite_card, draw_card, leave_match, debug_match_fixture |
 
 ## Adding Go integration tests (WebSocket)
 
@@ -76,57 +73,6 @@ roomID|join_match|connID|envID
 ```
 All other handlers use `c.requestKey(env)` which includes `c.playerID`. This prevents clients that share the same envelope counter from colliding.
 
-## Playwright E2E tests
-
-Configuration: `playwright.config.js`
-- Server: `DATABASE_URL= ADMIN_DEBUG_MATCH=1 go run ./cmd/server`
-- Server health URL: `http://127.0.0.1:8080/healthz`
-- `reuseExistingServer: false` — always fresh server per run
-- Test timeout: 60 s per test
-- Browser binaries: `playwright.config.js` sets `PLAYWRIGHT_BROWSERS_PATH` to `./.pw-browsers` (gitignored). After cloning or upgrading `@playwright/test`, run **`npx playwright install chromium`** from the repo root so E2E can launch.
-
-### Test files
-
-| File | What it covers |
-|------|----------------|
-| `tests/e2e/ui-basics.spec.js` | Page load, room creation, search filter |
-| `tests/e2e/lobby-flow.spec.js` | Room list polling, joining via lobby |
-| `tests/e2e/playmat-zones.spec.js` | Playmat zones visible, draw button state, pile view modal |
-| `tests/e2e/rematch-modal.spec.js` | End-of-match overlay, rematch flow (uses MockWebSocket) |
-| `tests/e2e/animation-effects.spec.js` | `ADMIN_DEBUG_MATCH` fixture via `__powerChessMatchTest`; ignition flash; ignite→retaliate/backstab cooldown chain |
-
-### joinViaRoomList helper
-
-The room list polls every 4 s (`setInterval(refreshRoomList, 4000)`). Use the helper defined in `playmat-zones.spec.js` for joining via the UI:
-
-```javascript
-async function joinViaRoomList(pageB, roomName) {
-  const roomEntry = pageB.locator("#roomList .room-list-item", { hasText: roomName }).first();
-  await expect(roomEntry).toBeVisible({ timeout: 15000 });
-  await roomEntry.click();
-  await expect(pageB.locator("#gameShell")).toBeVisible({ timeout: 10000 });
-}
-```
-
-### MockWebSocket pattern (rematch-modal.spec.js)
-
-Tests using `installMockSocket` must wait for the initial handshake before injecting snapshots:
-
-```javascript
-test.beforeEach(async ({ page }) => {
-  await installMockSocket(page);
-  // ... route setup, goto, locale, piece type, click connect ...
-  // REQUIRED: wait for mock WS handshake to complete
-  await expect(page.locator("#gameShell")).toBeVisible({ timeout: 5000 });
-});
-```
-
-Without this wait, a race condition causes the test snapshot to arrive before the initial one, and the subsequent `matchEnded: false` snapshot hides the overlay.
-
-### Playwright stateless mode
-
-The Playwright webServer runs with `DATABASE_URL=` (empty), which disables PostgreSQL. The server starts in stateless/in-memory mode. Auth endpoints return 503; the frontend sets `authBackendAvailable = false`. No tokens, no deck checks.
-
 ## Coverage targets
 
 Run coverage after adding new tests:
@@ -147,6 +93,4 @@ Focus new tests on handlers and resolvers in:
 | `i/o timeout` in WS integration test | Read deadline not cleared after `dialAndHello` | `c.SetReadDeadline(time.Time{})` after hello |
 | `duplicate_request` ack for second player join | Old code missing `connID` in dedup key | Fixed in `handleJoinMatch` (connID scoping) |
 | `#gameShell` stays hidden in E2E | Server returned `duplicate` for join_match | See dedup fix above |
-| E2E mock test overlay not visible | `beforeEach` didn't await `#gameShell` | Add `await expect(page.locator("#gameShell")).toBeVisible()` |
-| Server fails to start for Playwright | `.env` sets `DATABASE_URL` | Playwright config overrides with `DATABASE_URL=` |
 | `deck_lookup_failed` in debug fixture | Card ID not in default preset | Use only cards from `DefaultDeckPresetCardIDs()` |

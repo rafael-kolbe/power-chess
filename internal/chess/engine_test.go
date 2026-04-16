@@ -54,8 +54,8 @@ func TestCheckDetection(t *testing.T) {
 
 func TestCheckmateDetectionSimple(t *testing.T) {
 	g := NewEmptyGame(White)
-	g.SetPiece(Pos{7, 0}, Piece{King, White}) // a1
-	g.SetPiece(Pos{5, 2}, Piece{King, Black}) // c3
+	g.SetPiece(Pos{7, 0}, Piece{King, White})  // a1
+	g.SetPiece(Pos{5, 2}, Piece{King, Black})  // c3
 	g.SetPiece(Pos{6, 1}, Piece{Queen, Black}) // b2
 	g.SetPiece(Pos{6, 0}, Piece{Rook, Black})  // a2
 
@@ -70,8 +70,8 @@ func TestKingCannotBeCaptured(t *testing.T) {
 	g.SetPiece(Pos{0, 4}, Piece{King, Black})
 	g.SetPiece(Pos{1, 4}, Piece{Rook, White})
 
-	if err := g.ApplyMove(Move{From: Pos{1, 4}, To: Pos{0, 4}}); err == nil {
-		t.Fatalf("capturing king must be illegal")
+	if err := g.ApplyMove(Move{From: Pos{1, 4}, To: Pos{0, 4}}); err != ErrKingCannotBeCaptured {
+		t.Fatalf("capturing king must return ErrKingCannotBeCaptured, got: %v", err)
 	}
 
 	g2 := NewEmptyGame(White)

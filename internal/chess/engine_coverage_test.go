@@ -89,7 +89,7 @@ func TestIsStalemate(t *testing.T) {
 	// Classic stalemate: White King cornered, Black to move would cause stalemate on White.
 	// Kh1, Qa6, Ka8 — White to move, no legal moves and not in check.
 	g := NewEmptyGame(White)
-	g.SetPiece(Pos{Row: 7, Col: 7}, Piece{Type: King, Color: White}) // h1 equivalent
+	g.SetPiece(Pos{Row: 7, Col: 7}, Piece{Type: King, Color: White})  // h1 equivalent
 	g.SetPiece(Pos{Row: 5, Col: 0}, Piece{Type: Queen, Color: Black}) // controlling escape squares
 	g.SetPiece(Pos{Row: 0, Col: 7}, Piece{Type: King, Color: Black})
 
@@ -140,7 +140,7 @@ func TestKnightMovesGeneratedCorrectly(t *testing.T) {
 		if dc < 0 {
 			dc = -dc
 		}
-		if !((dr == 1 && dc == 2) || (dr == 2 && dc == 1)) {
+		if (dr != 1 || dc != 2) && (dr != 2 || dc != 1) {
 			t.Errorf("illegal knight move delta (%d,%d) for move %v", dr, dc, m)
 		}
 	}

@@ -104,6 +104,24 @@ Pedidos duplicados (mesmo `requestId` + tipo + jogador + sala) retornam `status:
 
 **Códigos usados:** `bad_request`, `unknown_message_type`, `join_required`, `action_failed`, `invalid_payload`, `protocol_violation`, `debug_disabled` (pedido `debug_match_fixture` quando `ADMIN_DEBUG_MATCH` não está ativo no servidor).
 
+### `activate_card` (servidor → cliente — ativação do efeito)
+
+Enviado **antes** do `state_snapshot` consolidado quando o servidor conclui o passo de **ativação do efeito** de uma carta (sucesso ou falha): ignição que chega a **0**, ou cada carta ao ser **desempilhada** da pilha de reações (resolução **LIFO** — uma carta por vez). Enquanto a pilha não esvazia, o estado de jogo permanece fechado para novas jogadas; cada `activate_card` corresponde a uma carta que acaba de sair da pilha (teste de efeito + animação no cliente), e só então a pilha avança. **Não** abre janela de reação do oponente; é distinto de **ignição** (mão → zona de ignição, C2S `ignite_card`). O cliente pode usar este evento para animação (brilho por tipo + voo para recarga). Vários `activate_card` podem aparecer em sequência no mesmo broadcast (por exemplo pilha de reações + ignição do ator); o cliente deve processá-los **em série** antes de depender do snapshot para posição das cartas.
+
+```json
+{
+  "type": "activate_card",
+  "payload": {
+    "playerId": "A",
+    "cardId": "energy-gain",
+    "cardType": "power",
+    "success": true
+  }
+}
+```
+
+- `cardType`: tipo catalogado em minúsculas (`power`, `continuous`, `retribution`, `counter`), quando conhecido.
+
 ### `state_snapshot`
 
 Broadcast do estado da sala. Campos principais:
@@ -111,13 +129,13 @@ Broadcast do estado da sala. Campos principais:
 | Área | Conteúdo |
 |------|-----------|
 | Sala | `roomId`, `roomName`, `roomPrivate`, `roomPassword`, `connectedA/B`, `gameStarted` |
-| Turno | `turnPlayer`, `turnSeconds`, `turnNumber`, `turnMainDeadlineUnixMs` (epoch ms do fim do timer principal; omitido se pausado), `turnMainPausedRemainingMs` (ms restantes do timer principal enquanto a primeira reação está pendente), `ignitionOn`, `ignitionCard`, `ignitionOwner`, `ignitionTurnsRemaining` |
+| Turno | `turnPlayer`, `turnNumber` |
 | Abertura | `mulliganPhaseActive` — `true` enquanto os dois jogadores podem confirmar mulligan; `mulliganReturned` — mapa `{"A": n, "B": n}` com quantas cartas cada um já devolveu (`-1` até confirmar); `mulliganDeadlineUnixMs` — instante (epoch ms) em que o servidor confirma automaticamente quem ainda não confirmou (devolução vazia, “keep”). Janela de 15 s a partir do início da fase de mulligan |
 | Perspectiva | `viewerPlayerId` — identifica o destinatário deste snapshot (determina visibilidade da mão) |
 | Tabuleiro | `board` 8×8 (códigos `wK`, `bP`, `""` vazio), `enPassant`, `castlingRights` |
-| Jogadores | `players[]`: `mana`, `maxMana`, `energizedMana`, `maxEnergized`, `handCount`, `cooldownCount`, `graveyardCount`, `strikes`, `deckCount`, `sleeveColor`, `reactionMode` (`off` / `on` / `auto`), `hand` (privado — só no snapshot do próprio jogador), `banishedCards[]`, `graveyardPieces[]` (ordenado Q>R>B>N>P), `cooldownPreview[]` (até 4), `cooldownHiddenCount` |
+| Jogadores | `players[]`: `mana`, `maxMana`, `energizedMana`, `maxEnergized`, `handCount`, `cooldownCount`, `graveyardCount`, `deckCount`, `sleeveColor`, `reactionMode` (`off` / `on` / `auto`), `ignitionOn`, `ignitionCard`, `ignitionTurnsRemaining` (zona de ignição **desse** assento; visível a ambos), `hand` (privado — só no snapshot do próprio jogador), `banishedCards[]`, `graveyardPieces[]` (ordenado Q>R>B>N>P; na UI: zona **Captura**), `cooldownPreview[]` (fila completa na recarga), `cooldownHiddenCount` (sempre `0`; campo reservado) |
 | Efeitos | `pendingEffects`, `activationQueueSize`, `pendingCapture`, `reactionWindow` |
-| Debug (admin) | `adminDebugMatch` (capability), `debugPauseActive` (pausa global ativa) |
+| Debug (admin) | `adminDebugMatch` (capability) |
 | Fim | `matchEnded`, `winner`, `endReason`, `rematchA/B`, `postMatchMsLeft` |
 
 **Privacidade**: o servidor envia um snapshot por cliente via `BroadcastSnapshot()`; apenas o campo `hand` do próprio jogador é populado; oponentes recebem `hand: null`.
@@ -130,10 +148,13 @@ Broadcast do estado da sala. Campos principais:
 | `sleeveColor` | `string` | Cor do sleeve: `blue`, `green`, `pink`, `red` |
 | `hand` | `CardSnapshotEntry[]` | Mão do jogador (só no snapshot do dono) |
 | `banishedCards` | `CardSnapshotEntry[]` | Cartas banidas, topo = mais recente |
-| `graveyardPieces` | `string[]` | Peças capturadas pelo oponente (código `wQ`, `bP`, …) ordenadas por importância |
-| `cooldownPreview` | `CooldownPreviewEntry[]` | Até 4 cartas com recarga mais próxima de terminar |
-| `cooldownHiddenCount` | `int` | Quantidade de cartas na fila de recarga além das 4 exibidas |
+| `graveyardPieces` | `string[]` | Peças capturadas pelo oponente (código `wQ`, `bP`, …) ordenadas por importância; na UI a zona chama-se **Captura** |
+| `cooldownPreview` | `CooldownPreviewEntry[]` | Todas as cartas na fila de recarga (ordenadas para HUD; o cliente sobrepõe como na mão) |
+| `cooldownHiddenCount` | `int` | Sempre `0` (compatibilidade; não há cartas omitidas do preview) |
 | `reactionMode` | `string` | Preferência do assento: `off`, `on`, `auto` — o servidor usa para decidir se abre janela de reação em captura (ver secção abaixo) |
+| `ignitionOn` | `bool` | `true` se esse jogador tem carta na sua zona de ignição |
+| `ignitionCard` | `string` | ID da carta na ignição (omitido se vazio) |
+| `ignitionTurnsRemaining` | `int` | Turnos restantes no contador de ignição (omitido se 0) |
 
 **`CardSnapshotEntry`**: `{ cardId, manaCost, ignition, cooldown }`  
 **`CooldownPreviewEntry`**: `{ cardId, manaCost, ignition, cooldown, turnsRemaining }`
@@ -152,10 +173,7 @@ Broadcast do estado da sala. Campos principais:
     "connectedB": 1,
     "gameStarted": true,
     "turnPlayer": "A",
-    "turnSeconds": 30,
     "turnNumber": 3,
-    "ignitionOn": true,
-    "ignitionCard": "double-turn",
     "board": [
       ["bR","bN","bB","bQ","bK","bB","bN","bR"],
       ["bP","bP","bP","bP","bP","bP","bP","bP"],
@@ -183,7 +201,9 @@ Broadcast do estado da sala. Campos principais:
         "handCount": 3,
         "cooldownCount": 0,
         "graveyardCount": 0,
-        "strikes": 0
+        "ignitionOn": true,
+        "ignitionCard": "double-turn",
+        "ignitionTurnsRemaining": 1
       },
       {
         "playerId": "B",
@@ -194,7 +214,6 @@ Broadcast do estado da sala. Campos principais:
         "handCount": 3,
         "cooldownCount": 0,
         "graveyardCount": 0,
-        "strikes": 0
       }
     ],
     "pendingEffects": [{ "owner": "A", "cardId": "knight-touch" }],
@@ -229,7 +248,6 @@ Broadcast do estado da sala. Campos principais:
 
 - `enPassant`: quando `valid` é true, o cliente pode usar para highlight; o servidor decide legalidade.  
 - `castlingRights`: evita sugerir roque após revogação.  
-- `turnSeconds`: duração autoritativa do timer de turno.  
 - `reactionWindow.stagedCardId` / `stagedOwner`: carta no topo da pilha de reações e o assento que a jogou (para HUD enquanto a janela está aberta).
 - `reactionWindow.stackCards`: lista opcional `{ cardId, owner }` na ordem **fundo → topo** da pilha (a primeira resposta enfileirada vem primeiro). A resolução no servidor é **LIFO** (última entrada resolve primeiro); o cliente pode usar essa lista para animar efeitos em sequência.  
 - Após fim de partida: `rematchA` / `rematchB` e `postMatchMsLeft` para a janela pós-partida.
@@ -243,6 +261,10 @@ Broadcast do estado da sala. Campos principais:
 ```json
 { "id": "req-1", "type": "ping", "payload": { "timestamp": 1710000000 } }
 ```
+
+### `client_fx_hold` / `client_fx_release`
+
+Mensagens em par para **pausar no servidor** a avaliação dos deadlines de reação, mulligan e desconexão enquanto o cliente corre animações (ignição, recarga, resolução de pilha, etc.). Cada `client_fx_hold` aumenta uma profundidade na sala; cada `client_fx_release` diminui. Com profundidade zero, o servidor **adianta** os deadlines absolutos pelo tempo de parede que passou desde o hold mais externo. Profundidade máxima 64. Esperado: **cada** cliente ligado envia um hold/release por “onda” de FX que executa localmente (dois jogadores ⇒ dois holds antes dos releases, para os prazos só retomarem quando ambos terminam). Requer `join_match` com assento atribuído. `client_fx_hold` responde com `ack`; após `client_fx_release` que esvazia o hold externo, o servidor emite `state_snapshot` com deadlines atualizados.
 
 ### `join_match`
 
@@ -278,10 +300,12 @@ Broadcast do estado da sala. Campos principais:
 }
 ```
 
-### `activate_card`
+### `ignite_card`
+
+Move uma carta da **mão** para a **zona de ignição** do jogador (paga mana, abre janelas de reação do oponente quando as regras o exigem). Na terminologia do jogo isto é **ignição**, não ativação do efeito.
 
 ```json
-{ "id": "req-4", "type": "activate_card", "payload": { "handIndex": 0 } }
+{ "id": "req-4", "type": "ignite_card", "payload": { "handIndex": 0 } }
 ```
 
 ### `draw_card`
@@ -312,25 +336,10 @@ Atualiza a preferência do jogador para **reações em captura** (e futuras jane
 
 - `mode`: `off`, `on` ou `auto` (case-insensitive; valores desconhecidos tratados como `on`).
 - **`off`**: o servidor **não mantém** janela `capture_attempt` aberta só para pass — aplica a captura de seguida.
-- **`on`**: mantém a janela como hoje (oponente pode reagir mesmo sem Counter jogável).
-- **`auto`**: o servidor só mantém a janela se o oponente tiver pelo menos um **Counter** na mão com mana suficiente e sem cópia do mesmo `cardId` na recarga (condições textuais das Counter cards podem ser fase posterior).
+- **`on`**: mantém a janela como hoje (oponente pode reagir mesmo sem carta jogável).
+- **`auto`**: o servidor só mantém a janela se o oponente tiver resposta identificável conforme o gatilho: em **`capture_attempt`**, pelo menos uma **Counter** na mão (regras económicas); em **`ignite_reaction`**, Retribution e/ou Counter conforme `eligibleTypes` (condições textuais das Counter em AUTO podem ser fase posterior).
 
 O estado atual vem em cada entrada de `players[].reactionMode` no `state_snapshot`.
-
-### `set_debug_pause` (apenas com `ADMIN_DEBUG_MATCH` ativo)
-
-Ativa/desativa **pausa global da sala** para depuração. Enquanto ativo:
-
-- ações de gameplay são recusadas com `action_failed: "debug_pause_active"`;
-- timers de turno/reação/mulligan não avançam;
-- o cliente deve tratar `debugPauseActive: true` no `state_snapshot` como estado fechado.
-
-```json
-{ "id": "req-dbg-pause-1", "type": "set_debug_pause", "payload": { "paused": true } }
-```
-
-- disponível apenas quando `adminDebugMatch` estiver ativo no snapshot;
-- se `ADMIN_DEBUG_MATCH` estiver desligado no servidor, retorna `error` com `code: "debug_disabled"`.
 
 ### `client_trace` (apenas com `ADMIN_DEBUG_MATCH` ativo)
 
@@ -428,36 +437,40 @@ Payload: `white` e `black` são obrigatórios. Cada lado tem:
 
 ---
 
-## Janela de captura e cadeia Counter
+## Janelas de resposta: captura (`capture_attempt`) e ignição (`ignite_reaction`)
 
-- Captura válida (inclui en passant) pode abrir `capture_attempt` com movimento **pendente** — salvo o modo `reactionMode` do **oponente** (`off` / `auto` sem Counter elegível) fazer o servidor resolver de imediato como se fosse `resolve_reactions` com pilha vazia.  
-- A primeira resposta na cadeia costuma ser **Counter** do oponente.  
-- Reações resolvem em **LIFO**.  
+### Quem abre e quem responde (regra de produto)
+
+- **Abrem janela:** ignição de cartas **Power** e **Continuous** (o servidor abre `ignite_reaction` para o oponente quando aplicável); tentativa de **captura** no xadrez (inclui en passant) abre `capture_attempt` com movimento **pendente**. **Retribution não abre janela** (só entra como carta de resposta).
+- **Podem responder:** em **`capture_attempt`**, só **Counter** (consta em `eligibleTypes`). Em **`ignite_reaction`**, **Retribution** e/ou **Counter** conforme `eligibleTypes`; **Counter** na primeira resposta só quando o catálogo define `MaybeCaptureAttemptOnIgnition` na carta em ignição (hoje **false** para todas até efeitos de captura por ignição existirem).
+
+### `capture_attempt`
+
+- Salvo `reactionMode` do oponente (`off`, ou `auto` sem Retribution/Counter elegível pelas regras económicas) fazer o servidor resolver de imediato com pilha vazia.  
+- A **primeira** resposta é do **oponente** ao atacante: **Counter** (somente).
+- Na cadeia: só **Counter** após **Counter**. Reações resolvem em **LIFO**.
 - Sem reações enfileiradas, `resolve_reactions` aplica a captura pendente.  
 - Timeout da janela de reação no servidor: **30 s** (por omissão na sala).  
 - **Counterattack** e **Blockade**: validação e efeitos conforme regras do servidor (ver [Cards.md](Cards.md)).
 
----
+### `ignite_reaction`
 
-## Janela de ignição (`ignite_reaction`)
-
-- Ignição de **Power** ou **Continuous** com contador de ignição **> 0** abre `ignite_reaction` com `reactionWindow.actor` = quem ignitou. A **primeira** resposta é sempre do **oponente**: carta **Retribution** ou **Extinguish** (outras Powers são rejeitadas neste passo).
-- O modo `reactionMode` do oponente (`off`, ou `auto` sem carta elegível na mão) pode fazer o servidor resolver de imediato com pilha vazia (sem janela aberta).
+- Ignição de **Power** ou **Continuous** quando o motor abre a janela: `reactionWindow.actor` = quem ignitou. A **primeira** resposta é do **oponente**: **Retribution** sempre que constar em `eligibleTypes`; **Counter** só quando `MaybeCaptureAttemptOnIgnition` for **true** no catálogo para a carta em ignição (efeitos ainda não aplicam capturas por carta; o campo existe para o futuro, ex. *Backstab*).
+- O modo `reactionMode` do oponente (`off`, ou `auto` sem carta elegível na mão) pode fazer o servidor resolver de imediato com pilha vazia.
 - Enquanto `ignite_reaction` estiver aberta, `submit_move` é rejeitado.
-- Cadeia após a primeira carta: só **Retribution** pode responder a **Retribution**; após **Extinguish** (Power), só **Retribution** pode responder.
+- Cadeia: só **Retribution** após **Retribution**; só **Counter** após **Counter** (quando Counter for permitido na janela).
 
 ---
 
-## Desconexão e timeout de turno
+## Desconexão
 
 | Situação | Efeito típico |
 |----------|----------------|
 | Ambos desconectam | Partida cancelada (`both_disconnected_cancelled` ou equivalente) |
 | Um desconecta | Orçamento **60 s** de tempo offline **cumulativo** por jogador na partida; vitória do outro (`disconnect_timeout`) no instante `max(detectou + 5 s, detectou + orçamento restante)`; `reconnectDeadlineUnixMs` no snapshot aponta esse instante enquanto o timer está ativo |
 | `leave_match` com oponente na sala | Vitória do oponente (`left_room`) |
-| Timeout de turno | +1 strike no jogador ativo; turno passa; 3 strikes → derrota (`strike_limit`) |
 
-`turnSeconds` no snapshot define o limite por jogada. O cliente deve preferir `turnMainDeadlineUnixMs` / `turnMainPausedRemainingMs` quando presentes para exibir o relógio principal alinhado ao servidor (pausa durante a primeira resposta de `capture_attempt` ou `ignite_reaction`).
+O turno de xadrez é sem limite de tempo. O único cronômetro exposto no cliente é o da fase de mulligan (`mulliganDeadlineUnixMs`).
 
 ---
 

@@ -1,6 +1,16 @@
 package gameplay
 
-import "testing"
+import (
+	"sort"
+	"testing"
+)
+
+// sortedCardIDsForValidation returns a copy of ids sorted lexicographically (test helper).
+func sortedCardIDsForValidation(ids []CardID) []CardID {
+	cp := append([]CardID(nil), ids...)
+	sort.Slice(cp, func(i, j int) bool { return cp[i] < cp[j] })
+	return cp
+}
 
 // --- GrantCaptureBonusMana ---
 
@@ -199,12 +209,12 @@ func TestTickCooldownsRoutesPowerToDeck(t *testing.T) {
 func TestResolveIgnitionClearsSlotAndQueuesEvent(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
 	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}
-	s.IgnitionSlot = IgnitionSlot{Card: card, TurnsRemaining: 0, Occupied: true, ActivationOwner: PlayerA}
+	s.Players[PlayerA].Ignition = IgnitionSlot{Card: card, TurnsRemaining: 0, Occupied: true, ActivationOwner: PlayerA}
 
-	if err := s.ResolveIgnition(true); err != nil {
+	if err := s.ResolveIgnitionFor(PlayerA, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if s.IgnitionSlot.Occupied {
+	if s.Players[PlayerA].Ignition.Occupied {
 		t.Fatal("ignition slot should be cleared")
 	}
 	if len(s.ResolvedQueue) != 1 {
@@ -225,9 +235,9 @@ func TestResolveIgnitionClearsSlotAndQueuesEvent(t *testing.T) {
 func TestResolveIgnitionFailureFlagPreserved(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
 	card := CardInstance{InstanceID: "c1", CardID: "extinguish", ManaCost: 2, Ignition: 0, Cooldown: 2}
-	s.IgnitionSlot = IgnitionSlot{Card: card, TurnsRemaining: 0, Occupied: true, ActivationOwner: PlayerB}
+	s.Players[PlayerB].Ignition = IgnitionSlot{Card: card, TurnsRemaining: 0, Occupied: true, ActivationOwner: PlayerB}
 
-	_ = s.ResolveIgnition(false)
+	_ = s.ResolveIgnitionFor(PlayerB, false)
 	if len(s.ResolvedQueue) != 1 || s.ResolvedQueue[0].Success {
 		t.Fatal("expected success=false in resolved queue")
 	}
@@ -235,7 +245,7 @@ func TestResolveIgnitionFailureFlagPreserved(t *testing.T) {
 
 func TestResolveIgnitionErrorOnEmptySlot(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
-	if err := s.ResolveIgnition(true); err == nil {
+	if err := s.ResolveIgnitionFor(PlayerA, true); err == nil {
 		t.Fatal("expected error when ignition slot is empty")
 	}
 }
@@ -261,7 +271,7 @@ func TestPopResolvedIgnitionsClearsQueue(t *testing.T) {
 func TestPopResolvedIgnitionsOnEmptyQueueReturnsEmpty(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
 	events := s.PopResolvedIgnitions()
-	if events != nil && len(events) != 0 {
+	if len(events) != 0 {
 		t.Fatalf("expected empty slice, got %v", events)
 	}
 }
@@ -270,7 +280,7 @@ func TestPopResolvedIgnitionsOnEmptyQueueReturnsEmpty(t *testing.T) {
 
 func TestSortedCardIDsForValidationSortsLexicographically(t *testing.T) {
 	ids := []CardID{"rook-touch", "bishop-touch", "double-turn", "knight-touch"}
-	sorted := SortedCardIDsForValidation(ids)
+	sorted := sortedCardIDsForValidation(ids)
 	for i := 1; i < len(sorted); i++ {
 		if sorted[i-1] > sorted[i] {
 			t.Fatalf("not sorted at index %d: %s > %s", i, sorted[i-1], sorted[i])
@@ -281,7 +291,7 @@ func TestSortedCardIDsForValidationSortsLexicographically(t *testing.T) {
 func TestSortedCardIDsForValidationDoesNotMutateOriginal(t *testing.T) {
 	ids := []CardID{"z", "a", "m"}
 	original := append([]CardID(nil), ids...)
-	_ = SortedCardIDsForValidation(ids)
+	_ = sortedCardIDsForValidation(ids)
 	for i, id := range ids {
 		if id != original[i] {
 			t.Fatalf("original slice mutated at index %d", i)
@@ -329,45 +339,6 @@ func TestEndTurnIncrementsTurnNumberOnlyAfterB(t *testing.T) {
 	_ = s.EndTurn(PlayerB)
 	if s.TurnNumber != initial+1 {
 		t.Fatalf("expected turn number %d after B's end, got %d", initial+1, s.TurnNumber)
-	}
-}
-
-// --- HandleTurnTimeout ---
-
-func TestHandleTurnTimeoutAddStrike(t *testing.T) {
-	s, _ := NewMatchState(StarterDeck(), StarterDeck())
-	lost, err := s.HandleTurnTimeout(PlayerA)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if lost {
-		t.Fatal("player should not lose after first timeout")
-	}
-	if s.Players[PlayerA].Strikes != 1 {
-		t.Fatalf("expected 1 strike, got %d", s.Players[PlayerA].Strikes)
-	}
-	if s.CurrentTurn != PlayerB {
-		t.Fatal("turn should advance after timeout strike")
-	}
-}
-
-func TestHandleTurnTimeoutThirdStrikeLoses(t *testing.T) {
-	s, _ := NewMatchState(StarterDeck(), StarterDeck())
-	s.Players[PlayerA].Strikes = 2
-
-	lost, err := s.HandleTurnTimeout(PlayerA)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !lost {
-		t.Fatal("player should lose after 3rd strike")
-	}
-}
-
-func TestHandleTurnTimeoutRejectsWrongPlayer(t *testing.T) {
-	s, _ := NewMatchState(StarterDeck(), StarterDeck())
-	if _, err := s.HandleTurnTimeout(PlayerB); err == nil {
-		t.Fatal("expected error for non-current player timeout")
 	}
 }
 

@@ -41,6 +41,31 @@ type Engine struct {
 	ReactionWindow *ReactionWindow
 	reactionStack  []ReactionAction
 	pendingMove    *PendingMoveAction
+	// pendingActivationFX holds server→client activate_card events (effect step after ignition reaches 0).
+	pendingActivationFX []ActivationFXEvent
+}
+
+// ActivationFXEvent is one ignition resolution for client animations (glow + fly to cooldown).
+type ActivationFXEvent struct {
+	Owner   gameplay.PlayerID
+	CardID  gameplay.CardID
+	Success bool
+}
+
+// PullActivationFXEvents returns and clears pending activation broadcast events.
+func (e *Engine) PullActivationFXEvents() []ActivationFXEvent {
+	out := e.pendingActivationFX
+	e.pendingActivationFX = nil
+	return out
+}
+
+// appendActivationFX records one server→client activate_card animation (effect step: success/fail, then cooldown).
+func (e *Engine) appendActivationFX(owner gameplay.PlayerID, id gameplay.CardID, success bool) {
+	e.pendingActivationFX = append(e.pendingActivationFX, ActivationFXEvent{
+		Owner:   owner,
+		CardID:  id,
+		Success: success,
+	})
 }
 
 // NewEngine wires chess state, gameplay state and card resolvers into a single match runtime.
@@ -121,10 +146,11 @@ func (e *Engine) maybeOpenIgniteReactionWindow(activator gameplay.PlayerID) {
 	if e.ReactionWindow != nil && e.ReactionWindow.Open {
 		return
 	}
-	if !e.State.IgnitionSlot.Occupied {
+	slot := &e.State.Players[activator].Ignition
+	if !slot.Occupied {
 		return
 	}
-	card := e.State.IgnitionSlot.Card
+	card := slot.Card
 	cardDef, ok := gameplay.CardDefinitionByID(card.CardID)
 	if !ok {
 		return
@@ -132,7 +158,11 @@ func (e *Engine) maybeOpenIgniteReactionWindow(activator gameplay.PlayerID) {
 	if cardDef.Type != gameplay.CardTypePower && cardDef.Type != gameplay.CardTypeContinuous {
 		return
 	}
-	e.OpenReactionWindow("ignite_reaction", activator, []gameplay.CardType{gameplay.CardTypeRetribution, gameplay.CardTypePower})
+	eligible := []gameplay.CardType{gameplay.CardTypeRetribution}
+	if gameplay.MaybeCaptureAttemptOnIgnition(card.CardID) {
+		eligible = append(eligible, gameplay.CardTypeCounter)
+	}
+	e.OpenReactionWindow("ignite_reaction", activator, eligible)
 }
 
 // ResolvePendingEffect applies the next queued target-dependent effect for the player.
@@ -210,6 +240,7 @@ func (e *Engine) processResolvedIgnitions() error {
 		if err := e.handleResolvedEffect(&evCopy); err != nil {
 			return err
 		}
+		e.appendActivationFX(evCopy.Owner, evCopy.Card.CardID, evCopy.Success)
 		e.State.SendCardToCooldown(evCopy.Owner, evCopy.Card)
 	}
 	return nil
@@ -231,12 +262,65 @@ func (e *Engine) ActivatePlayerSkill(pid gameplay.PlayerID) error {
 	return e.StartTurn(e.State.CurrentTurn)
 }
 
+// pieceRefFromChessPiece converts a board piece to the compact graveyard descriptor (e.g. wP, bQ).
+// Returns false for an empty square or unsupported type.
+func pieceRefFromChessPiece(p chess.Piece) (gameplay.PieceRef, bool) {
+	if p.IsEmpty() {
+		return gameplay.PieceRef{}, false
+	}
+	color := "w"
+	if p.Color == chess.Black {
+		color = "b"
+	}
+	var typ string
+	switch p.Type {
+	case chess.Pawn:
+		typ = "P"
+	case chess.Knight:
+		typ = "N"
+	case chess.Bishop:
+		typ = "B"
+	case chess.Rook:
+		typ = "R"
+	case chess.Queen:
+		typ = "Q"
+	case chess.King:
+		typ = "K"
+	default:
+		return gameplay.PieceRef{}, false
+	}
+	return gameplay.PieceRef{Color: color, Type: typ}, true
+}
+
 // applyMoveCore applies a validated move without opening capture trigger windows.
 // It is used by normal non-capture flow and pending-move finalization.
 func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 	captureForMana := e.isCaptureAttempt(pid, m)
+	var captured gameplay.PieceRef
+	haveCaptured := false
+	if captureForMana {
+		fromPiece := e.Chess.PieceAt(m.From)
+		target := e.Chess.PieceAt(m.To)
+		// En passant: captured pawn sits on EnPassant.PawnPos, not on m.To.
+		if fromPiece.Type == chess.Pawn && target.IsEmpty() && m.From.Col != m.To.Col &&
+			e.Chess.EnPassant.Valid && m.To == e.Chess.EnPassant.Target {
+			ep := e.Chess.PieceAt(e.Chess.EnPassant.PawnPos)
+			if ref, ok := pieceRefFromChessPiece(ep); ok && ep.Color != fromPiece.Color {
+				captured = ref
+				haveCaptured = true
+			}
+		} else if !target.IsEmpty() && target.Color != fromPiece.Color {
+			if ref, ok := pieceRefFromChessPiece(target); ok {
+				captured = ref
+				haveCaptured = true
+			}
+		}
+	}
 	if err := e.Chess.ApplyMove(m); err != nil {
 		return err
+	}
+	if haveCaptured {
+		e.State.AddToGraveyard(pid, captured)
 	}
 	if captureForMana {
 		e.State.GrantManaForChessCapture(pid)

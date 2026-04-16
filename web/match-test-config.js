@@ -19,29 +19,29 @@ export const MATCH_TEST_AUTO_APPLY = false;
 export const MATCH_TEST_AUTO_CONFIRM_MULLIGAN = false;
 
 if (typeof globalThis !== "undefined" && globalThis.__powerChessMatchTest === undefined) {
-    globalThis.__powerChessMatchTest = {};
+  globalThis.__powerChessMatchTest = {};
 }
 
 /**
  * @returns {boolean} Whether to auto-send `debug_match_fixture` (console or file default).
  */
 export function matchTestAutoApplyEnabled() {
-    const o = globalThis.__powerChessMatchTest;
-    if (o && typeof o.autoApply === "boolean") {
-        return o.autoApply;
-    }
-    return MATCH_TEST_AUTO_APPLY;
+  const o = globalThis.__powerChessMatchTest;
+  if (o && typeof o.autoApply === "boolean") {
+    return o.autoApply;
+  }
+  return MATCH_TEST_AUTO_APPLY;
 }
 
 /**
  * @returns {boolean} Whether to auto-send `confirm_mulligan` after the fixture (console or file default).
  */
 export function matchTestAutoConfirmMulliganEnabled() {
-    const o = globalThis.__powerChessMatchTest;
-    if (o && typeof o.autoConfirmMulligan === "boolean") {
-        return o.autoConfirmMulligan;
-    }
-    return MATCH_TEST_AUTO_CONFIRM_MULLIGAN;
+  const o = globalThis.__powerChessMatchTest;
+  if (o && typeof o.autoConfirmMulligan === "boolean") {
+    return o.autoConfirmMulligan;
+  }
+  return MATCH_TEST_AUTO_CONFIRM_MULLIGAN;
 }
 
 /**
@@ -49,26 +49,26 @@ export function matchTestAutoConfirmMulliganEnabled() {
  * @type {readonly string[]}
  */
 export const DEFAULT_DECK_20 = Object.freeze([
-    "energy-gain",
-    "energy-gain",
-    "energy-gain",
-    "knight-touch",
-    "knight-touch",
-    "bishop-touch",
-    "bishop-touch",
-    "rook-touch",
-    "rook-touch",
-    "sacrifice-of-the-masses",
-    "backstab",
-    "backstab",
-    "extinguish",
-    "extinguish",
-    "clairvoyance",
-    "save-it-for-later",
-    "retaliate",
-    "retaliate",
-    "retaliate",
-    "counterattack",
+  "energy-gain",
+  "energy-gain",
+  "energy-gain",
+  "knight-touch",
+  "knight-touch",
+  "bishop-touch",
+  "bishop-touch",
+  "rook-touch",
+  "rook-touch",
+  "sacrifice-of-the-masses",
+  "backstab",
+  "backstab",
+  "extinguish",
+  "extinguish",
+  "clairvoyance",
+  "save-it-for-later",
+  "retaliate",
+  "retaliate",
+  "retaliate",
+  "counterattack",
 ]);
 
 /**
@@ -78,23 +78,23 @@ export const DEFAULT_DECK_20 = Object.freeze([
  * @returns {{ test_environment: boolean, white: object, black: object }}
  */
 export function buildMatchDebugFixturePayload() {
-    return {
-        test_environment: true,
-        white: {
-            deck: [...DEFAULT_DECK_20],
-            hand: ["knight-touch", "energy-gain", "bishop-touch"],
-            mana: 5,
-            maxMana: 10,
-            energizedMana: 0,
-            maxEnergized: 20,
-        },
-        black: {
-            deck: [...DEFAULT_DECK_20],
-            hand: ["retaliate", "backstab", "clairvoyance"],
-            mana: 4,
-            maxMana: 10,
-            energizedMana: 0,
-            maxEnergized: 20,
-        },
-    };
+  return {
+    test_environment: true,
+    white: {
+      deck: [...DEFAULT_DECK_20],
+      hand: ["knight-touch", "counterattack", "retaliate"],
+      mana: 8,
+      maxMana: 10,
+      energizedMana: 0,
+      maxEnergized: 20,
+    },
+    black: {
+      deck: [...DEFAULT_DECK_20],
+      hand: ["knight-touch", "counterattack", "retaliate"],
+      mana: 8,
+      maxMana: 10,
+      energizedMana: 0,
+      maxEnergized: 20,
+    },
+  };
 }

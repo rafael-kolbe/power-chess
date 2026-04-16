@@ -69,6 +69,7 @@ func (e *Engine) ExportState() PersistedEngineState {
 // NewEngineFromState recreates a runtime engine from a persisted snapshot.
 func NewEngineFromState(snapshot PersistedEngineState) (*Engine, error) {
 	matchState := snapshot.Match
+	matchState.NormalizeLegacyIgnition()
 	chessState := snapshot.Chess
 	e := NewEngine(&matchState, &chessState)
 	if snapshot.ReactionWindow != nil {

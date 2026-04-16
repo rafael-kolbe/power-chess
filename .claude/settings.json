@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n \"reactionBudget\\\\|pauseMainTurn\\\\|noteReaction\\\\|resumeMainTurn\\\\|computeClock\\\\|pausedTurn\\\\|reactionDeadlineFor\\\\|stop_timer\\\\|resume_timer\\\\|TimerControl\" /home/shiraori/Projetos/Personal/power-chess/.claude/worktrees/agent-a599a604/internal/server/*.go)",
+      "Bash(ls /home/shiraori/Projetos/Personal/power-chess/.claude/worktrees/agent-a599a604/internal/server/ws*)",
+      "Bash(git worktree *)",
+      "Bash(git branch *)",
+      "Bash(grep -n \"cooldownPreview\\\\|CooldownEntry\" /home/shiraori/Projetos/Personal/power-chess/internal/gameplay/*.go)",
+      "Bash(grep -rn \"CooldownPreview\" /home/shiraori/Projetos/Personal/power-chess/internal/server/*.go)",
+      "Bash(node --check web/app.js)",
+      "Read(//logs/**)",
+      "Read(//home/shiraori/**)"
+    ]
+  }
+}

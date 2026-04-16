@@ -14,7 +14,6 @@ const (
 	DefaultInitialDraw          = 3
 	DefaultDrawCardManaCost     = 2
 	DefaultExtraManaPerTurnCap  = 1
-	DefaultStrikeLimit          = 3
 	DefaultIgnitionSlotCapacity = 1
 )
 
@@ -74,18 +73,21 @@ type PlayerState struct {
 	Banished  []CardInstance
 
 	Graveyard []PieceRef
-	Strikes   int
+	// Ignition is this player's ignition zone (one card at a time; independent of the opponent's).
+	Ignition IgnitionSlot `json:"ignition,omitempty"`
 }
 
 // MatchState is the main gameplay aggregate for turns, resources and card lifecycle.
 type MatchState struct {
-	Players map[PlayerID]*PlayerState
-
+	Players     map[PlayerID]*PlayerState
 	CurrentTurn PlayerID
 	TurnNumber  int
 	TurnSeconds int
 
-	IgnitionSlot  IgnitionSlot
+	// LegacyIgnitionSlot is only used when unmarshaling old persisted JSON (single global slot).
+	// NormalizeLegacyIgnition copies it into Players[owner].Ignition and clears this field.
+	LegacyIgnitionSlot IgnitionSlot `json:"ignitionSlot,omitempty"`
+
 	ResolvedQueue []ResolvedIgnitionEvent
 	Started       bool
 
@@ -134,6 +136,29 @@ func NewMatchState(deckA, deckB []CardInstance) (*MatchState, error) {
 	return s, nil
 }
 
+// OppositePlayer returns the other seat in a two-player match.
+func OppositePlayer(pid PlayerID) PlayerID {
+	if pid == PlayerA {
+		return PlayerB
+	}
+	return PlayerA
+}
+
+// NormalizeLegacyIgnition migrates pre-per-player ignition persistence into Players[].Ignition.
+func (s *MatchState) NormalizeLegacyIgnition() {
+	if !s.LegacyIgnitionSlot.Occupied {
+		return
+	}
+	owner := s.LegacyIgnitionSlot.ActivationOwner
+	if owner != PlayerA && owner != PlayerB {
+		owner = PlayerA
+	}
+	if p := s.Players[owner]; p != nil {
+		p.Ignition = s.LegacyIgnitionSlot
+	}
+	s.LegacyIgnitionSlot = IgnitionSlot{}
+}
+
 // StartTurn applies start-of-turn updates for the active player (+1 mana, respecting max mana pool).
 func (s *MatchState) StartTurn(pid PlayerID) error {
 	if s.CurrentTurn != pid {
@@ -175,22 +200,6 @@ func (s *MatchState) EndTurn(pid PlayerID) error {
 		s.TurnNumber++
 	}
 	return nil
-}
-
-// HandleTurnTimeout applies a strike to the active player and returns whether they lost.
-func (s *MatchState) HandleTurnTimeout(pid PlayerID) (lost bool, err error) {
-	if s.CurrentTurn != pid {
-		return false, errors.New("timeout for non-current player")
-	}
-	p := s.Players[pid]
-	p.Strikes++
-	if p.Strikes >= DefaultStrikeLimit {
-		return true, nil
-	}
-	if err := s.EndTurn(pid); err != nil {
-		return false, err
-	}
-	return false, nil
 }
 
 // GrantCaptureBonusMana grants capped extra mana for capture-triggered bonuses.
@@ -245,7 +254,7 @@ func (s *MatchState) ActivateCard(pid PlayerID, handIndex int) error {
 		return errors.New("invalid hand index")
 	}
 	card := p.Hand[handIndex]
-	if s.IgnitionSlot.Occupied {
+	if p.Ignition.Occupied {
 		return errors.New("ignition slot occupied")
 	}
 	if p.Mana < card.ManaCost {
@@ -255,7 +264,7 @@ func (s *MatchState) ActivateCard(pid PlayerID, handIndex int) error {
 	s.addEnergizedMana(pid, card.ManaCost)
 
 	p.Hand = append(p.Hand[:handIndex], p.Hand[handIndex+1:]...)
-	s.IgnitionSlot = IgnitionSlot{
+	p.Ignition = IgnitionSlot{
 		Card:            card,
 		TurnsRemaining:  card.Ignition,
 		Occupied:        true,
@@ -306,21 +315,21 @@ func (s *MatchState) routeCardFinishedCooldown(pid PlayerID, card CardInstance) 
 	p.Deck = append(p.Deck, card)
 }
 
-// ResolveIgnition finalizes ignition and appends a success/failure event to the activation queue.
-func (s *MatchState) ResolveIgnition(success bool) error {
-	if !s.IgnitionSlot.Occupied {
+// ResolveIgnitionFor finalizes ignition for one player's slot and appends a success/failure event.
+func (s *MatchState) ResolveIgnitionFor(owner PlayerID, success bool) error {
+	p := s.Players[owner]
+	if p == nil || !p.Ignition.Occupied {
 		return errors.New("ignition slot is empty")
 	}
-	owner := s.IgnitionSlot.ActivationOwner
-
+	card := p.Ignition.Card
 	// Effect application is owned by power resolvers later.
 	_ = success
 	s.ResolvedQueue = append(s.ResolvedQueue, ResolvedIgnitionEvent{
 		Owner:   owner,
-		Card:    s.IgnitionSlot.Card,
+		Card:    card,
 		Success: success,
 	})
-	s.IgnitionSlot = IgnitionSlot{}
+	p.Ignition = IgnitionSlot{}
 	return nil
 }
 
@@ -331,20 +340,17 @@ func (s *MatchState) PopResolvedIgnitions() []ResolvedIgnitionEvent {
 	return ev
 }
 
-// tickIgnition decrements the ignition counter only when the player starting the turn
-// is the one who activated the card (ActivationOwner). Opponent turn starts do not tick it.
+// tickIgnition decrements this player's ignition counter at the start of their turn.
 func (s *MatchState) tickIgnition(pid PlayerID) {
-	if !s.IgnitionSlot.Occupied {
+	p := s.Players[pid]
+	if p == nil || !p.Ignition.Occupied {
 		return
 	}
-	if s.IgnitionSlot.ActivationOwner != pid {
-		return
+	if p.Ignition.TurnsRemaining > 0 {
+		p.Ignition.TurnsRemaining--
 	}
-	if s.IgnitionSlot.TurnsRemaining > 0 {
-		s.IgnitionSlot.TurnsRemaining--
-	}
-	if s.IgnitionSlot.TurnsRemaining == 0 {
-		_ = s.ResolveIgnition(true)
+	if p.Ignition.TurnsRemaining == 0 {
+		_ = s.ResolveIgnitionFor(pid, true)
 	}
 }
 

@@ -132,7 +132,7 @@ func NewServerWithStore(store RoomStore) *Server {
 		adminDebugMatch: adminDebugMatchFromEnv(),
 	}
 	go s.runReactionTimeoutLoop()
-	go s.runTurnTimeoutLoop()
+	go s.runMulliganTimeoutLoop()
 	go s.runPostMatchTimeoutLoop()
 	go s.runRoomCleanupLoop()
 	return s
@@ -195,7 +195,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		authUserID: authUID,
 		connID:     fmt.Sprintf("%016x", rand.Uint64()),
 	}
-	c.send(Envelope{Type: MessageHello})
+	_ = c.send(Envelope{Type: MessageHello})
 	c.readLoop()
 }
 
@@ -273,16 +273,14 @@ func (c *Client) handle(env Envelope) error {
 		return c.handleLeaveMatch(env)
 	case MessageSubmitMove:
 		return c.handleSubmitMove(env)
-	case MessageActivateCard:
-		return c.handleActivateCard(env)
+	case MessageIgniteCard:
+		return c.handleIgniteCard(env)
 	case MessageDrawCard:
 		return c.handleDrawCard(env)
 	case MessageConfirmMulligan:
 		return c.handleConfirmMulligan(env)
 	case MessageSetReactionMode:
 		return c.handleSetReactionMode(env)
-	case MessageSetDebugPause:
-		return c.handleSetDebugPause(env)
 	case MessageResolvePending:
 		return c.handleResolvePending(env)
 	case MessageQueueReaction:
@@ -297,6 +295,10 @@ func (c *Client) handle(env Envelope) error {
 		return c.handleDebugMatchFixture(env)
 	case MessageClientTrace:
 		return c.handleClientTrace(env)
+	case MessageClientFxHold:
+		return c.handleClientFxHold(env)
+	case MessageClientFxRelease:
+		return c.handleClientFxRelease(env)
 	default:
 		return protocolError{code: ErrorUnknownMessageType, message: "unknown message type"}
 	}
@@ -318,13 +320,51 @@ func (c *Client) handleClientTrace(env Envelope) error {
 	if text == "" {
 		return c.sendAck(env, "ok", "", "")
 	}
-	const maxRunes = 12000
-	r := []rune(text)
-	if len(r) > maxRunes {
-		text = string(r[:maxRunes]) + "...(truncated)"
-	}
-	log.Printf("client_trace room=%s player=%s %s", c.room.RoomID, c.playerID, text)
+	line := compactClientTraceLogLine(text)
+	log.Printf("client_trace room=%s player=%s %s", c.room.RoomID, c.playerID, line)
 	return c.sendAck(env, "ok", "", "")
+}
+
+// handleClientFxHold freezes match timers on the server until paired client_fx_release messages
+// drain the nesting depth (one hold per client animation scope is expected).
+func (c *Client) handleClientFxHold(env Envelope) error {
+	if c.room == nil {
+		return protocolError{code: ErrorJoinRequired, message: "join_match is required before client_fx_hold"}
+	}
+	if c.playerID == "" {
+		return protocolError{code: ErrorJoinRequired, message: "join_match is required before client_fx_hold"}
+	}
+	now := time.Now().UTC()
+	if err := c.room.Execute(func() error {
+		c.room.beginClientFxHoldUnsafe(now)
+		return nil
+	}); err != nil {
+		return err
+	}
+	return c.sendAck(env, "ok", "", "")
+}
+
+// handleClientFxRelease pops one level of client FX hold and shifts deadlines when the outermost
+// hold ends; broadcasts a fresh state_snapshot so clients see updated timer instants.
+func (c *Client) handleClientFxRelease(env Envelope) error {
+	if c.room == nil {
+		return protocolError{code: ErrorJoinRequired, message: "join_match is required before client_fx_release"}
+	}
+	if c.playerID == "" {
+		return protocolError{code: ErrorJoinRequired, message: "join_match is required before client_fx_release"}
+	}
+	now := time.Now().UTC()
+	if err := c.room.Execute(func() error {
+		c.room.endClientFxHoldUnsafe(now)
+		return nil
+	}); err != nil {
+		return err
+	}
+	_ = c.sendAck(env, "ok", "", "")
+	_ = c.server.persistRoom(context.Background(), c.room)
+	c.room.TouchActivity()
+	c.room.BroadcastSnapshot()
+	return nil
 }
 
 func (c *Client) handleStayInRoom(env Envelope) error {
@@ -524,17 +564,12 @@ func (c *Client) handleSubmitMove(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
-		if c.room.debugPauseActive {
-			return protocolError{code: ErrorActionFailed, message: "debug_pause_active"}
-		}
 		if err := c.room.Engine.SubmitMove(c.playerID, mv); err != nil {
 			return err
 		}
 		if err := c.room.maybeAutoResolveCaptureReactionUnsafe(); err != nil {
 			return err
 		}
-		c.room.pauseMainTurnIfReactionWindowOpenUnsafe(time.Now())
-		c.room.syncTurnDeadlineAfterActionUnsafe(time.Now())
 		return nil
 	}); err != nil {
 		if errors.Is(err, errDuplicateRequest) {
@@ -550,12 +585,12 @@ func (c *Client) handleSubmitMove(env Envelope) error {
 	return nil
 }
 
-// handleActivateCard activates a hand card for ignition.
-func (c *Client) handleActivateCard(env Envelope) error {
+// handleIgniteCard moves a hand card into the player's ignition zone (opens reactions when applicable).
+func (c *Client) handleIgniteCard(env Envelope) error {
 	if c.room == nil {
-		return protocolError{code: ErrorJoinRequired, message: "join_match is required before activate_card"}
+		return protocolError{code: ErrorJoinRequired, message: "join_match is required before ignite_card"}
 	}
-	var p ActivateCardPayload
+	var p IgniteCardPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		return err
 	}
@@ -567,24 +602,26 @@ func (c *Client) handleActivateCard(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
-		if c.room.debugPauseActive {
-			return protocolError{code: ErrorActionFailed, message: "debug_pause_active"}
-		}
 		_, prevStack, hadOpenWindow := c.room.Engine.ReactionWindowSnapshot()
 		if err := c.room.Engine.ActivateCard(c.playerID, p.HandIndex); err != nil {
 			return err
 		}
+		now := time.Now()
 		if hadOpenWindow && prevStack == 0 {
 			_, newStack, ok := c.room.Engine.ReactionWindowSnapshot()
 			if ok && newStack > 0 {
-				c.room.noteReactionChainStartedUnsafe()
+				c.room.NoteReactionChainExtendedUnsafe(now)
 			}
 		}
 		if err := c.room.maybeAutoResolveIgniteReactionUnsafe(); err != nil {
 			return err
 		}
-		c.room.pauseMainTurnIfReactionWindowOpenUnsafe(time.Now())
-		c.room.syncTurnDeadlineAfterActionUnsafe(time.Now())
+		if err := c.room.maybeAutoFinalizeIgniteChainIfStuckUnsafe(); err != nil {
+			return err
+		}
+		if err := c.room.maybeAutoFinalizeCounterChainIfStuckUnsafe(); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		if errors.Is(err, errDuplicateRequest) {
@@ -613,13 +650,9 @@ func (c *Client) handleDrawCard(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
-		if c.room.debugPauseActive {
-			return protocolError{code: ErrorActionFailed, message: "debug_pause_active"}
-		}
 		if err := c.room.Engine.DrawCard(c.playerID); err != nil {
 			return err
 		}
-		c.room.syncTurnDeadlineAfterActionUnsafe(time.Now())
 		return nil
 	}); err != nil {
 		if errors.Is(err, errDuplicateRequest) {
@@ -656,13 +689,9 @@ func (c *Client) handleResolvePending(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
-		if c.room.debugPauseActive {
-			return protocolError{code: ErrorActionFailed, message: "debug_pause_active"}
-		}
 		if err := c.room.Engine.ResolvePendingEffect(c.playerID, target); err != nil {
 			return err
 		}
-		c.room.syncTurnDeadlineAfterActionUnsafe(time.Now())
 		return nil
 	}); err != nil {
 		if errors.Is(err, errDuplicateRequest) {
@@ -695,25 +724,57 @@ func (c *Client) handleQueueReaction(env Envelope) error {
 	if !c.room.BothPlayersConnected() {
 		return protocolError{code: ErrorActionFailed, message: "waiting_for_opponent"}
 	}
+
+	// stagingSnap holds a snapshot taken while the card is still on the reaction stack, before
+	// auto-finalization resolves it. If auto-finalization will happen immediately (chain stuck),
+	// the frontend would never see the staged state — we broadcast it first so the glow/fly
+	// animation has a DOM element to attach to.
+	type stagingSnap struct {
+		A, B, Generic StateSnapshotPayload
+	}
+	var staging *stagingSnap
+
 	if err := c.room.Execute(func() error {
 		requestKey := c.requestKey(env)
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
-		if c.room.debugPauseActive {
-			return protocolError{code: ErrorActionFailed, message: "debug_pause_active"}
-		}
 		_, prevStack, _ := c.room.Engine.ReactionWindowSnapshot()
 		if err := c.room.Engine.QueueReactionCard(c.playerID, p.HandIndex, target); err != nil {
 			return err
 		}
-		if prevStack == 0 {
-			c.room.noteReactionChainStartedUnsafe()
+		now := time.Now()
+		// Save former responder's budget and arm new deadline for the new responder.
+		// Also handles the first-reaction case (prevStack==0) by arming the initial deadline.
+		c.room.NoteReactionChainExtendedUnsafe(now)
+		_ = prevStack
+
+		// Detect if auto-finalization will immediately clear the stack. If so, capture a snapshot
+		// with the card still staged so the client can show it in the ignition zone during animation.
+		// This must be done before maybeAutoFinalize* runs — after that the stack is empty.
+		if rw, sz, ok := c.room.Engine.ReactionWindowSnapshot(); ok && rw.Open && sz > 0 {
+			if top, topOK := c.room.Engine.ReactionStackTopSnapshot(); topOK {
+				next := oppositePlayer(top.Owner)
+				mode := c.room.reactionModeUnsafe(next)
+				canExtend := (mode == ReactionModeOn || mode == ReactionModeAuto) &&
+					((rw.Trigger == "ignite_reaction" && c.room.Engine.CanPlayerExtendIgniteChain(next)) ||
+						(rw.Trigger == "capture_attempt" && c.room.Engine.CanPlayerExtendCaptureReactionChain(next)))
+				if !canExtend {
+					staging = &stagingSnap{
+						A:       c.room.SnapshotForPlayer(gameplay.PlayerA),
+						B:       c.room.SnapshotForPlayer(gameplay.PlayerB),
+						Generic: c.room.SnapshotForPlayer(""),
+					}
+				}
+			}
 		}
+
 		if err := c.room.maybeAutoFinalizeIgniteChainIfStuckUnsafe(); err != nil {
 			return err
 		}
-		c.room.syncTurnDeadlineAfterActionUnsafe(time.Now())
+		if err := c.room.maybeAutoFinalizeCounterChainIfStuckUnsafe(); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		if errors.Is(err, errDuplicateRequest) {
@@ -726,6 +787,10 @@ func (c *Client) handleQueueReaction(env Envelope) error {
 	c.room.TouchActivity()
 	if err := c.sendAck(env, "queued", "", "reaction card queued"); err != nil {
 		return err
+	}
+	// Broadcast the staged state first (card visible in ignition zone), then the resolved state.
+	if staging != nil {
+		c.room.broadcastPrecomputedSnapshots(staging.A, staging.B, staging.Generic)
 	}
 	c.room.BroadcastSnapshot()
 	return nil
@@ -744,14 +809,14 @@ func (c *Client) handleResolveReactions(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
-		if c.room.debugPauseActive {
-			return protocolError{code: ErrorActionFailed, message: "debug_pause_active"}
-		}
+		now := time.Now()
+		// Save the current responder's remaining budget before resolving.
+		c.room.NoteReactionResolvedUnsafe(now)
 		if err := c.room.Engine.ResolveReactionStack(); err != nil {
 			return err
 		}
 		c.room.reactionDeadline = time.Time{}
-		c.room.resumeMainTurnAfterReactionUnsafe(time.Now())
+		c.room.reactionBudgetRemaining = 0
 		return nil
 	}); err != nil {
 		if errors.Is(err, errDuplicateRequest) {
@@ -825,9 +890,6 @@ func (c *Client) handleConfirmMulligan(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
-		if c.room.debugPauseActive {
-			return protocolError{code: ErrorActionFailed, message: "debug_pause_active"}
-		}
 		done, err := c.room.Engine.State.ConfirmMulligan(c.playerID, p.HandIndices)
 		if err != nil {
 			return err
@@ -837,7 +899,7 @@ func (c *Client) handleConfirmMulligan(env Envelope) error {
 			if err := c.room.Engine.StartTurn(gameplay.PlayerA); err != nil {
 				return err
 			}
-			c.room.resetTurnDeadlineUnsafe(time.Now())
+			c.room.resetReactionBudgetsUnsafe()
 			return nil
 		}
 		return nil
@@ -846,38 +908,6 @@ func (c *Client) handleConfirmMulligan(env Envelope) error {
 			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
 		}
 		return protocolError{code: ErrorActionFailed, message: err.Error()}
-	}
-	_ = c.sendAck(env, "ok", "", "")
-	_ = c.server.persistRoom(context.Background(), c.room)
-	c.room.TouchActivity()
-	c.room.BroadcastSnapshot()
-	return nil
-}
-
-// handleSetDebugPause toggles room-wide debug pause (ADMIN_DEBUG_MATCH only).
-func (c *Client) handleSetDebugPause(env Envelope) error {
-	if !c.server.adminDebugMatch {
-		return protocolError{code: ErrorDebugDisabled, message: "admin_debug_match_disabled"}
-	}
-	if c.room == nil {
-		return protocolError{code: ErrorJoinRequired, message: "join_match is required before set_debug_pause"}
-	}
-	var p SetDebugPausePayload
-	if err := json.Unmarshal(env.Payload, &p); err != nil {
-		return err
-	}
-	if err := c.room.Execute(func() error {
-		requestKey := c.requestKey(env)
-		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
-			return errDuplicateRequest
-		}
-		c.room.setDebugPauseUnsafe(p.Paused, time.Now())
-		return nil
-	}); err != nil {
-		if errors.Is(err, errDuplicateRequest) {
-			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
-		}
-		return err
 	}
 	_ = c.sendAck(env, "ok", "", "")
 	_ = c.server.persistRoom(context.Background(), c.room)
@@ -1032,7 +1062,7 @@ func (s *Server) runReactionTimeoutLoop() {
 	}
 }
 
-func (s *Server) runTurnTimeoutLoop() {
+func (s *Server) runMulliganTimeoutLoop() {
 	t := time.NewTicker(250 * time.Millisecond)
 	defer t.Stop()
 	for now := range t.C {
@@ -1053,16 +1083,6 @@ func (s *Server) runTurnTimeoutLoop() {
 				room.TouchActivity()
 				room.BroadcastSnapshot()
 				continue
-			}
-			resolved, err := room.ResolveTurnTimeoutIfExpired(now)
-			if err != nil {
-				s.telemetry.ObserveError(ErrorActionFailed)
-				continue
-			}
-			if resolved {
-				_ = s.persistRoom(context.Background(), room)
-				room.TouchActivity()
-				room.BroadcastSnapshot()
 			}
 		}
 	}

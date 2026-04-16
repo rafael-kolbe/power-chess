@@ -35,7 +35,7 @@ func dialAndHello(t *testing.T, wsURL string) *websocket.Conn {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	t.Cleanup(func() { c.Close() })
+	t.Cleanup(func() { _ = c.Close() })
 	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
 	_, _, _ = c.ReadMessage()          // hello
 	_ = c.SetReadDeadline(time.Time{}) // clear deadline
@@ -181,7 +181,7 @@ func TestHandleHealthReturnsOK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("health request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
@@ -419,20 +419,20 @@ func TestHandleSubmitMoveRejectsIllegalMove(t *testing.T) {
 	_ = env
 }
 
-// --- handleActivateCard ---
+// --- handleIgniteCard ---
 
-func TestHandleActivateCardRequiresJoin(t *testing.T) {
+func TestHandleIgniteCardRequiresJoin(t *testing.T) {
 	_, wsURL := wsSetup(t)
 	c := dialAndHello(t, wsURL)
 
 	sendEnv(t, c, Envelope{
 		ID:      "ac1",
-		Type:    MessageActivateCard,
-		Payload: MustPayload(ActivateCardPayload{HandIndex: 0}),
+		Type:    MessageIgniteCard,
+		Payload: MustPayload(IgniteCardPayload{HandIndex: 0}),
 	})
 	env, found := drainUntilType(t, c, MessageError, 5)
 	if !found {
-		t.Fatal("expected error for activate_card without join")
+		t.Fatal("expected error for ignite_card without join")
 	}
 	var ep ErrorPayload
 	_ = json.Unmarshal(env.Payload, &ep)
@@ -441,7 +441,7 @@ func TestHandleActivateCardRequiresJoin(t *testing.T) {
 	}
 }
 
-func TestHandleActivateCardSucceeds(t *testing.T) {
+func TestHandleIgniteCardSucceeds(t *testing.T) {
 	t.Setenv("ADMIN_DEBUG_MATCH", "1")
 	_, wsURL := wsSetup(t)
 	cA, cB := joinTwoPlayers(t, wsURL, "920")
@@ -451,15 +451,15 @@ func TestHandleActivateCardSucceeds(t *testing.T) {
 	// knight-touch is at hand index 0 for white; ignition=0 so it resolves immediately.
 	sendEnv(t, cA, Envelope{
 		ID:      "ac2",
-		Type:    MessageActivateCard,
-		Payload: MustPayload(ActivateCardPayload{HandIndex: 0}),
+		Type:    MessageIgniteCard,
+		Payload: MustPayload(IgniteCardPayload{HandIndex: 0}),
 	})
 	if _, found := drainUntilType(t, cA, MessageAck, 10); !found {
-		t.Fatal("expected ack for activate_card")
+		t.Fatal("expected ack for ignite_card")
 	}
 }
 
-func TestHandleActivateCardRejectsInvalidIndex(t *testing.T) {
+func TestHandleIgniteCardRejectsInvalidIndex(t *testing.T) {
 	t.Setenv("ADMIN_DEBUG_MATCH", "1")
 	_, wsURL := wsSetup(t)
 	cA, cB := joinTwoPlayers(t, wsURL, "921")
@@ -468,8 +468,8 @@ func TestHandleActivateCardRejectsInvalidIndex(t *testing.T) {
 
 	sendEnv(t, cA, Envelope{
 		ID:      "ac3",
-		Type:    MessageActivateCard,
-		Payload: MustPayload(ActivateCardPayload{HandIndex: 99}),
+		Type:    MessageIgniteCard,
+		Payload: MustPayload(IgniteCardPayload{HandIndex: 99}),
 	})
 	env, found := drainUntilType(t, cA, MessageError, 10)
 	if !found {
@@ -758,94 +758,6 @@ func TestHandleSetReactionModeSucceeds(t *testing.T) {
 	_ = cB
 }
 
-// --- set_debug_pause ---
-
-func TestHandleSetDebugPauseDisabledWithoutEnv(t *testing.T) {
-	_, wsURL := wsSetup(t)
-	c := dialAndHello(t, wsURL)
-	sendEnv(t, c, Envelope{
-		ID:      "sdp-off-1",
-		Type:    MessageSetDebugPause,
-		Payload: MustPayload(SetDebugPausePayload{Paused: true}),
-	})
-	env, found := drainUntilType(t, c, MessageError, 5)
-	if !found {
-		t.Fatal("expected error for set_debug_pause when admin debug is disabled")
-	}
-	var ep ErrorPayload
-	_ = json.Unmarshal(env.Payload, &ep)
-	if ep.Code != ErrorDebugDisabled {
-		t.Fatalf("expected debug_disabled, got %s", ep.Code)
-	}
-}
-
-func TestHandleSetDebugPauseBlocksGameplayUntilResumed(t *testing.T) {
-	t.Setenv("ADMIN_DEBUG_MATCH", "1")
-	_, wsURL := wsSetup(t)
-	cA, cB := joinTwoPlayers(t, wsURL, "927")
-	applyDebugFixtureFromClient(t, cA)
-	confirmMulliganBoth(t, cA, cB)
-
-	sendEnv(t, cA, Envelope{
-		ID:      "sdp-on-1",
-		Type:    MessageSetDebugPause,
-		Payload: MustPayload(SetDebugPausePayload{Paused: true}),
-	})
-	if _, found := drainUntilType(t, cA, MessageAck, 10); !found {
-		t.Fatal("expected ack for set_debug_pause paused=true")
-	}
-	var snap StateSnapshotPayload
-	foundPausedSnap := false
-	for i := 0; i < 12; i++ {
-		snapEnv, ok := drainUntilType(t, cA, MessageStateSnapshot, 10)
-		if !ok {
-			break
-		}
-		if err := json.Unmarshal(snapEnv.Payload, &snap); err != nil {
-			t.Fatalf("unmarshal snapshot: %v", err)
-		}
-		if snap.AdminDebugMatch && snap.DebugPauseActive {
-			foundPausedSnap = true
-			break
-		}
-	}
-	if !foundPausedSnap {
-		t.Fatalf("expected snapshot with adminDebugMatch/debugPauseActive true, last=%+v", snap)
-	}
-
-	sendEnv(t, cA, Envelope{
-		ID:      "sdp-block-mv",
-		Type:    MessageSubmitMove,
-		Payload: MustPayload(SubmitMovePayload{FromRow: 6, FromCol: 4, ToRow: 4, ToCol: 4}),
-	})
-	errEnv, found := drainUntilType(t, cA, MessageError, 10)
-	if !found {
-		t.Fatal("expected error for gameplay action while debug paused")
-	}
-	var ep ErrorPayload
-	_ = json.Unmarshal(errEnv.Payload, &ep)
-	if ep.Code != ErrorActionFailed || ep.Message != "debug_pause_active" {
-		t.Fatalf("expected action_failed/debug_pause_active, got %+v", ep)
-	}
-
-	sendEnv(t, cA, Envelope{
-		ID:      "sdp-off-2",
-		Type:    MessageSetDebugPause,
-		Payload: MustPayload(SetDebugPausePayload{Paused: false}),
-	})
-	if _, found := drainUntilType(t, cA, MessageAck, 10); !found {
-		t.Fatal("expected ack for set_debug_pause paused=false")
-	}
-	sendEnv(t, cA, Envelope{
-		ID:      "sdp-mv-ok",
-		Type:    MessageSubmitMove,
-		Payload: MustPayload(SubmitMovePayload{FromRow: 6, FromCol: 4, ToRow: 4, ToCol: 4}),
-	})
-	if _, found := drainUntilType(t, cA, MessageAck, 10); !found {
-		t.Fatal("expected submit_move ack after debug pause resume")
-	}
-}
-
 // TestStateSnapshotIncludesReconnectFieldsWhenPeerDisconnects ensures the surviving peer receives
 // reconnect grace fields over WebSocket after the other socket closes (HUD banner + frozen clock).
 func TestStateSnapshotIncludesReconnectFieldsWhenPeerDisconnects(t *testing.T) {
@@ -877,9 +789,6 @@ func TestStateSnapshotIncludesReconnectFieldsWhenPeerDisconnects(t *testing.T) {
 	}
 	if snap.MatchEnded {
 		t.Fatalf("did not expect match ended during grace, got %+v", snap)
-	}
-	if snap.TurnMainDeadlineUnixMs == 0 && snap.TurnMainPausedRemainingMs == 0 {
-		t.Fatalf("expected frozen or active main clock in snapshot during grace, got %+v", snap)
 	}
 }
 

@@ -13,4 +13,3 @@ func TestInitialPlayerSkillsCountAndType(t *testing.T) {
 		}
 	}
 }
-

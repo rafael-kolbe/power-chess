@@ -2,7 +2,6 @@ package gameplay
 
 import (
 	"fmt"
-	"sort"
 )
 
 // MaxSavedDecksPerUser is the maximum number of named decks a user may persist server-side.
@@ -84,9 +83,3 @@ func deckInstanceID(n int) string {
 	return "c" + itoa(n)
 }
 
-// SortedCardIDsForValidation returns a copy of ids sorted lexicographically (for tests / stable compares).
-func SortedCardIDsForValidation(ids []CardID) []CardID {
-	cp := append([]CardID(nil), ids...)
-	sort.Slice(cp, func(i, j int) bool { return cp[i] < cp[j] })
-	return cp
-}

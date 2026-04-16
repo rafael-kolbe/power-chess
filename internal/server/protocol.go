@@ -15,7 +15,7 @@ const (
 	MessageJoinMatch         MessageType = "join_match"
 	MessageLeaveMatch        MessageType = "leave_match"
 	MessageSubmitMove        MessageType = "submit_move"
-	MessageActivateCard      MessageType = "activate_card"
+	MessageIgniteCard        MessageType = "ignite_card"
 	MessageDrawCard          MessageType = "draw_card"
 	MessageResolvePending    MessageType = "resolve_pending_effect"
 	MessageQueueReaction     MessageType = "queue_reaction"
@@ -24,14 +24,17 @@ const (
 	MessageRequestRematch    MessageType = "request_rematch"
 	MessageConfirmMulligan   MessageType = "confirm_mulligan"
 	MessageSetReactionMode   MessageType = "set_reaction_mode"
-	MessageSetDebugPause     MessageType = "set_debug_pause"
 	MessageDebugMatchFixture MessageType = "debug_match_fixture"
 	MessageClientTrace       MessageType = "client_trace"
+	MessageClientFxHold      MessageType = "client_fx_hold"
+	MessageClientFxRelease   MessageType = "client_fx_release"
 	// Server -> Client
 	MessageHello         MessageType = "hello"
 	MessageAck           MessageType = "ack"
 	MessageError         MessageType = "error"
 	MessageStateSnapshot MessageType = "state_snapshot"
+	// MessageActivateCard is server→client only: effect activation after ignition counter reaches 0.
+	MessageActivateCard MessageType = "activate_card"
 )
 
 // ErrorCode standardizes transport-level and gameplay-level error identifiers.
@@ -98,9 +101,17 @@ type SubmitMovePayload struct {
 	ToCol   int `json:"toCol"`
 }
 
-// ActivateCardPayload requests activation of a card from hand index.
-type ActivateCardPayload struct {
+// IgniteCardPayload moves a card from hand into this player's ignition zone (may open reaction windows).
+type IgniteCardPayload struct {
 	HandIndex int `json:"handIndex"`
+}
+
+// ActivateCardEventPayload is server→client: ignition finished and the effect resolution step ran.
+type ActivateCardEventPayload struct {
+	PlayerID string `json:"playerId"`
+	CardID   string `json:"cardId"`
+	CardType string `json:"cardType,omitempty"`
+	Success  bool   `json:"success"`
 }
 
 // ConfirmMulliganPayload submits which hand cards (by index) are returned to the deck for the mulligan.
@@ -112,11 +123,6 @@ type ConfirmMulliganPayload struct {
 // Mode is "off", "on", or "auto" (case-insensitive; unknown values become "on").
 type SetReactionModePayload struct {
 	Mode string `json:"mode"`
-}
-
-// SetDebugPausePayload toggles room-wide debug pause (ADMIN_DEBUG_MATCH only).
-type SetDebugPausePayload struct {
-	Paused bool `json:"paused"`
 }
 
 // ClientTracePayload carries a browser-side debug line batch for server session logs (ADMIN_DEBUG_MATCH only).
@@ -200,17 +206,21 @@ type PlayerHUDState struct {
 	HandCount      int    `json:"handCount"`
 	CooldownCount  int    `json:"cooldownCount"`
 	GraveyardCount int    `json:"graveyardCount"`
-	Strikes        int    `json:"strikes"`
 	// Zone data — always public unless noted.
-	DeckCount           int                    `json:"deckCount"`
-	SleeveColor         string                 `json:"sleeveColor"`
-	Hand                []CardSnapshotEntry    `json:"hand,omitempty"`
-	BanishedCards       []CardSnapshotEntry    `json:"banishedCards"`
-	GraveyardPieces     []string               `json:"graveyardPieces"`
-	CooldownPreview     []CooldownPreviewEntry `json:"cooldownPreview"`
-	CooldownHiddenCount int                    `json:"cooldownHiddenCount"`
+	DeckCount       int                    `json:"deckCount"`
+	SleeveColor     string                 `json:"sleeveColor"`
+	Hand            []CardSnapshotEntry    `json:"hand,omitempty"`
+	BanishedCards   []CardSnapshotEntry    `json:"banishedCards"`
+	GraveyardPieces []string               `json:"graveyardPieces"`
+	CooldownPreview []CooldownPreviewEntry `json:"cooldownPreview"`
+	// CooldownHiddenCount is always 0; kept for stable JSON shape (full queue is in CooldownPreview).
+	CooldownHiddenCount int `json:"cooldownHiddenCount"`
 	// ReactionMode is off / on / auto — server authority for when to open reaction windows.
 	ReactionMode string `json:"reactionMode,omitempty"`
+	// Per-player ignition zone (public to both players).
+	IgnitionOn             bool   `json:"ignitionOn,omitempty"`
+	IgnitionCard           string `json:"ignitionCard,omitempty"`
+	IgnitionTurnsRemaining int    `json:"ignitionTurnsRemaining,omitempty"`
 }
 
 // PendingEffectState describes unresolved effects that need player input.
@@ -244,20 +254,20 @@ type ReactionStackPreviewEntry struct {
 // PendingCaptureState describes a deferred capture move awaiting reaction resolution.
 type PendingCaptureState struct {
 	Active  bool   `json:"active"`
-	FromRow int    `json:"fromRow,omitempty"`
-	FromCol int    `json:"fromCol,omitempty"`
-	ToRow   int    `json:"toRow,omitempty"`
-	ToCol   int    `json:"toCol,omitempty"`
+	FromRow int    `json:"fromRow"`
+	FromCol int    `json:"fromCol"`
+	ToRow   int    `json:"toRow"`
+	ToCol   int    `json:"toCol"`
 	Actor   string `json:"actor,omitempty"`
 }
 
 // EnPassantStateSnapshot exposes chess en-passant targets for client-side move highlighting.
 type EnPassantStateSnapshot struct {
 	Valid     bool `json:"valid"`
-	TargetRow int  `json:"targetRow,omitempty"`
-	TargetCol int  `json:"targetCol,omitempty"`
-	PawnRow   int  `json:"pawnRow,omitempty"`
-	PawnCol   int  `json:"pawnCol,omitempty"`
+	TargetRow int  `json:"targetRow"`
+	TargetCol int  `json:"targetCol"`
+	PawnRow   int  `json:"pawnRow"`
+	PawnCol   int  `json:"pawnCol"`
 }
 
 // CastlingRightsSnapshot mirrors server-side castling rights for client move hints.
@@ -289,20 +299,8 @@ type StateSnapshotPayload struct {
 	ReconnectPendingFor     string `json:"reconnectPendingFor,omitempty"`
 	ReconnectDeadlineUnixMs int64  `json:"reconnectDeadlineUnixMs,omitempty"`
 	AdminDebugMatch         bool   `json:"adminDebugMatch,omitempty"`
-	DebugPauseActive        bool   `json:"debugPauseActive,omitempty"`
 	TurnPlayer              string `json:"turnPlayer"`
-	TurnSeconds             int    `json:"turnSeconds"`
 	TurnNumber              int    `json:"turnNumber"`
-	// TurnMainDeadlineUnixMs is the wall-clock instant when the main turn timer expires (0 if paused for reaction).
-	TurnMainDeadlineUnixMs int64 `json:"turnMainDeadlineUnixMs,omitempty"`
-	// TurnMainPausedRemainingMs is remaining main-turn budget while the first reaction response is pending (0 if not paused).
-	TurnMainPausedRemainingMs int64 `json:"turnMainPausedRemainingMs,omitempty"`
-	// ReactionDeadlineUnixMs is the responder timer deadline while waiting first response in reaction window.
-	ReactionDeadlineUnixMs int64                  `json:"reactionDeadlineUnixMs,omitempty"`
-	IgnitionOn             bool                   `json:"ignitionOn"`
-	IgnitionCard           string                 `json:"ignitionCard,omitempty"`
-	IgnitionOwner          string                 `json:"ignitionOwner,omitempty"`
-	IgnitionTurnsRemaining int                    `json:"ignitionTurnsRemaining"`
 	Board                  [8][8]string           `json:"board"`
 	EnPassant              EnPassantStateSnapshot `json:"enPassant"`
 	CastlingRights         CastlingRightsSnapshot `json:"castlingRights"`

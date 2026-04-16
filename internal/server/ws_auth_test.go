@@ -24,7 +24,7 @@ func TestWebSocketWithoutAuthStillConnects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 	_, _, err = c.ReadMessage()
 	if err != nil {
@@ -73,7 +73,7 @@ func TestWebSocketWithAuthAcceptsQueryToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 	_, _, err = c.ReadMessage()
 	if err != nil {
@@ -104,5 +104,5 @@ func TestWebSocketWithAuthAcceptsBearerHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 }

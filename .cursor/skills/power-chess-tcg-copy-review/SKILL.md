@@ -70,7 +70,7 @@ See [reference.md](reference.md) for file paths and a **term alignment** checkli
 
 5. **Verify**
    - `go test ./...`
-   - `npm run test:e2e` (if web copy or i18n touched)
+   - `go test ./...`
 
 ## When the user invokes this skill
 

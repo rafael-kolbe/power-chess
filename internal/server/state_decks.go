@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"time"
 
 	"power-chess/internal/chess"
@@ -38,6 +39,32 @@ func (r *RoomSession) loadDeckSkillAndSleeveForSeat(srv *Server, pid gameplay.Pl
 	return inst, sk, DefaultSleeveColor(sleeve)
 }
 
+// rebuildEngineFromFreshLobbyDecksUnsafe replaces r.Engine with a new match built from the same
+// lobby deck sources as the first game (full 20-card decks, skills, sleeves). Does not shuffle
+// or deal opening hands — call BeginOpeningPhase after this when starting play.
+// Caller must hold r.stateM.
+func (r *RoomSession) rebuildEngineFromFreshLobbyDecksUnsafe(srv *Server) error {
+	deckA, skA, sleeveA := r.loadDeckSkillAndSleeveForSeat(srv, gameplay.PlayerA)
+	deckB, skB, sleeveB := r.loadDeckSkillAndSleeveForSeat(srv, gameplay.PlayerB)
+	skA = normalizeLobbySkill(skA)
+	skB = normalizeLobbySkill(skB)
+	newState, err := gameplay.NewMatchState(deckA, deckB)
+	if err != nil {
+		return err
+	}
+	if err := newState.SelectPlayerSkill(gameplay.PlayerA, skA); err != nil {
+		return err
+	}
+	if err := newState.SelectPlayerSkill(gameplay.PlayerB, skB); err != nil {
+		return err
+	}
+	r.Engine = match.NewEngine(newState, chess.NewGame())
+	r.sleeveByPlayer[gameplay.PlayerA] = sleeveA
+	r.sleeveByPlayer[gameplay.PlayerB] = sleeveB
+	r.deckMatchInitialized = true
+	return nil
+}
+
 // MaybeRebuildEngineWithSavedDecks replaces the engine once both players are connected and decks were not applied yet.
 func (r *RoomSession) MaybeRebuildEngineWithSavedDecks(srv *Server) error {
 	r.stateM.Lock()
@@ -49,46 +76,28 @@ func (r *RoomSession) MaybeRebuildEngineWithSavedDecks(srv *Server) error {
 		return nil
 	}
 	if srv != nil && srv.decks != nil && !r.deckMatchInitialized {
-		deckA, skA, sleeveA := r.loadDeckSkillAndSleeveForSeat(srv, gameplay.PlayerA)
-		deckB, skB, sleeveB := r.loadDeckSkillAndSleeveForSeat(srv, gameplay.PlayerB)
-		skA = normalizeLobbySkill(skA)
-		skB = normalizeLobbySkill(skB)
-		newState, err := gameplay.NewMatchState(deckA, deckB)
-		if err != nil {
+		if err := r.rebuildEngineFromFreshLobbyDecksUnsafe(srv); err != nil {
 			return err
 		}
-		if err := newState.SelectPlayerSkill(gameplay.PlayerA, skA); err != nil {
-			return err
-		}
-		if err := newState.SelectPlayerSkill(gameplay.PlayerB, skB); err != nil {
-			return err
-		}
-		r.Engine = match.NewEngine(newState, chess.NewGame())
-		r.sleeveByPlayer[gameplay.PlayerA] = sleeveA
-		r.sleeveByPlayer[gameplay.PlayerB] = sleeveB
-		r.deckMatchInitialized = true
 	}
 	return r.beginOpeningPhaseIfNeededUnsafe()
 }
 
-func (r *RoomSession) resetMatchEngineFromSavedDecksUnsafe(srv *Server) {
-	deckA, skA, sleeveA := r.loadDeckSkillAndSleeveForSeat(srv, gameplay.PlayerA)
-	deckB, skB, sleeveB := r.loadDeckSkillAndSleeveForSeat(srv, gameplay.PlayerB)
-	skA = normalizeLobbySkill(skA)
-	skB = normalizeLobbySkill(skB)
-	newState, err := gameplay.NewMatchState(deckA, deckB)
-	if err != nil {
-		return
+// resetMatchEngineFromSavedDecksUnsafe rebuilds the match for rematch / stay-in-room the same
+// way as the first game: fresh lobby decks, then shuffle + 3-card draw + mulligan when both are connected.
+// After a completed match, lobby decks are assumed valid (same source that supplied the first game).
+// Caller must hold r.stateM.
+func (r *RoomSession) resetMatchEngineFromSavedDecksUnsafe(srv *Server) error {
+	if err := r.rebuildEngineFromFreshLobbyDecksUnsafe(srv); err != nil {
+		return fmt.Errorf("rematch engine: %w", err)
 	}
-	_ = newState.SelectPlayerSkill(gameplay.PlayerA, skA)
-	_ = newState.SelectPlayerSkill(gameplay.PlayerB, skB)
-	r.Engine = match.NewEngine(newState, chess.NewGame())
-	r.sleeveByPlayer[gameplay.PlayerA] = sleeveA
-	r.sleeveByPlayer[gameplay.PlayerB] = sleeveB
 	if r.connectedByPlayer[gameplay.PlayerA] > 0 && r.connectedByPlayer[gameplay.PlayerB] > 0 {
-		_ = gameplay.BeginOpeningPhase(r.Engine.State)
+		if err := gameplay.BeginOpeningPhase(r.Engine.State); err != nil {
+			return fmt.Errorf("rematch opening: %w", err)
+		}
 		r.startMulliganDeadlineUnsafe(time.Now().UTC())
 	}
+	return nil
 }
 
 // beginOpeningPhaseIfNeededUnsafe shuffles and deals opening hands when both players are seated and the match has not begun.

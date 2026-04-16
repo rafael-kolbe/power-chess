@@ -23,7 +23,7 @@ description: Investigates bugs and protocol issues by reading Docker session log
    - Rationale: filenames are timestamped; `ls -t` by mtime is reliable even if the clock or naming pattern changes slightly.
 
 3. **Reproduce or narrow the time window**  
-   Note room id, player seat, and approximate timestamp; **grep only that latest file** for `room=`, `match_debug`, `protocol_err`, `handler_err`, `queue_reaction`, `set_debug_pause`, `ConfirmMulligan`, or the WebSocket message type in question.
+   Note room id, player seat, and approximate timestamp; **grep only that latest file** for `room=`, `match_debug`, `protocol_err`, `handler_err`, `queue_reaction`, `ConfirmMulligan`, or the WebSocket message type in question.
 
 4. **Correlate with code**  
    After the log points to a handler or error string, open the matching code in `internal/server/` or `internal/match/` and add tests if the fix is non-trivial.  

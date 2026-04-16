@@ -1,350 +1,431 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>POWER CHESS (Alpha)</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500&family=Oxanium:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css" />
-  <link rel="stylesheet" href="/card.css" />
-</head>
-<body class="has-card-footer">
-  <div id="authOverlay" class="modal-overlay auth-overlay hidden" aria-hidden="true">
-    <div class="modal-dialog auth-dialog" role="dialog" aria-modal="true" aria-labelledby="authTitle">
-      <h3 id="authTitle">Create account</h3>
-      <p id="authUnavailableHint" class="lobby-hint hidden"></p>
-      <div id="authRegisterBlock" class="auth-block">
-        <label class="field"><span id="authUsernameLabel">Username</span><input id="authRegUsername" autocomplete="username" /></label>
-        <label class="field"><span id="authEmailLabel">Email</span><input id="authRegEmail" type="email" autocomplete="email" /></label>
-        <label class="field"><span id="authPasswordLabel">Password</span><input id="authRegPassword" type="password" autocomplete="new-password" /></label>
-        <label class="field"><span id="authConfirmPasswordLabel">Confirm password</span><input id="authRegConfirm" type="password" autocomplete="new-password" /></label>
-        <button type="button" id="authRegisterBtn" class="connect-btn auth-block__primary">Create account</button>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>POWER CHESS (Alpha)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500&family=Oxanium:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/card.css" />
+  </head>
+  <body class="has-card-footer">
+    <div id="authOverlay" class="modal-overlay auth-overlay hidden" aria-hidden="true">
+      <div class="modal-dialog auth-dialog" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+        <h3 id="authTitle">Create account</h3>
+        <p id="authUnavailableHint" class="lobby-hint hidden"></p>
+        <div id="authRegisterBlock" class="auth-block">
+          <label class="field"
+            ><span id="authUsernameLabel">Username</span><input id="authRegUsername" autocomplete="username"
+          /></label>
+          <label class="field"
+            ><span id="authEmailLabel">Email</span><input id="authRegEmail" type="email" autocomplete="email"
+          /></label>
+          <label class="field"
+            ><span id="authPasswordLabel">Password</span
+            ><input id="authRegPassword" type="password" autocomplete="new-password"
+          /></label>
+          <label class="field"
+            ><span id="authConfirmPasswordLabel">Confirm password</span
+            ><input id="authRegConfirm" type="password" autocomplete="new-password"
+          /></label>
+          <button type="button" id="authRegisterBtn" class="connect-btn auth-block__primary">Create account</button>
+        </div>
+        <div id="authDivider" class="auth-divider" role="separator">
+          <span class="auth-divider__line" aria-hidden="true"></span>
+          <span id="authDividerLabel" class="auth-divider__text">Already have an account?</span>
+          <span class="auth-divider__line" aria-hidden="true"></span>
+        </div>
+        <div id="authLoginBlock" class="auth-block">
+          <label class="field"
+            ><span id="authLoginEmailLabel">Email</span><input id="authLoginEmail" type="email" autocomplete="email"
+          /></label>
+          <label class="field"
+            ><span id="authLoginPasswordLabel">Password</span
+            ><input id="authLoginPassword" type="password" autocomplete="current-password"
+          /></label>
+          <button type="button" id="authLoginBtn" class="connect-btn auth-block__primary">Log in</button>
+        </div>
+        <p id="authError" class="auth-error hidden" role="alert"></p>
       </div>
-      <div id="authDivider" class="auth-divider" role="separator">
-        <span class="auth-divider__line" aria-hidden="true"></span>
-        <span id="authDividerLabel" class="auth-divider__text">Already have an account?</span>
-        <span class="auth-divider__line" aria-hidden="true"></span>
-      </div>
-      <div id="authLoginBlock" class="auth-block">
-        <label class="field"><span id="authLoginEmailLabel">Email</span><input id="authLoginEmail" type="email" autocomplete="email" /></label>
-        <label class="field"><span id="authLoginPasswordLabel">Password</span><input id="authLoginPassword" type="password" autocomplete="current-password" /></label>
-        <button type="button" id="authLoginBtn" class="connect-btn auth-block__primary">Log in</button>
-      </div>
-      <p id="authError" class="auth-error hidden" role="alert"></p>
     </div>
-  </div>
 
-  <h2 id="titleLabel">POWER CHESS (Alpha)</h2>
+    <h2 id="titleLabel">POWER CHESS (Alpha)</h2>
 
-  <div id="lobbyScreen" class="lobby-layout">
-    <div class="lobby-main">
-      <div class="row lobby-session-row">
-        <span id="lobbyUserLabel" class="lobby-user-label"></span>
-        <button type="button" id="logoutBtn" class="match-end-btn-secondary hidden">Log out</button>
-      </div>
-      <div id="lobbyDeckRow" class="lobby-deck-block hidden">
-        <div class="lobby-deck-top">
-          <label class="field lobby-deck-field">
-            <span id="lobbyDeckLabel">Deck for match</span>
-            <select id="lobbyDeckSelect" aria-describedby="lobbyDeckHint"></select>
+    <div id="lobbyScreen" class="lobby-layout">
+      <div class="lobby-main">
+        <div class="row lobby-session-row">
+          <span id="lobbyUserLabel" class="lobby-user-label"></span>
+          <button type="button" id="logoutBtn" class="match-end-btn-secondary hidden">Log out</button>
+        </div>
+        <div id="lobbyDeckRow" class="lobby-deck-block hidden">
+          <div class="lobby-deck-top">
+            <label class="field lobby-deck-field">
+              <span id="lobbyDeckLabel">Deck for match</span>
+              <select id="lobbyDeckSelect" aria-describedby="lobbyDeckHint"></select>
+            </label>
+            <div class="lobby-deck-actions">
+              <button type="button" id="lobbyDeckViewBtn" class="match-end-btn-secondary">View</button>
+              <a
+                href="/deck-builder.html"
+                id="lobbyDeckBuilderLink"
+                class="match-end-btn-secondary lobby-deck-builder-link"
+                >Deck Builder</a
+              >
+            </div>
+          </div>
+          <p id="lobbyDeckHint" class="lobby-hint"></p>
+          <p id="lobbyDeckAlert" class="lobby-private-password-error hidden" role="alert"></p>
+        </div>
+        <div class="row lobby-row-primary">
+          <label class="field">
+            <span id="languageLabel">Language</span>
+            <select id="localeSelect">
+              <option value="en-US">English (US)</option>
+              <option value="pt-BR">Português (Brasil)</option>
+            </select>
           </label>
-          <div class="lobby-deck-actions">
-            <button type="button" id="lobbyDeckViewBtn" class="match-end-btn-secondary">View</button>
-            <a href="/deck-builder.html" id="lobbyDeckBuilderLink" class="match-end-btn-secondary lobby-deck-builder-link">Deck Builder</a>
-          </div>
+          <label class="field">
+            <span id="roomNameLabel">Room Name</span>
+            <input id="roomName" value="Let's Play!" placeholder="Let's Play!" />
+          </label>
+          <label class="field">
+            <span id="pieceTypeLabel">Piece Type</span>
+            <select id="pieceType">
+              <option value="random">Random</option>
+              <option value="white">White</option>
+              <option value="black">Black</option>
+            </select>
+          </label>
+          <input id="playerId" type="hidden" value="A" />
+          <button id="connectBtn" class="connect-btn">Create</button>
         </div>
-        <p id="lobbyDeckHint" class="lobby-hint"></p>
-        <p id="lobbyDeckAlert" class="lobby-private-password-error hidden" role="alert"></p>
+        <div class="row">
+          <label class="row-label">
+            <span id="privateRoomLabel">Private Room</span>
+            <input id="privateRoom" type="checkbox" />
+          </label>
+          <label id="roomPasswordField" class="field hidden">
+            <span id="passwordLabel">Password</span>
+            <div class="password-input-wrap">
+              <input
+                id="roomPassword"
+                type="password"
+                value=""
+                placeholder="Room password"
+                aria-describedby="lobbyPrivatePasswordError"
+              />
+              <button
+                id="roomPasswordToggle"
+                type="button"
+                class="icon-btn"
+                aria-label="Mostrar senha"
+                title="Mostrar senha"
+              >
+                👁
+              </button>
+            </div>
+          </label>
+        </div>
+        <p id="lobbyPrivatePasswordError" class="lobby-private-password-error hidden" role="alert"></p>
+        <p id="lobbyHint" class="lobby-hint">
+          Choose the room name and piece side you want to play, then click Create. Join an existing room by clicking it
+          in the room list. The match starts when both players are in the room.
+        </p>
       </div>
-      <div class="row lobby-row-primary">
-        <label class="field">
-          <span id="languageLabel">Language</span>
-          <select id="localeSelect">
-            <option value="en-US">English (US)</option>
-            <option value="pt-BR">Português (Brasil)</option>
-          </select>
+      <aside class="room-list-panel">
+        <h3 id="roomListTitle">Open Rooms</h3>
+        <label class="field room-list-search">
+          <span id="roomSearchLabel">Search (ID or Name)</span>
+          <input id="roomSearch" value="" placeholder="Search rooms..." />
         </label>
-        <label class="field">
-          <span id="roomNameLabel">Room Name</span>
-          <input id="roomName" value="Let's Play!" placeholder="Let's Play!">
-        </label>
-        <label class="field">
-          <span id="pieceTypeLabel">Piece Type</span>
-          <select id="pieceType">
-            <option value="random">Random</option>
-            <option value="white">White</option>
-            <option value="black">Black</option>
-          </select>
-        </label>
-        <input id="playerId" type="hidden" value="A">
-        <button id="connectBtn" class="connect-btn">Create</button>
+        <ul id="roomList"></ul>
+        <p id="roomListEmpty" class="room-list-empty hidden">No active rooms right now.</p>
+      </aside>
+    </div>
+
+    <div id="deckViewModal" class="modal-overlay hidden" aria-hidden="true">
+      <div class="modal-dialog deck-view-dialog" role="dialog" aria-modal="true" aria-labelledby="deckViewTitle">
+        <div class="deck-view-dialog__head">
+          <h3 id="deckViewTitle">Deck</h3>
+          <button type="button" id="deckViewCloseBtn" class="match-end-btn-secondary">Close</button>
+        </div>
+        <div id="deckViewGrid" class="deck-view-grid"></div>
       </div>
-      <div class="row">
-        <label class="row-label">
-          <span id="privateRoomLabel">Private Room</span>
-          <input id="privateRoom" type="checkbox" />
-        </label>
-        <label id="roomPasswordField" class="field hidden">
-          <span id="passwordLabel">Password</span>
+    </div>
+
+    <div id="privateJoinOverlay" class="modal-overlay hidden" aria-hidden="true">
+      <div class="modal-dialog private-join-dialog" role="dialog" aria-modal="true" aria-labelledby="privateJoinTitle">
+        <h3 id="privateJoinTitle">Private room</h3>
+        <p id="privateJoinBody" class="modal-body"></p>
+        <label class="field private-join-field">
+          <span id="privateJoinPasswordLabel">Password</span>
           <div class="password-input-wrap">
-            <input id="roomPassword" type="password" value="" placeholder="Room password" aria-describedby="lobbyPrivatePasswordError">
-            <button id="roomPasswordToggle" type="button" class="icon-btn" aria-label="Mostrar senha" title="Mostrar senha">👁</button>
+            <input
+              id="privateJoinPasswordInput"
+              type="password"
+              autocomplete="off"
+              value=""
+              aria-describedby="privateJoinError"
+            />
+            <button
+              type="button"
+              id="privateJoinPasswordToggle"
+              class="icon-btn"
+              aria-label="Show password"
+              title="Show password"
+            >
+              👁
+            </button>
           </div>
         </label>
-      </div>
-      <p id="lobbyPrivatePasswordError" class="lobby-private-password-error hidden" role="alert"></p>
-      <p id="lobbyHint" class="lobby-hint">Choose the room name and piece side you want to play, then click Create. Join an existing room by clicking it in the room list. The match starts when both players are in the room.</p>
-    </div>
-    <aside class="room-list-panel">
-      <h3 id="roomListTitle">Open Rooms</h3>
-      <label class="field room-list-search">
-        <span id="roomSearchLabel">Search (ID or Name)</span>
-        <input id="roomSearch" value="" placeholder="Search rooms...">
-      </label>
-      <ul id="roomList"></ul>
-      <p id="roomListEmpty" class="room-list-empty hidden">No active rooms right now.</p>
-    </aside>
-  </div>
-
-  <div id="deckViewModal" class="modal-overlay hidden" aria-hidden="true">
-    <div class="modal-dialog deck-view-dialog" role="dialog" aria-modal="true" aria-labelledby="deckViewTitle">
-      <div class="deck-view-dialog__head">
-        <h3 id="deckViewTitle">Deck</h3>
-        <button type="button" id="deckViewCloseBtn" class="match-end-btn-secondary">Close</button>
-      </div>
-      <div id="deckViewGrid" class="deck-view-grid"></div>
-    </div>
-  </div>
-
-  <div id="privateJoinOverlay" class="modal-overlay hidden" aria-hidden="true">
-    <div class="modal-dialog private-join-dialog" role="dialog" aria-modal="true" aria-labelledby="privateJoinTitle">
-      <h3 id="privateJoinTitle">Private room</h3>
-      <p id="privateJoinBody" class="modal-body"></p>
-      <label class="field private-join-field">
-        <span id="privateJoinPasswordLabel">Password</span>
-        <div class="password-input-wrap">
-          <input id="privateJoinPasswordInput" type="password" autocomplete="off" value="" aria-describedby="privateJoinError">
-          <button type="button" id="privateJoinPasswordToggle" class="icon-btn" aria-label="Show password" title="Show password">👁</button>
+        <p id="privateJoinError" class="private-join-error hidden" role="alert"></p>
+        <div class="modal-actions">
+          <button type="button" id="privateJoinCancel" class="match-end-btn-secondary">Cancel</button>
+          <button type="button" id="privateJoinSubmit" class="match-end-btn-primary">Join</button>
         </div>
-      </label>
-      <p id="privateJoinError" class="private-join-error hidden" role="alert"></p>
-      <div class="modal-actions">
-        <button type="button" id="privateJoinCancel" class="match-end-btn-secondary">Cancel</button>
-        <button type="button" id="privateJoinSubmit" class="match-end-btn-primary">Join</button>
       </div>
     </div>
-  </div>
 
-  <div id="matchEndOverlay" class="match-end-overlay hidden" aria-hidden="true">
-    <div class="match-end-dialog" role="dialog" aria-labelledby="matchEndTitle" aria-describedby="matchEndBody">
-      <h3 id="matchEndTitle">Match finished</h3>
-      <p id="matchEndBody"></p>
-      <p id="matchEndCountdown" class="match-end-countdown hidden"></p>
-      <div class="match-end-actions">
-        <button type="button" id="matchEndRematch" class="match-end-btn-primary hidden">Play again</button>
-        <button type="button" id="matchEndStay" class="match-end-btn-secondary hidden">Stay in room</button>
-        <button type="button" id="matchEndToLobby" class="match-end-btn-primary">Back to lobby</button>
+    <div id="matchEndOverlay" class="match-end-overlay hidden" aria-hidden="true">
+      <div class="match-end-dialog" role="dialog" aria-labelledby="matchEndTitle" aria-describedby="matchEndBody">
+        <h3 id="matchEndTitle">Match finished</h3>
+        <p id="matchEndBody"></p>
+        <p id="matchEndCountdown" class="match-end-countdown hidden"></p>
+        <div class="match-end-actions">
+          <button type="button" id="matchEndRematch" class="match-end-btn-primary hidden">Play again</button>
+          <button type="button" id="matchEndStay" class="match-end-btn-secondary hidden">Stay in room</button>
+          <button type="button" id="matchEndToLobby" class="match-end-btn-primary">Back to lobby</button>
+        </div>
       </div>
     </div>
-  </div>
 
-  <div id="gameShell" class="game-shell-hud hidden">
-    <div id="opponentDisconnectOverlay" class="opponent-disconnect-overlay hidden" aria-hidden="true" role="alertdialog" aria-labelledby="opponentDisconnectTitle">
-      <div class="opponent-disconnect-dialog">
-        <h3 id="opponentDisconnectTitle">Opponent disconnected</h3>
-        <p id="opponentDisconnectCountdown" class="opponent-disconnect-countdown">60</p>
-        <p id="opponentDisconnectHint" class="opponent-disconnect-hint"></p>
+    <div id="gameShell" class="game-shell-hud hidden">
+      <div
+        id="opponentDisconnectOverlay"
+        class="opponent-disconnect-overlay hidden"
+        aria-hidden="true"
+        role="alertdialog"
+        aria-labelledby="opponentDisconnectTitle"
+      >
+        <div class="opponent-disconnect-dialog">
+          <h3 id="opponentDisconnectTitle">Opponent disconnected</h3>
+          <p id="opponentDisconnectCountdown" class="opponent-disconnect-countdown">60</p>
+          <p id="opponentDisconnectHint" class="opponent-disconnect-hint"></p>
+        </div>
       </div>
-    </div>
-    <div class="row match-header-row">
-      <span id="inRoomLabel" class="in-room-label"></span>
-      <button id="disconnectBtn" type="button">Leave room</button>
-      <span class="match-header-sep" aria-hidden="true">|</span>
-      <label class="match-header-tool">
-        <input type="checkbox" id="coordsInSquares" />
-        <span id="coordsInSquaresText" class="match-header-tool__text">Coords: Off</span>
-      </label>
-      <label class="match-header-tool" for="reactionModeSelect">
-        <span id="reactionModeLabel" class="match-header-tool__text">Reactions: On</span>
-        <select id="reactionModeSelect" class="match-header-tool__select" aria-label="Reactions mode">
-          <option value="off">Off</option>
-          <option value="on" selected>On</option>
-          <option value="auto">Auto</option>
-        </select>
-      </label>
-      <button id="reactionPassBtn" type="button" class="match-end-btn-secondary hidden">OK</button>
-      <button id="debugPauseBtn" type="button" class="match-end-btn-secondary hidden">Pause</button>
-    </div>
-    <div id="boardArea" class="playmat-area">
-
-      <!-- Left column: opp hand/ignition/cooldown (top) + self banish/deck (bottom) -->
-      <div class="playmat-col playmat-col--left" id="playmatColLeft">
-
-        <!-- Opponent block — hand on the left from player's view -->
-        <div class="pm-side-group pm-side-group--opp" id="rightZonesOpp">
-          <div class="pm-ignition-cooldown-row pm-ignition-cooldown-row--opp">
-            <div class="pm-zone pm-zone--ignition" id="ignitionOpp" aria-label="Opponent ignition slot">
-              <span class="pm-zone__label">Ignition</span>
-              <div class="pm-ignition-card" id="ignitionCardOpp"></div>
-              <span class="pm-ignition-counter hidden" id="ignitionCounterOpp">0</span>
+      <div class="row match-header-row">
+        <span id="inRoomLabel" class="in-room-label"></span>
+        <button id="disconnectBtn" type="button">Leave room</button>
+        <span class="match-header-sep" aria-hidden="true">|</span>
+        <label class="match-header-tool">
+          <input type="checkbox" id="coordsInSquares" />
+          <span id="coordsInSquaresText" class="match-header-tool__text">Coords: Off</span>
+        </label>
+        <label class="match-header-tool" for="reactionModeSelect">
+          <span id="reactionModeLabel" class="match-header-tool__text">Reactions: On</span>
+          <select id="reactionModeSelect" class="match-header-tool__select" aria-label="Reactions mode">
+            <option value="off">Off</option>
+            <option value="on" selected>On</option>
+            <option value="auto">Auto</option>
+          </select>
+        </label>
+        <button id="reactionPassBtn" type="button" class="match-end-btn-secondary hidden">OK</button>
+      </div>
+      <div id="boardArea" class="playmat-area">
+        <!-- Left column: opp hand/ignition/cooldown (top) + self banish/deck (bottom) -->
+        <div class="playmat-col playmat-col--left" id="playmatColLeft">
+          <!-- Opponent block — hand on the left from player's view -->
+          <div class="pm-side-group pm-side-group--opp" id="rightZonesOpp">
+            <div class="pm-ignition-cooldown-row pm-ignition-cooldown-row--opp">
+              <div class="pm-zone pm-zone--ignition" id="ignitionOpp" aria-label="Opponent ignition slot">
+                <span class="pm-zone__label" id="labelIgnitionOpp">Ignition</span>
+                <div class="pm-ignition-card" id="ignitionCardOpp"></div>
+                <span class="pm-ignition-counter hidden" id="ignitionCounterOpp">0</span>
+              </div>
+              <div class="pm-zone pm-zone--cooldown" id="cooldownOpp" aria-label="Opponent cooldown pile">
+                <span class="pm-zone__label" id="labelCooldownOpp">Cooldown</span>
+                <div class="pm-cooldown-cards" id="cooldownCardsOpp"></div>
+              </div>
             </div>
-            <div class="pm-zone pm-zone--cooldown" id="cooldownOpp" aria-label="Opponent cooldown pile">
-              <span class="pm-zone__label">Cooldown</span>
-              <div class="pm-cooldown-cards" id="cooldownCardsOpp"></div>
+            <div class="pm-hand-row">
+              <div class="pm-hand-area" id="handOpp" aria-label="Opponent hand">
+                <span class="pm-hand-area__label" id="handLabelOpp">Hand</span>
+                <div class="pm-hand-cards"></div>
+              </div>
             </div>
           </div>
-          <div class="pm-hand-row">
-            <div class="pm-hand-area" id="handOpp" aria-label="Opponent hand">
-              <span class="pm-hand-area__label" id="handLabelOpp">Hand</span>
-              <div class="pm-hand-cards"></div>
-            </div>
-          </div>
-        </div>
 
-        <!-- Player block — banish + deck -->
-        <div class="pm-side-group pm-side-group--own" id="leftZonesSelf">
-          <div class="pm-left-zones-pair">
-            <div class="pm-zone pm-zone--banish" id="banishSelf" aria-label="Your banished">
-              <span class="pm-zone__label">Banished</span>
-              <div class="pm-stack-top" id="banishTopSelf"></div>
-            </div>
-            <div class="pm-zone pm-zone--deck" id="deckSelf" aria-label="Your deck">
-              <span class="pm-zone__label" id="deckLabelSelf">Deck</span>
-              <div class="pm-deck-row">
-                <span class="pm-deck-count" id="deckCountSelf">—</span>
-                <div class="pm-deck-sleeve" id="deckSleeveSelf"></div>
-                <button class="pm-draw-btn" id="drawBtn" type="button">DRAW</button>
+          <!-- Player block — banish + deck -->
+          <div class="pm-side-group pm-side-group--own" id="leftZonesSelf">
+            <div class="pm-left-zones-pair">
+              <div class="pm-zone pm-zone--banish" id="banishSelf" aria-label="Your banished">
+                <span class="pm-zone__label" id="labelBanishSelf">Banished</span>
+                <div class="pm-stack-top" id="banishTopSelf"></div>
+              </div>
+              <div class="pm-zone pm-zone--deck" id="deckSelf" aria-label="Your deck">
+                <span class="pm-zone__label" id="deckLabelSelf">Deck</span>
+                <div class="pm-deck-row">
+                  <span class="pm-deck-count" id="deckCountSelf">—</span>
+                  <div class="pm-deck-sleeve" id="deckSleeveSelf"></div>
+                  <button class="pm-draw-btn" id="drawBtn" type="button">DRAW</button>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-      </div>
-
-      <!-- Center: cemeteries + chess board (board slightly smaller than column width) -->
-      <div class="playmat-center">
-        <div id="boardWrap" class="board-wrap">
-          <div class="player-b-stack">
-            <div class="pm-zone pm-zone--graveyard pm-graveyard--board pm-graveyard--opp" id="graveyardOpp" aria-label="Opponent graveyard">
-              <span class="pm-zone__label">Cemetery</span>
-              <div class="pm-graveyard-grid" id="graveyardGridOpp"></div>
-            </div>
-            <div class="side-clock clock-b"><strong id="playerBLabel">Player B</strong> | <span id="clockLabelB">Clock</span>: <span id="clockB">--</span>s | <span id="strikesLabelB">Strikes</span>: <span id="strikesB">0</span></div>
-            <div class="bar-group">
-              <div class="bar mana-bar" id="manaBarB"><div class="fill" id="manaFillB"></div><span class="bar-label" id="manaLabelB">0/10</span></div>
-              <div class="bar energized-bar" id="energizedBarB"><div class="fill" id="energizedFillB"></div><span class="bar-label" id="energizedLabelB">0/20</span></div>
-            </div>
-          </div>
-          <div id="waitingBanner" class="waiting-banner">Waiting for opponent...</div>
-          <div class="board-frame-stack">
-            <div id="boardFrame" class="board-frame"></div>
-            <svg id="captureThreatOverlay" class="capture-threat-overlay" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" aria-hidden="true"></svg>
-          </div>
-          <div class="player-a-stack">
-            <div class="bar-group">
-              <div class="bar mana-bar" id="manaBarA"><div class="fill" id="manaFillA"></div><span class="bar-label" id="manaLabelA">0/10</span></div>
-              <div class="bar energized-bar" id="energizedBarA"><div class="fill" id="energizedFillA"></div><span class="bar-label" id="energizedLabelA">0/20</span></div>
-            </div>
-            <div class="side-clock clock-a"><strong id="playerALabel">Player A</strong> | <span id="clockLabelA">Clock</span>: <span id="clockA">--</span>s | <span id="strikesLabelA">Strikes</span>: <span id="strikesA">0</span></div>
-            <div class="pm-zone pm-zone--graveyard pm-graveyard--board pm-graveyard--own" id="graveyardSelf" aria-label="Your graveyard">
-              <span class="pm-zone__label">Cemetery</span>
-              <div class="pm-graveyard-grid" id="graveyardGridSelf"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Right column: opp banish/deck (top) + self ignition/cooldown/hand (bottom) -->
-      <div class="playmat-col playmat-col--right" id="playmatColRight">
-        <!-- Opponent block — deck on the right from player's view -->
-        <div class="pm-side-group pm-side-group--opp" id="leftZonesOpp">
-          <div class="pm-left-zones-pair">
-            <div class="pm-zone pm-zone--deck" id="deckOpp" aria-label="Opponent deck">
-              <span class="pm-zone__label" id="deckLabelOpp">Deck</span>
-              <div class="pm-deck-row">
-                <span class="pm-deck-count" id="deckCountOpp">—</span>
-                <div class="pm-deck-sleeve" id="deckSleeveOpp"></div>
-                <!-- Invisible third slot: matches DRAW button footprint so space-evenly matches your deck -->
-                <span class="pm-deck-draw-placeholder" aria-hidden="true"></span>
+        <!-- Center: cemeteries + chess board (board slightly smaller than column width) -->
+        <div class="playmat-center">
+          <div id="boardWrap" class="board-wrap">
+            <div class="player-b-stack">
+              <div
+                class="pm-zone pm-zone--graveyard pm-graveyard--board pm-graveyard--opp"
+                id="graveyardOpp"
+                aria-label="Opponent captures"
+              >
+                <span class="pm-zone__label" id="labelGraveyardOpp">Capture</span>
+                <div class="pm-graveyard-grid" id="graveyardGridOpp"></div>
+              </div>
+              <div class="bar-group">
+                <div class="bar mana-bar" id="manaBarB">
+                  <div class="fill" id="manaFillB"></div>
+                  <span class="bar-label" id="manaLabelB">0/10</span>
+                </div>
+                <div class="bar energized-bar" id="energizedBarB">
+                  <div class="fill" id="energizedFillB"></div>
+                  <span class="bar-label" id="energizedLabelB">0/20</span>
+                </div>
+              </div>
+              <div class="side-clock clock-b">
+                <strong id="playerBLabel">Player B</strong>
               </div>
             </div>
-            <div class="pm-zone pm-zone--banish" id="banishOpp" aria-label="Opponent banished">
-              <span class="pm-zone__label">Banished</span>
-              <div class="pm-stack-top" id="banishTopOpp"></div>
+            <div id="waitingBanner" class="waiting-banner">Waiting for opponent...</div>
+            <div class="board-frame-stack">
+              <div id="boardFrame" class="board-frame"></div>
+              <svg
+                id="captureThreatOverlay"
+                class="capture-threat-overlay"
+                xmlns="http://www.w3.org/2000/svg"
+                preserveAspectRatio="none"
+                aria-hidden="true"
+              ></svg>
+            </div>
+            <div class="player-a-stack">
+              <div class="side-clock clock-a">
+                <strong id="playerALabel">Player A</strong>
+              </div>
+              <div class="bar-group">
+                <div class="bar mana-bar" id="manaBarA">
+                  <div class="fill" id="manaFillA"></div>
+                  <span class="bar-label" id="manaLabelA">0/10</span>
+                </div>
+                <div class="bar energized-bar" id="energizedBarA">
+                  <div class="fill" id="energizedFillA"></div>
+                  <span class="bar-label" id="energizedLabelA">0/20</span>
+                </div>
+              </div>
+              <div
+                class="pm-zone pm-zone--graveyard pm-graveyard--board pm-graveyard--own"
+                id="graveyardSelf"
+                aria-label="Your captures"
+              >
+                <span class="pm-zone__label" id="labelGraveyardSelf">Capture</span>
+                <div class="pm-graveyard-grid" id="graveyardGridSelf"></div>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Own right zones (bottom half) -->
-        <div class="pm-side-group pm-side-group--own" id="rightZonesSelf">
-          <div class="pm-ignition-cooldown-row pm-ignition-cooldown-row--self">
-            <div class="pm-zone pm-zone--ignition pm-zone--ignition-self" id="ignitionSelf" aria-label="Your ignition slot">
-              <span class="pm-zone__label">Ignition</span>
-              <div class="pm-ignition-card" id="ignitionCardSelf"></div>
-              <span class="pm-ignition-counter hidden" id="ignitionCounterSelf">0</span>
-            </div>
-            <div class="pm-zone pm-zone--cooldown" id="cooldownSelf" aria-label="Your cooldown pile">
-              <span class="pm-zone__label">Cooldown</span>
-              <div class="pm-cooldown-cards" id="cooldownCardsSelf"></div>
+        <!-- Right column: opp banish/deck (top) + self ignition/cooldown/hand (bottom) -->
+        <div class="playmat-col playmat-col--right" id="playmatColRight">
+          <!-- Opponent block — deck on the right from player's view -->
+          <div class="pm-side-group pm-side-group--opp" id="leftZonesOpp">
+            <div class="pm-left-zones-pair">
+              <div class="pm-zone pm-zone--deck" id="deckOpp" aria-label="Opponent deck">
+                <span class="pm-zone__label" id="deckLabelOpp">Deck</span>
+                <div class="pm-deck-row">
+                  <span class="pm-deck-count" id="deckCountOpp">—</span>
+                  <div class="pm-deck-sleeve" id="deckSleeveOpp"></div>
+                  <!-- Invisible third slot: matches DRAW button footprint so space-evenly matches your deck -->
+                  <span class="pm-deck-draw-placeholder" aria-hidden="true"></span>
+                </div>
+              </div>
+              <div class="pm-zone pm-zone--banish" id="banishOpp" aria-label="Opponent banished">
+                <span class="pm-zone__label" id="labelBanishOpp">Banished</span>
+                <div class="pm-stack-top" id="banishTopOpp"></div>
+              </div>
             </div>
           </div>
-          <div class="pm-hand-row">
-            <div class="pm-hand-area" id="handSelf" aria-label="Your hand">
-              <span class="pm-hand-area__label" id="handLabelSelf">Hand</span>
-              <div class="pm-hand-cards"></div>
+
+          <!-- Own right zones (bottom half) -->
+          <div class="pm-side-group pm-side-group--own" id="rightZonesSelf">
+            <div class="pm-ignition-cooldown-row pm-ignition-cooldown-row--self">
+              <div
+                class="pm-zone pm-zone--ignition pm-zone--ignition-self"
+                id="ignitionSelf"
+                aria-label="Your ignition slot"
+              >
+                <span class="pm-zone__label" id="labelIgnitionSelf">Ignition</span>
+                <div class="pm-ignition-card" id="ignitionCardSelf"></div>
+                <span class="pm-ignition-counter hidden" id="ignitionCounterSelf">0</span>
+              </div>
+              <div class="pm-zone pm-zone--cooldown" id="cooldownSelf" aria-label="Your cooldown pile">
+                <span class="pm-zone__label" id="labelCooldownSelf">Cooldown</span>
+                <div class="pm-cooldown-cards" id="cooldownCardsSelf"></div>
+              </div>
             </div>
-            <div id="mulliganBar" class="pm-mulligan-bar hidden" aria-live="polite">
-              <p class="pm-mulligan-hint" id="mulliganHint"></p>
-              <p class="pm-mulligan-timer" id="mulliganTimer" aria-hidden="true"></p>
-              <p class="pm-mulligan-counts" id="mulliganCounts"></p>
-              <button type="button" id="mulliganConfirmBtn" class="pm-mulligan-confirm"></button>
+            <div class="pm-hand-row">
+              <div class="pm-hand-area" id="handSelf" aria-label="Your hand">
+                <span class="pm-hand-area__label" id="handLabelSelf">Hand</span>
+                <div class="pm-hand-cards"></div>
+              </div>
+              <div id="mulliganBar" class="pm-mulligan-bar hidden" aria-live="polite">
+                <p class="pm-mulligan-hint" id="mulliganHint"></p>
+                <p class="pm-mulligan-timer" id="mulliganTimer" aria-hidden="true"></p>
+                <p class="pm-mulligan-counts" id="mulliganCounts"></p>
+                <button type="button" id="mulliganConfirmBtn" class="pm-mulligan-confirm"></button>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-    </div>
+      <!-- Card hover preview -->
+      <div id="matchCardPreview" class="pm-card-preview hidden" aria-hidden="true"></div>
 
-    <!-- Card hover preview -->
-    <div id="matchCardPreview" class="pm-card-preview hidden" aria-hidden="true"></div>
-
-    <!-- Pile view modal (reused for deck/cooldown/banish inspection) -->
-    <div id="pileViewModal" class="modal-overlay hidden" aria-hidden="true">
-      <div class="modal-dialog pile-view-dialog" role="dialog" aria-modal="true" aria-labelledby="pileViewTitle">
-        <div class="pile-view-dialog__head">
-          <h3 id="pileViewTitle">Cards</h3>
-          <button type="button" id="pileViewCloseBtn" class="match-end-btn-secondary">Close</button>
+      <section class="match-debug">
+        <h3 id="debugLogsTitle">Debug logs</h3>
+        <h4 id="reactionPendingTitle" class="match-debug-sub">Reaction / pending</h4>
+        <pre id="status"></pre>
+        <h4 id="snapshotTitle" class="match-debug-sub">Snapshot</h4>
+        <pre id="snapshot"></pre>
+        <div class="match-debug-events-head">
+          <h4 id="eventsTitle" class="match-debug-sub">Events</h4>
+          <button type="button" id="exportClientTraceBtn" class="match-end-btn-secondary">
+            Download client trace (JSON)
+          </button>
         </div>
-        <div id="pileViewGrid" class="deck-view-grid"></div>
-      </div>
+        <pre id="events"></pre>
+      </section>
     </div>
-    <section class="match-debug">
-      <h3 id="debugLogsTitle">Debug logs</h3>
-      <h4 id="reactionPendingTitle" class="match-debug-sub">Reaction / pending</h4>
-      <pre id="status"></pre>
-      <h4 id="snapshotTitle" class="match-debug-sub">Snapshot</h4>
-      <pre id="snapshot"></pre>
-      <div class="match-debug-events-head">
-        <h4 id="eventsTitle" class="match-debug-sub">Events</h4>
-        <button type="button" id="exportClientTraceBtn" class="match-end-btn-secondary">Download client trace (JSON)</button>
+
+    <footer class="main-footer" id="mainFooter" aria-label="Card catalog preview">
+      <p class="main-footer__label" id="cardMarqueeLabel">All cards — layout preview</p>
+      <div class="card-marquee">
+        <div class="card-marquee__track" id="cardMarqueeTrack"></div>
       </div>
-      <pre id="events"></pre>
-    </section>
-  </div>
+    </footer>
 
-  <footer class="main-footer" id="mainFooter" aria-label="Card catalog preview">
-    <p class="main-footer__label" id="cardMarqueeLabel">All cards — layout preview</p>
-    <div class="card-marquee">
-      <div class="card-marquee__track" id="cardMarqueeTrack"></div>
-    </div>
-  </footer>
-
-  <script src="/card-metadata.gen.js"></script>
-  <script src="/cards-catalog.js"></script>
-  <script src="/card.js"></script>
-  <script src="/card-marquee.js"></script>
-  <script type="module" src="/app.js"></script>
-</body>
+    <script src="/card-metadata.gen.js"></script>
+    <script src="/cards-catalog.js"></script>
+    <script src="/card.js"></script>
+    <script src="/card-marquee.js"></script>
+    <script type="module" src="/app.js"></script>
+  </body>
 </html>

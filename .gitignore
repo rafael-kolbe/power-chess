@@ -1,6 +1,6 @@
 node_modules/
 
-# Playwright browser binaries (see playwright.config.js PLAYWRIGHT_BROWSERS_PATH)
+# Local browser cache directory (can remain from previous UI tooling)
 .pw-browsers/
 
 # Match debug file logs (ADMIN_DEBUG_MATCH)

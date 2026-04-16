@@ -52,10 +52,7 @@ func TestRoomPersistCallsStore(t *testing.T) {
 // TestRoomServerStateDisconnectFrozenJSON ensures disconnect clock freeze fields round-trip in server JSON.
 func TestRoomServerStateDisconnectFrozenJSON(t *testing.T) {
 	in := roomServerState{
-		DisconnectFrozenMainMs:      42000,
-		DisconnectFrozenMainFor:     "A",
-		DisconnectFrozenCarryPaused: true,
-		DisconnectFrozenReactionMs:  8000,
+		DisconnectFrozenReactionMs: 8000,
 	}
 	raw, err := json.Marshal(&in)
 	if err != nil {
@@ -65,10 +62,7 @@ func TestRoomServerStateDisconnectFrozenJSON(t *testing.T) {
 	if err := json.Unmarshal(raw, &out); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if out.DisconnectFrozenMainMs != in.DisconnectFrozenMainMs ||
-		out.DisconnectFrozenMainFor != in.DisconnectFrozenMainFor ||
-		out.DisconnectFrozenCarryPaused != in.DisconnectFrozenCarryPaused ||
-		out.DisconnectFrozenReactionMs != in.DisconnectFrozenReactionMs {
+	if out.DisconnectFrozenReactionMs != in.DisconnectFrozenReactionMs {
 		t.Fatalf("round-trip mismatch: %+v vs %+v", out, in)
 	}
 }

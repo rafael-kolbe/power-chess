@@ -18,7 +18,7 @@ func (c *countingStore) SaveRoom(context.Context, *RoomSession) error {
 	return nil
 }
 func (c *countingStore) DeleteRoom(context.Context, string) error { return nil }
-func (c *countingStore) DeleteAllRooms(context.Context) error      { return nil }
+func (c *countingStore) DeleteAllRooms(context.Context) error     { return nil }
 
 // TestPersistRoomSkipsWhenAdminDebugMatch ensures ADMIN_DEBUG_MATCH disables DB writes.
 func TestPersistRoomSkipsWhenAdminDebugMatch(t *testing.T) {
