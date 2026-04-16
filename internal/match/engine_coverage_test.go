@@ -234,7 +234,7 @@ func TestLoneCounterOnStackResolvesNoOp(t *testing.T) {
 	markInPlayForTest(state)
 
 	resolver := e.resolvers[CardBlockade]
-	e.reactionStack = []ReactionAction{{Owner: gameplay.PlayerA, Card: blockade, Resolver: resolver}}
+	e.reactions.Push(ReactionAction{Owner: gameplay.PlayerA, Card: blockade, Resolver: resolver})
 	e.ReactionWindow = &ReactionWindow{Open: true, Trigger: "capture_attempt", Actor: gameplay.PlayerA}
 
 	if err := e.ResolveReactionStack(); err != nil {

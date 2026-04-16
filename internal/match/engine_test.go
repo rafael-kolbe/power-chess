@@ -306,7 +306,7 @@ func TestCanPlayerExtendCounterChainIgnitionGate(t *testing.T) {
 	markInPlayForTest(state)
 	e.OpenReactionWindow("capture_attempt", gameplay.PlayerA, []gameplay.CardType{gameplay.CardTypeCounter})
 	resolverCT := e.resolvers[CardCounterattack]
-	e.reactionStack = []ReactionAction{{Owner: gameplay.PlayerB, Card: ct, Resolver: resolverCT}}
+	e.reactions.Push(ReactionAction{Owner: gameplay.PlayerB, Card: ct, Resolver: resolverCT})
 
 	state.Players[gameplay.PlayerA].Ignition = gameplay.IgnitionSlot{
 		Occupied:        true,

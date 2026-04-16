@@ -15,6 +15,7 @@ const (
 	DefaultDrawCardManaCost     = 2
 	DefaultExtraManaPerTurnCap  = 1
 	DefaultIgnitionSlotCapacity = 1
+	errNotEnoughMana            = "not enough mana"
 )
 
 type PlayerID string
@@ -221,7 +222,7 @@ func (s *MatchState) GrantManaForChessCapture(pid PlayerID) {
 func (s *MatchState) DrawCard(pid PlayerID) error {
 	p := s.Players[pid]
 	if p.Mana < DefaultDrawCardManaCost {
-		return errors.New("not enough mana")
+		return errors.New(errNotEnoughMana)
 	}
 	if len(p.Hand) >= DefaultMaxHandSize {
 		return errors.New("hand is full")
@@ -238,9 +239,13 @@ func (s *MatchState) drawCardNoCost(pid PlayerID) error {
 	if len(p.Hand) >= DefaultMaxHandSize {
 		return errors.New("hand is full")
 	}
-	card := p.Deck[0]
-	p.Deck = p.Deck[1:]
-	p.Hand = append(p.Hand, card)
+	svc := NewZoneService()
+	_, nextDeck, nextHand, err := svc.MoveCardBetweenSlices(p.Deck, p.Hand, 0)
+	if err != nil {
+		return err
+	}
+	p.Deck = nextDeck
+	p.Hand = nextHand
 	return nil
 }
 
@@ -258,12 +263,17 @@ func (s *MatchState) ActivateCard(pid PlayerID, handIndex int) error {
 		return errors.New("ignition slot occupied")
 	}
 	if p.Mana < card.ManaCost {
-		return errors.New("not enough mana")
+		return errors.New(errNotEnoughMana)
 	}
 	p.Mana -= card.ManaCost
 	s.addEnergizedMana(pid, card.ManaCost)
 
-	p.Hand = append(p.Hand[:handIndex], p.Hand[handIndex+1:]...)
+	svc := NewZoneService()
+	_, nextHand, _, err := svc.MoveCardBetweenSlices(p.Hand, nil, handIndex)
+	if err != nil {
+		return err
+	}
+	p.Hand = nextHand
 	p.Ignition = IgnitionSlot{
 		Card:            card,
 		TurnsRemaining:  card.Ignition,
@@ -281,11 +291,16 @@ func (s *MatchState) ConsumeCardFromHand(pid PlayerID, handIndex int) (CardInsta
 	}
 	card := p.Hand[handIndex]
 	if p.Mana < card.ManaCost {
-		return CardInstance{}, errors.New("not enough mana")
+		return CardInstance{}, errors.New(errNotEnoughMana)
 	}
 	p.Mana -= card.ManaCost
 	s.addEnergizedMana(pid, card.ManaCost)
-	p.Hand = append(p.Hand[:handIndex], p.Hand[handIndex+1:]...)
+	svc := NewZoneService()
+	_, nextHand, _, err := svc.MoveCardBetweenSlices(p.Hand, nil, handIndex)
+	if err != nil {
+		return CardInstance{}, err
+	}
+	p.Hand = nextHand
 	return card, nil
 }
 
@@ -293,26 +308,7 @@ func (s *MatchState) ConsumeCardFromHand(pid PlayerID, handIndex int) (CardInsta
 // Cooldown is zero: Continuous cards are banished; other types return to the deck (see PROJECT.md).
 func (s *MatchState) SendCardToCooldown(pid PlayerID, card CardInstance) {
 	p := s.Players[pid]
-	if card.Cooldown <= 0 {
-		s.routeCardFinishedCooldown(pid, card)
-		return
-	}
-	p.Cooldowns = append(p.Cooldowns, CooldownEntry{
-		Card:           card,
-		TurnsRemaining: card.Cooldown,
-	})
-}
-
-// routeCardFinishedCooldown moves a card whose cooldown timer has reached zero: Continuous cards
-// go to banish; all other types are appended to the deck.
-func (s *MatchState) routeCardFinishedCooldown(pid PlayerID, card CardInstance) {
-	p := s.Players[pid]
-	def, ok := CardDefinitionByID(card.CardID)
-	if ok && def.Type == CardTypeContinuous {
-		p.Banished = append(p.Banished, card)
-		return
-	}
-	p.Deck = append(p.Deck, card)
+	NewZoneService().SendCardToCooldown(p, card)
 }
 
 // ResolveIgnitionFor finalizes ignition for one player's slot and appends a success/failure event.
@@ -356,13 +352,14 @@ func (s *MatchState) tickIgnition(pid PlayerID) {
 
 func (s *MatchState) tickCooldowns(pid PlayerID) {
 	p := s.Players[pid]
+	zones := NewZoneService()
 	next := p.Cooldowns[:0]
 	for _, cd := range p.Cooldowns {
 		if cd.TurnsRemaining > 0 {
 			cd.TurnsRemaining--
 		}
 		if cd.TurnsRemaining == 0 {
-			s.routeCardFinishedCooldown(pid, cd.Card)
+			zones.RouteFinishedCooldown(p, cd.Card)
 			continue
 		}
 		next = append(next, cd)
