@@ -76,7 +76,7 @@ Swap positions of one piece you control with one piece your opponent controls up
 ```
 
 # Mind Control
-## Type: Power 
+## Type: Power
 ## Description
 Target a piece your opponent controls, except the king or a queen, and take control of it for three turns. If the piece is captured, it goes to your opponent's captures.
 ## Cost: 7

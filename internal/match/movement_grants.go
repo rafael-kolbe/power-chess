@@ -11,6 +11,8 @@ type MovementGrantKind string
 const (
 	// MovementGrantKnightPattern grants additional knight movement while preserving native moves.
 	MovementGrantKnightPattern MovementGrantKind = "knight_pattern"
+	// MovementGrantBishopPattern grants additional bishop-line movement (one diagonal step for pawns).
+	MovementGrantBishopPattern MovementGrantKind = "bishop_pattern"
 )
 
 // MovementGrant stores one active piece movement modifier owned by a player.
@@ -45,12 +47,55 @@ func (e *Engine) canUseAugmentedMovement(pid gameplay.PlayerID, m chess.Move) bo
 		if grant.Owner != pid || grant.Target != m.From || grant.RemainingOwnerTurns <= 0 {
 			continue
 		}
-		if !movementGrantMatches(grant.Kind, m.From, m.To) {
+		if !e.movementGrantMatchesMove(grant, m) {
 			continue
 		}
 		return true
 	}
 	return false
+}
+
+// movementGrantMatchesMove checks whether m's geometry matches the grant pattern for the piece on m.From.
+func (e *Engine) movementGrantMatchesMove(grant MovementGrant, m chess.Move) bool {
+	moving := e.Chess.PieceAt(m.From)
+	switch grant.Kind {
+	case MovementGrantKnightPattern:
+		dr := absInt(m.From.Row - m.To.Row)
+		dc := absInt(m.From.Col - m.To.Col)
+		return (dr == 2 && dc == 1) || (dr == 1 && dc == 2)
+	case MovementGrantBishopPattern:
+		return bishopTouchMovePatternLegal(e.Chess, moving, m.From, m.To)
+	default:
+		return false
+	}
+}
+
+// bishopTouchMovePatternLegal reports whether from->to follows bishop lines: sliding with a clear path
+// for non-pawns, or exactly one diagonal step for pawns (empty or enemy capture). Own-piece
+// destinations are rejected; king capture is not validated here (ApplyPseudoLegalMove enforces it).
+func bishopTouchMovePatternLegal(g *chess.Game, moving chess.Piece, from, to chess.Pos) bool {
+	dr := to.Row - from.Row
+	dc := to.Col - from.Col
+	adr := absInt(dr)
+	adc := absInt(dc)
+	if adr != adc || adr == 0 {
+		return false
+	}
+	dest := g.PieceAt(to)
+	if !dest.IsEmpty() && dest.Color == moving.Color {
+		return false
+	}
+	if moving.Type == chess.Pawn {
+		return adr == 1
+	}
+	stepR := dr / adr
+	stepC := dc / adc
+	for r, c, i := from.Row+stepR, from.Col+stepC, 1; i < adr; i, r, c = i+1, r+stepR, c+stepC {
+		if !g.PieceAt(chess.Pos{Row: r, Col: c}).IsEmpty() {
+			return false
+		}
+	}
+	return true
 }
 
 // advanceMovementGrantPosition moves grants that are attached to the moved piece.
@@ -88,16 +133,6 @@ func (e *Engine) pruneStaleMovementGrants() {
 		next = append(next, grant)
 	}
 	e.movementGrants = next
-}
-
-// movementGrantMatches checks whether from->to satisfies the grant movement pattern.
-func movementGrantMatches(kind MovementGrantKind, from, to chess.Pos) bool {
-	if kind != MovementGrantKnightPattern {
-		return false
-	}
-	dr := absInt(from.Row - to.Row)
-	dc := absInt(from.Col - to.Col)
-	return (dr == 2 && dc == 1) || (dr == 1 && dc == 2)
 }
 
 // absInt returns absolute value for small board delta calculations.

@@ -127,8 +127,8 @@ globalThis.__POWER_CHESS_CARD_METADATA__ = [
     "mana": 3,
     "ignition": 0,
     "cooldown": 2,
-    "targets": 0,
-    "effectDuration": 0,
+    "targets": 1,
+    "effectDuration": 1,
     "name": "Bishop Touch",
     "description": "Give any piece you control, except the king or a bishop, the ability to move as if it were a bishop for one turn. If the target is a pawn, it may move only 1 square when using this movement.",
     "example": "1. You have a rook on b2.\n2. You activate \"Bishop Touch\".\n3. You move the rook to c3."

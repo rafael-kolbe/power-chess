@@ -1684,6 +1684,71 @@ import {
         return out;
     }
 
+    /** Merges bishop-pattern destinations when `activePieceEffects` grants bishop-touch on this square. */
+    function mergeBishopTouchGrant(out, board, from, color, snapshot) {
+        if (!snapshot) return out;
+        const localPid = playerEl.value;
+        const fx = snapshot.activePieceEffects;
+        if (!Array.isArray(fx)) return out;
+        const src = parseCode(pieceAt(board, from.row, from.col));
+        if (!src || src.type === "B" || src.type === "K") return out;
+        const localColor = localPid === "A" ? "w" : "b";
+        if (color !== localColor) return out;
+        const has = fx.some(
+            (e) =>
+                e.owner === localPid &&
+                String(e.cardId || "") === "bishop-touch" &&
+                Number(e.turnsRemaining || 0) > 0 &&
+                Number(e.row) === from.row &&
+                Number(e.col) === from.col,
+        );
+        if (!has) return out;
+        const maxSteps = src.type === "P" ? 1 : 8;
+        const diags = [
+            [-1, -1],
+            [-1, 1],
+            [1, -1],
+            [1, 1],
+        ];
+        for (const [dr, dc] of diags) {
+            let r = from.row + dr;
+            let c = from.col + dc;
+            let traveled = 0;
+            while (inBounds(r, c) && traveled < maxSteps) {
+                const dst = parseCode(pieceAt(board, r, c));
+                if (!dst) {
+                    out.push({ row: r, col: c });
+                    traveled++;
+                    r += dr;
+                    c += dc;
+                    continue;
+                }
+                if (dst.color !== color) {
+                    out.push({ row: r, col: c });
+                }
+                break;
+            }
+        }
+        return out;
+    }
+
+    /** Applies knight-touch and bishop-touch movement hints; dedupes overlapping destinations. */
+    function mergePowerMovementGrants(out, board, from, color, snapshot) {
+        mergeKnightTouchGrant(out, board, from, color, snapshot);
+        mergeBishopTouchGrant(out, board, from, color, snapshot);
+        const seen = new Set();
+        let w = 0;
+        for (let i = 0; i < out.length; i++) {
+            const m = out[i];
+            const k = `${m.row},${m.col}`;
+            if (seen.has(k)) continue;
+            seen.add(k);
+            out[w++] = m;
+        }
+        out.length = w;
+        return out;
+    }
+
     /**
      * computeMoves returns pseudo-legal destinations for highlighting. En passant uses server snapshot.
      * @param {string[][]} board
@@ -1726,7 +1791,7 @@ import {
                     }
                 }
             }
-            return mergeKnightTouchGrant(out, board, from, color, snapshot).filter((m) =>
+            return mergePowerMovementGrants(out, board, from, color, snapshot).filter((m) =>
                 inBounds(m.row, m.col),
             );
         }
@@ -1743,7 +1808,7 @@ import {
                 [2, 1],
             ];
             for (const [dr, dc] of jumps) pushIfValidMove(out, board, color, from.row + dr, from.col + dc);
-            return out;
+            return mergePowerMovementGrants(out, board, from, color, snapshot);
         }
         if (type === "B") {
             slidingMoves(out, board, color, from, [
@@ -1752,7 +1817,7 @@ import {
                 [1, -1],
                 [1, 1],
             ]);
-            return mergeKnightTouchGrant(out, board, from, color, snapshot);
+            return mergePowerMovementGrants(out, board, from, color, snapshot);
         }
         if (type === "R") {
             slidingMoves(out, board, color, from, [
@@ -1761,7 +1826,7 @@ import {
                 [0, -1],
                 [0, 1],
             ]);
-            return mergeKnightTouchGrant(out, board, from, color, snapshot);
+            return mergePowerMovementGrants(out, board, from, color, snapshot);
         }
         if (type === "Q") {
             slidingMoves(out, board, color, from, [
@@ -1774,7 +1839,7 @@ import {
                 [0, -1],
                 [0, 1],
             ]);
-            return mergeKnightTouchGrant(out, board, from, color, snapshot);
+            return mergePowerMovementGrants(out, board, from, color, snapshot);
         }
         if (type === "K") {
             const opponentColor = color === "w" ? "b" : "w";
@@ -1837,7 +1902,7 @@ import {
                 }
             }
         }
-        return mergeKnightTouchGrant(out, board, from, color, snapshot);
+        return mergePowerMovementGrants(out, board, from, color, snapshot);
     }
 
     function isOwnPiece(code) {
