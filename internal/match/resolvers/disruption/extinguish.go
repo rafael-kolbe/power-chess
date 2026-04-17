@@ -7,14 +7,14 @@ import (
 )
 
 // ExtinguishResolver is the resolver for the "extinguish" Disruption card.
-// The card effect (negating the opponent's ignition) is not yet implemented;
-// the resolver is a deliberate no-op placeholder until the effect is built.
 type ExtinguishResolver struct{}
 
 // RequiresTarget reports whether this resolver waits for resolve_pending_effect input.
 func (ExtinguishResolver) RequiresTarget() bool { return false }
 
-// Apply is a placeholder; the Extinguish effect will be implemented in a future iteration.
-func (ExtinguishResolver) Apply(_ resolvers.ResolverEngine, _ gameplay.PlayerID, _ resolvers.EffectTarget) error {
-	return nil
+// Apply marks the opponent's current ignition card as negated; it remains in their ignition zone
+// until its normal burn completes, but activation attempts resolve as failure and skip the effect.
+func (ExtinguishResolver) Apply(e resolvers.ResolverEngine, owner gameplay.PlayerID, _ resolvers.EffectTarget) error {
+	opp := gameplay.OppositePlayer(owner)
+	return e.MarkOpponentCardEffectNegated(opp)
 }

@@ -66,9 +66,15 @@ type Engine struct {
 
 // ActivationFXEvent is one ignition resolution for client animations (glow + fly to cooldown).
 type ActivationFXEvent struct {
-	Owner   gameplay.PlayerID
-	CardID  gameplay.CardID
-	Success bool
+	Owner          gameplay.PlayerID
+	CardID         gameplay.CardID
+	Success        bool
+	RetainIgnition bool // true: Continuous mid-burn pulse — client keeps ignition DOM until snapshot catches up
+	// NegatesActivationOf is non-empty when this activation caused the opponent's card to become
+	// activation-negated (EffectNegated changed false→true). The ignition slot remains occupied
+	// but all future activation attempts for that card will resolve as failure.
+	// The client shows the negate overlay immediately after the glow, before subsequent events.
+	NegatesActivationOf gameplay.PlayerID
 }
 
 // PullActivationFXEvents returns and clears pending activation broadcast events.
@@ -80,10 +86,26 @@ func (e *Engine) PullActivationFXEvents() []ActivationFXEvent {
 
 // appendActivationFX records one server→client activate_card animation (effect step: success/fail, then cooldown).
 func (e *Engine) appendActivationFX(owner gameplay.PlayerID, id gameplay.CardID, success bool) {
+	e.appendActivationFXRetain(owner, id, success, false)
+}
+
+func (e *Engine) appendActivationFXRetain(owner gameplay.PlayerID, id gameplay.CardID, success bool, retainIgnition bool) {
 	e.pendingActivationFX = append(e.pendingActivationFX, ActivationFXEvent{
-		Owner:   owner,
-		CardID:  id,
-		Success: success,
+		Owner:          owner,
+		CardID:         id,
+		Success:        success,
+		RetainIgnition: retainIgnition,
+	})
+}
+
+// appendActivationFXNegating records an activate_card event that also negated the opponent's
+// card activation during this activation (e.g. Extinguish). NegatesActivationOf may be empty.
+func (e *Engine) appendActivationFXNegating(owner gameplay.PlayerID, id gameplay.CardID, success bool, negatesActivationOf gameplay.PlayerID) {
+	e.pendingActivationFX = append(e.pendingActivationFX, ActivationFXEvent{
+		Owner:               owner,
+		CardID:              id,
+		Success:             success,
+		NegatesActivationOf: negatesActivationOf,
 	})
 }
 
@@ -452,15 +474,48 @@ func (e *Engine) handleResolvedEffect(ev *gameplay.ResolvedIgnitionEvent) error 
 func (e *Engine) processResolvedIgnitions() error {
 	for _, ev := range e.State.PopResolvedIgnitions() {
 		evCopy := ev
-		if err := e.handleResolvedEffect(&evCopy); err != nil {
+		negatesActivationOf, err := e.runWithNegationDetection(evCopy.Owner, func() error {
+			return e.handleResolvedEffect(&evCopy)
+		})
+		if err != nil {
 			return err
 		}
-		e.appendActivationFX(evCopy.Owner, evCopy.Card.CardID, evCopy.Success)
+		if evCopy.MidTurn {
+			e.pendingActivationFX = append(e.pendingActivationFX, ActivationFXEvent{
+				Owner:               evCopy.Owner,
+				CardID:              evCopy.Card.CardID,
+				Success:             evCopy.Success,
+				RetainIgnition:      true,
+				NegatesActivationOf: negatesActivationOf,
+			})
+			continue
+		}
+		e.pendingActivationFX = append(e.pendingActivationFX, ActivationFXEvent{
+			Owner:               evCopy.Owner,
+			CardID:              evCopy.Card.CardID,
+			Success:             evCopy.Success,
+			NegatesActivationOf: negatesActivationOf,
+		})
 		e.State.SendCardToCooldown(evCopy.Owner, evCopy.Card)
 		e.ignitionTargets[evCopy.Owner] = nil
 		delete(e.ignitionTargetCard, evCopy.Owner)
 	}
 	return nil
+}
+
+// runWithNegationDetection calls fn (which runs a resolver) and returns the opponent player ID if
+// their ignition card transitioned to EffectNegated=true during the call, or empty string otherwise.
+func (e *Engine) runWithNegationDetection(owner gameplay.PlayerID, fn func() error) (gameplay.PlayerID, error) {
+	opp := gameplay.OppositePlayer(owner)
+	oppSlot := e.State.Players[opp]
+	wasNegated := oppSlot != nil && oppSlot.Ignition.Occupied && oppSlot.Ignition.EffectNegated
+	if err := fn(); err != nil {
+		return "", err
+	}
+	if !wasNegated && oppSlot != nil && oppSlot.Ignition.Occupied && oppSlot.Ignition.EffectNegated {
+		return opp, nil
+	}
+	return "", nil
 }
 
 // ActivatePlayerSkill executes the selected player skill on the current turn and consumes that turn.
@@ -741,4 +796,16 @@ func (e *Engine) IncrementExtraMoves(pid gameplay.PlayerID) {
 // NegateOpponentIgnition implements matchresolvers.ResolverEngine.
 func (e *Engine) NegateOpponentIgnition(opponentPID gameplay.PlayerID) error {
 	return e.State.ResolveIgnitionFor(opponentPID, false)
+}
+
+// MarkOpponentCardEffectNegated implements matchresolvers.ResolverEngine. It marks the opponent's
+// ignition card as negated whether the card was just ignited (reaction window) or already burning
+// (initiator play on a later turn). Any resolver may call this to apply a negate effect.
+func (e *Engine) MarkOpponentCardEffectNegated(opponentPID gameplay.PlayerID) error {
+	p := e.State.Players[opponentPID]
+	if p == nil || !p.Ignition.Occupied {
+		return errors.New("opponent ignition slot is empty")
+	}
+	p.Ignition.EffectNegated = true
+	return nil
 }

@@ -44,10 +44,14 @@ type PieceRef struct {
 
 // IgnitionSlot stores the currently igniting card (single slot).
 type IgnitionSlot struct {
-	Card            CardInstance
-	TurnsRemaining  int
-	Occupied        bool
-	ActivationOwner PlayerID
+	Card             CardInstance
+	TurnsRemaining   int
+	Occupied         bool
+	ActivationOwner  PlayerID
+	// EffectNegated is true when an opponent effect (e.g. Extinguish) marked this ignition
+	// activation as negated; resolution uses failure and the UI shows a negate overlay until the
+	// card leaves the ignition zone.
+	EffectNegated bool `json:"effectNegated,omitempty"`
 }
 
 // CooldownEntry tracks a card and remaining cooldown turns.
@@ -105,6 +109,9 @@ type ResolvedIgnitionEvent struct {
 	Owner   PlayerID
 	Card    CardInstance
 	Success bool
+	// MidTurn is true for Continuous cards: an activation pulse while the card stays in ignition
+	// (retain slot). The engine still applies the card resolver for that pulse (then activate_card FX).
+	MidTurn bool `json:"midTurn,omitempty"`
 }
 
 // NewMatchState creates an initialized match with default rules and full decks (no opening draw).
@@ -279,10 +286,11 @@ func (s *MatchState) ActivateCard(pid PlayerID, handIndex int) error {
 	}
 	p.Hand = nextHand
 	p.Ignition = IgnitionSlot{
-		Card:            card,
-		TurnsRemaining:  card.Ignition,
-		Occupied:        true,
-		ActivationOwner: pid,
+		Card:             card,
+		TurnsRemaining:   card.Ignition,
+		Occupied:         true,
+		ActivationOwner:  pid,
+		EffectNegated:    false,
 	}
 	return nil
 }
@@ -340,18 +348,53 @@ func (s *MatchState) PopResolvedIgnitions() []ResolvedIgnitionEvent {
 	return ev
 }
 
-// tickIgnition decrements this player's ignition counter at the start of their turn.
+// tickIgnition runs the start-of-turn ignition logic for one player:
+// all cards decrement their counter; when the counter reaches 0, the final activation fires;
+// Continuous cards also fire a mid-turn activation on every tick where the counter ends up > 0.
 func (s *MatchState) tickIgnition(pid PlayerID) {
 	p := s.Players[pid]
 	if p == nil || !p.Ignition.Occupied {
 		return
 	}
+	cardDef, ok := CardDefinitionByID(p.Ignition.Card.CardID)
+	isContinuous := ok && cardDef.Type == CardTypeContinuous
+
+	// All types: decrement counter at start of owner's turn.
 	if p.Ignition.TurnsRemaining > 0 {
 		p.Ignition.TurnsRemaining--
 	}
+
+	// Counter hit 0: final activation (clears slot, sends to cooldown/banished via engine).
 	if p.Ignition.TurnsRemaining == 0 {
-		_ = s.ResolveIgnitionFor(pid, true)
+		success := !p.Ignition.EffectNegated
+		_ = s.ResolveIgnitionFor(pid, success)
+		return
 	}
+
+	// Continuous only: also fire a mid-turn activation when counter is still > 0 after decrement.
+	if isContinuous {
+		s.queueContinuousMidTurnPulse(pid)
+	}
+}
+
+// PulseContinuousIgnitionMidTurn queues the initial mid-turn activation for a Continuous card in
+// ignition WITHOUT decrementing its counter. Call this once after the ignite_reaction window closes
+// on the turn the card was played. The counter must be > 0 and will only be decremented at the
+// start of the owner's next turn (see tickIgnition).
+func (s *MatchState) PulseContinuousIgnitionMidTurn(owner PlayerID) {
+	s.queueContinuousMidTurnPulse(owner)
+}
+
+// queueContinuousMidTurnPulse appends a MidTurn activation event without touching the counter.
+func (s *MatchState) queueContinuousMidTurnPulse(owner PlayerID) {
+	p := s.Players[owner]
+	success := !p.Ignition.EffectNegated
+	s.ResolvedQueue = append(s.ResolvedQueue, ResolvedIgnitionEvent{
+		Owner:   owner,
+		Card:    p.Ignition.Card,
+		Success: success,
+		MidTurn: true,
+	})
 }
 
 func (s *MatchState) tickCooldowns(pid PlayerID) {

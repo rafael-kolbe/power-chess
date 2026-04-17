@@ -1728,6 +1728,29 @@ pre {
   overflow: hidden;
 }
 
+/* Opponent negation (Extinguish): symbol over ignition card; pointer-events none so hover uses card beneath */
+.pm-ignition-negate-overlay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 80%;
+  max-width: 100%;
+  z-index: 4;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pm-ignition-negate-overlay__img {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  opacity: 0.5;
+  filter: drop-shadow(0 0 4px rgba(220, 60, 60, 0.95));
+}
+
 /* Queued reaction card (stack top); may fill the slot or sit above an existing ignition card. */
 .pm-ignition-card.pm-ignition-staged {
   outline: 2px dashed rgba(120, 200, 255, 0.9);

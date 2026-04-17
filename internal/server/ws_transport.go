@@ -24,10 +24,12 @@ func (WSTransport) BuildActivateCardEnvelope(ev match.ActivationFXEvent) Envelop
 	return Envelope{
 		Type: MessageActivateCard,
 		Payload: MustPayload(ActivateCardEventPayload{
-			PlayerID: string(ev.Owner),
-			CardID:   string(ev.CardID),
-			CardType: cardType,
-			Success:  ev.Success,
+			PlayerID:          string(ev.Owner),
+			CardID:            string(ev.CardID),
+			CardType:          cardType,
+			Success:           ev.Success,
+			RetainIgnition:    ev.RetainIgnition,
+			NegatesActivationOf: string(ev.NegatesActivationOf),
 		}),
 	}
 }

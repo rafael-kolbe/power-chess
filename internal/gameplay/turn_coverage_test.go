@@ -204,6 +204,89 @@ func TestTickCooldownsRoutesPowerToDeck(t *testing.T) {
 	}
 }
 
+// --- tickIgnition ---
+
+func TestTickIgnitionContinuousQueuesMidTurnPulse(t *testing.T) {
+	s, _ := NewMatchState(StarterDeck(), StarterDeck())
+	card := CardInstance{InstanceID: "c1", CardID: "clairvoyance", ManaCost: 7, Ignition: 3, Cooldown: 0}
+	s.Players[PlayerA].Ignition = IgnitionSlot{
+		Card: card, TurnsRemaining: 3, Occupied: true, ActivationOwner: PlayerA,
+	}
+	s.tickIgnition(PlayerA)
+	if len(s.ResolvedQueue) != 1 || !s.ResolvedQueue[0].MidTurn || !s.ResolvedQueue[0].Success {
+		t.Fatalf("expected mid-turn success event, got %+v", s.ResolvedQueue)
+	}
+	if s.Players[PlayerA].Ignition.TurnsRemaining != 2 {
+		t.Fatalf("expected 2 turns left, got %d", s.Players[PlayerA].Ignition.TurnsRemaining)
+	}
+}
+
+func TestTickIgnitionNegatedPowerFinalFails(t *testing.T) {
+	s, _ := NewMatchState(StarterDeck(), StarterDeck())
+	card := CardInstance{InstanceID: "c1", CardID: "energy-gain", ManaCost: 0, Ignition: 1, Cooldown: 2}
+	s.Players[PlayerA].Ignition = IgnitionSlot{
+		Card: card, TurnsRemaining: 1, Occupied: true, ActivationOwner: PlayerA,
+		EffectNegated: true,
+	}
+	s.tickIgnition(PlayerA)
+	if s.Players[PlayerA].Ignition.Occupied {
+		t.Fatal("expected ignition cleared after final tick")
+	}
+	if len(s.ResolvedQueue) != 1 || s.ResolvedQueue[0].Success || s.ResolvedQueue[0].MidTurn {
+		t.Fatalf("expected final fail event, got %+v", s.ResolvedQueue[0])
+	}
+}
+
+func TestTickIgnitionContinuousNegatedMidPulseFails(t *testing.T) {
+	s, _ := NewMatchState(StarterDeck(), StarterDeck())
+	card := CardInstance{InstanceID: "c1", CardID: "clairvoyance", ManaCost: 7, Ignition: 3, Cooldown: 0}
+	s.Players[PlayerA].Ignition = IgnitionSlot{
+		Card: card, TurnsRemaining: 3, Occupied: true, ActivationOwner: PlayerA,
+		EffectNegated: true,
+	}
+	s.tickIgnition(PlayerA)
+	if len(s.ResolvedQueue) != 1 || !s.ResolvedQueue[0].MidTurn || s.ResolvedQueue[0].Success {
+		t.Fatalf("expected mid fail, got %+v", s.ResolvedQueue[0])
+	}
+	if s.Players[PlayerA].Ignition.TurnsRemaining != 2 || !s.Players[PlayerA].Ignition.Occupied {
+		t.Fatal("continuous should stay in ignition")
+	}
+}
+
+// TestTickIgnitionContinuousFinalWhenTurnsRemainingIsOne verifies that when TurnsRemaining==1,
+// the StartTurn decrement brings it to 0 and the FINAL activation fires (not a mid-turn pulse).
+func TestTickIgnitionContinuousFinalWhenTurnsRemainingIsOne(t *testing.T) {
+	s, _ := NewMatchState(StarterDeck(), StarterDeck())
+	card := CardInstance{InstanceID: "c1", CardID: "clairvoyance", ManaCost: 7, Ignition: 3, Cooldown: 0}
+	s.Players[PlayerA].Ignition = IgnitionSlot{
+		Card: card, TurnsRemaining: 1, Occupied: true, ActivationOwner: PlayerA,
+	}
+	s.tickIgnition(PlayerA)
+	if s.Players[PlayerA].Ignition.Occupied {
+		t.Fatal("expected ignition cleared: T=1 ticked to 0 → final resolve")
+	}
+	if len(s.ResolvedQueue) != 1 || s.ResolvedQueue[0].MidTurn {
+		t.Fatalf("expected final (non-MidTurn) event, got %+v", s.ResolvedQueue)
+	}
+}
+
+// TestTickIgnitionContinuousFinalWhenTurnsRemainingIsZero verifies that when TurnsRemaining is
+// already 0 (counter expired last tick), the StartTurn call fires the final activation.
+func TestTickIgnitionContinuousFinalWhenTurnsRemainingIsZero(t *testing.T) {
+	s, _ := NewMatchState(StarterDeck(), StarterDeck())
+	card := CardInstance{InstanceID: "c1", CardID: "clairvoyance", ManaCost: 7, Ignition: 3, Cooldown: 0}
+	s.Players[PlayerA].Ignition = IgnitionSlot{
+		Card: card, TurnsRemaining: 0, Occupied: true, ActivationOwner: PlayerA,
+	}
+	s.tickIgnition(PlayerA)
+	if s.Players[PlayerA].Ignition.Occupied {
+		t.Fatal("expected ignition cleared after final tick")
+	}
+	if len(s.ResolvedQueue) != 1 || s.ResolvedQueue[0].MidTurn {
+		t.Fatalf("expected final non-mid event, got %+v", s.ResolvedQueue[0])
+	}
+}
+
 // --- ResolveIgnition ---
 
 func TestResolveIgnitionClearsSlotAndQueuesEvent(t *testing.T) {

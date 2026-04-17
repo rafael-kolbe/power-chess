@@ -87,6 +87,7 @@ func playerHUDState(pid gameplay.PlayerID, p *gameplay.PlayerState, sleeve strin
 		hud.IgnitionOn = true
 		hud.IgnitionCard = string(p.Ignition.Card.CardID)
 		hud.IgnitionTurnsRemaining = p.Ignition.TurnsRemaining
+		hud.IgnitionEffectNegated = p.Ignition.EffectNegated
 	}
 
 	// Include hand only for the owning player.

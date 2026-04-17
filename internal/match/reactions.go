@@ -299,12 +299,14 @@ func (e *Engine) ResolveReactionStack() error {
 	}
 	for e.reactions.Len() > 0 {
 		a, _ := e.reactions.Pop()
-		if err := a.Resolver.Apply(e, a.Owner, a.Target); err != nil {
+		negatesActivationOf, err := e.runWithNegationDetection(a.Owner, func() error {
+			return a.Resolver.Apply(e, a.Owner, a.Target)
+		})
+		if err != nil {
 			return err
 		}
 		// Resolvers may later report fail paths; until then successful Apply implies effect succeeded.
-		success := true
-		e.appendActivationFX(a.Owner, a.Card.CardID, success)
+		e.appendActivationFXNegating(a.Owner, a.Card.CardID, true, negatesActivationOf)
 		e.State.SendCardToCooldown(a.Owner, a.Card)
 	}
 	if e.pendingMove != nil {
@@ -314,17 +316,28 @@ func (e *Engine) ResolveReactionStack() error {
 			return err
 		}
 	}
-	// Delayed ignition (TurnsRemaining > 0) must keep burning after the reaction window; only
-	// ignition-0 cards finalize here (see Energy Gain, Continuous powers).
+	// ignite_reaction close: ignition-0 Power/Continuous finalize here. Continuous with TurnsRemaining > 0
+	// also fires its first activation in the same turn (after the window), then stays in the slot.
 	if rwTrigger == "ignite_reaction" && e.ReactionWindow != nil {
 		act := e.ReactionWindow.Actor
 		ig := &e.State.Players[act].Ignition
-		if ig.Occupied && ig.TurnsRemaining == 0 {
-			if err := e.State.ResolveIgnitionFor(act, true); err != nil {
+		if !ig.Occupied {
+			// no-op
+		} else if ig.TurnsRemaining == 0 {
+			success := !ig.EffectNegated
+			if err := e.State.ResolveIgnitionFor(act, success); err != nil {
 				return err
 			}
 			if err := e.processResolvedIgnitions(); err != nil {
 				return err
+			}
+		} else {
+			def, ok := gameplay.CardDefinitionByID(ig.Card.CardID)
+			if ok && def.Type == gameplay.CardTypeContinuous {
+				e.State.PulseContinuousIgnitionMidTurn(act)
+				if err := e.processResolvedIgnitions(); err != nil {
+					return err
+				}
 			}
 		}
 	}

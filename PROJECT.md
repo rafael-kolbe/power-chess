@@ -93,7 +93,7 @@ Fluxo típico de ativação:
 3. O oponente pode reagir em janelas permitidas.  
 4. Sucesso ou falha → carta vai para **recarga**; ao terminar, volta ao **deck** (exceto banimento e efeitos específicos).
 
-**Ticks no início de turno (servidor):** +1 mana do jogador da vez (até o máximo); **−1** no contador de **ignição** da carta na zona de ignição **desse jogador** (cada assento tem o seu slot; o tick aplica-se à carta desse jogador quando o turno dele começa); **−1** em cada entrada de **cooldown** do jogador que está começando o turno (entradas que chegam a 0 voltam ao deck).
+**Ticks no início de turno (servidor):** +1 mana do jogador da vez (até o máximo); na zona de ignição **desse jogador**: **Power** (e tipos não-Continuous com burn) só **decrementam** o contador até 0 e **só então** tentam resolver o efeito; **Continuous** tenta **resolver o efeito em cada turno desse jogador** enquanto a carta estiver no slot (incluindo o **primeiro** pulso **no mesmo turno** em que a carta entrou, **depois** de fechar `ignite_reaction`), e o contador desce **uma vez por esse pulso**; quando o contador chega a **0** o slot ainda recebe **mais um** pulso final noutro início de turno antes de ir à recarga/banimento; **−1** em cada entrada de **cooldown** do jogador que está começando o turno (entradas que chegam a 0 voltam ao deck).
 
 ### Janelas de reação (tipos e papéis)
 

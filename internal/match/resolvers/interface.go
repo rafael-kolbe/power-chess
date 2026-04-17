@@ -46,8 +46,13 @@ type ResolverEngine interface {
 	GrantManaFromCardEffect(pid gameplay.PlayerID, amount int)
 	// IncrementExtraMoves grants one additional chess move this turn to pid.
 	IncrementExtraMoves(pid gameplay.PlayerID)
-	// NegateOpponentIgnition resolves opponentPID's ignition slot as a failure.
+	// NegateOpponentIgnition resolves opponentPID's ignition slot as a failure (clears slot).
 	NegateOpponentIgnition(opponentPID gameplay.PlayerID) error
+	// MarkOpponentCardEffectNegated sets the opponent's current ignition card as negated;
+	// the card stays in ignition until its normal burn completes; activations resolve as failure.
+	// Works regardless of whether the card was just ignited (reaction) or was already burning
+	// (initiator turn) — any resolver can call this to apply a negate effect.
+	MarkOpponentCardEffectNegated(opponentPID gameplay.PlayerID) error
 }
 
 // EffectResolver is the execution contract for card effects.

@@ -101,6 +101,12 @@ func TestDisruptionOwnTurnActivationSucceeds(t *testing.T) {
 	if state.Players[gameplay.PlayerB].Ignition.Occupied {
 		t.Fatal("expected PlayerB ignition cleared after resolution")
 	}
+	if !state.Players[gameplay.PlayerA].Ignition.Occupied {
+		t.Fatal("expected PlayerA ignition still occupied (Energy Gain)")
+	}
+	if !state.Players[gameplay.PlayerA].Ignition.EffectNegated {
+		t.Fatal("expected PlayerA ignition marked negated by Extinguish")
+	}
 }
 
 // TestDisruptionOwnTurnRejectedWhenOpponentIgnitionEmpty verifies that Extinguish cannot be
@@ -127,9 +133,8 @@ func TestDisruptionOwnTurnRejectedWhenOpponentIgnitionEmpty(t *testing.T) {
 	}
 }
 
-// TestDisruptionNegateOpponentIgnitionWorks verifies that the Engine's NegateOpponentIgnition
-// helper (used by future implementations) correctly clears the opponent's ignition slot.
-// ExtinguishResolver is currently a noop placeholder and does not call this method yet.
+// TestDisruptionNegateOpponentIgnitionWorks verifies NegateOpponentIgnition clears the opponent slot
+// (e.g. some Retribution effects). Extinguish uses MarkOpponentCardEffectNegated instead.
 func TestDisruptionNegateOpponentIgnitionWorks(t *testing.T) {
 	e, state := newDisruptionTestEngine(t)
 
@@ -148,6 +153,25 @@ func TestDisruptionNegateOpponentIgnitionWorks(t *testing.T) {
 
 	if state.Players[gameplay.PlayerA].Ignition.Occupied {
 		t.Fatal("expected PlayerA ignition to be cleared after NegateOpponentIgnition")
+	}
+}
+
+func TestMarkOpponentCardEffectNegatedKeepsSlot(t *testing.T) {
+	e, state := newDisruptionTestEngine(t)
+	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
+		t.Fatalf("PlayerA activate: %v", err)
+	}
+	if err := e.ResolveReactionStack(); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if err := e.MarkOpponentCardEffectNegated(gameplay.PlayerA); err != nil {
+		t.Fatalf("Mark: %v", err)
+	}
+	if !state.Players[gameplay.PlayerA].Ignition.Occupied {
+		t.Fatal("ignition should remain occupied")
+	}
+	if !state.Players[gameplay.PlayerA].Ignition.EffectNegated {
+		t.Fatal("EffectNegated should be true")
 	}
 }
 

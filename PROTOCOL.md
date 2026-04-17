@@ -115,12 +115,16 @@ Enviado **antes** do `state_snapshot` consolidado quando o servidor conclui o pa
     "playerId": "A",
     "cardId": "energy-gain",
     "cardType": "power",
-    "success": true
+    "success": true,
+    "retainIgnition": false
   }
 }
 ```
 
 - `cardType`: tipo catalogado em minúsculas (`power`, `continuous`, `retribution`, `counter`), quando conhecido.
+- `success`: `false` quando o efeito foi **negado** (ex.: Extinguish) ou falhou de outra forma — o resolver **não** aplica o efeito da carta.
+- `retainIgnition`: quando `true`, a carta **permanece** na zona de ignição após este passo (pulso **intermédio** de carta **Continuous**: inclui o **primeiro** pulso no **mesmo turno** em que a carta entrou, **após** fechar `ignite_reaction`, e cada início de turno seguinte **desse** jogador até ao pulso **final**). O cliente não deve mover a carta para recarga nem limpar a ignição até um `activate_card` sem `retainIgnition` (resolução final).
+- `negatesActivationOf`: ID do jogador cuja **activação** da carta em ignição foi negada por este evento (transição `EffectNegated false → true`). Não-vazio **apenas** quando este evento causou essa transição. O cliente deve mostrar o overlay `negate.png` na carta desse jogador **imediatamente após** o glow desta activação, **antes** de processar o próximo evento `activate_card`. Nota: a **ignição** (entrada no slot + janela de reação) é distinta da **activação** (teste do efeito); o que fica negado é a activação.
 
 ### `state_snapshot`
 
@@ -133,7 +137,7 @@ Broadcast do estado da sala. Campos principais:
 | Abertura | `mulliganPhaseActive` — `true` enquanto os dois jogadores podem confirmar mulligan; `mulliganReturned` — mapa `{"A": n, "B": n}` com quantas cartas cada um já devolveu (`-1` até confirmar); `mulliganDeadlineUnixMs` — instante (epoch ms) em que o servidor confirma automaticamente quem ainda não confirmou (devolução vazia, “keep”). Janela de 15 s a partir do início da fase de mulligan |
 | Perspectiva | `viewerPlayerId` — identifica o destinatário deste snapshot (determina visibilidade da mão) |
 | Tabuleiro | `board` 8×8 (códigos `wK`, `bP`, `""` vazio), `enPassant`, `castlingRights` |
-| Jogadores | `players[]`: `mana`, `maxMana`, `energizedMana`, `maxEnergized`, `handCount`, `cooldownCount`, `graveyardCount`, `deckCount`, `sleeveColor`, `reactionMode` (`off` / `on` / `auto`), `ignitionOn`, `ignitionCard`, `ignitionTurnsRemaining` (zona de ignição **desse** assento; visível a ambos), `hand` (privado — só no snapshot do próprio jogador), `banishedCards[]`, `graveyardPieces[]` (ordenado Q>R>B>N>P; na UI: zona **Captura**), `cooldownPreview[]` (fila completa na recarga), `cooldownHiddenCount` (sempre `0`; campo reservado) |
+| Jogadores | `players[]`: `mana`, `maxMana`, `energizedMana`, `maxEnergized`, `handCount`, `cooldownCount`, `graveyardCount`, `deckCount`, `sleeveColor`, `reactionMode` (`off` / `on` / `auto`), `ignitionOn`, `ignitionCard`, `ignitionTurnsRemaining`, `ignitionEffectNegated` (efeito negado enquanto na ignição; visível a ambos), `hand` (privado — só no snapshot do próprio jogador), `banishedCards[]`, `graveyardPieces[]` (ordenado Q>R>B>N>P; na UI: zona **Captura**), `cooldownPreview[]` (fila completa na recarga), `cooldownHiddenCount` (sempre `0`; campo reservado) |
 | Efeitos | `pendingEffects`, `activationQueueSize`, `pendingCapture`, `reactionWindow` |
 | Debug (admin) | `adminDebugMatch` (capability) |
 | Fim | `matchEnded`, `winner`, `endReason`, `rematchA/B`, `postMatchMsLeft` |
@@ -155,6 +159,7 @@ Broadcast do estado da sala. Campos principais:
 | `ignitionOn` | `bool` | `true` se esse jogador tem carta na sua zona de ignição |
 | `ignitionCard` | `string` | ID da carta na ignição (omitido se vazio) |
 | `ignitionTurnsRemaining` | `int` | Turnos restantes no contador de ignição (omitido se 0) |
+| `ignitionEffectNegated` | `bool` | `true` se o efeito da carta na ignição foi negado (ex.: Extinguish); permanece até a carta sair da ignição |
 
 **`CardSnapshotEntry`**: `{ cardId, manaCost, ignition, cooldown }`  
 **`CooldownPreviewEntry`**: `{ cardId, manaCost, ignition, cooldown, turnsRemaining }`
