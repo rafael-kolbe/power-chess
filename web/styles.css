@@ -2244,6 +2244,24 @@ pre {
   opacity: 0;
 }
 
+/* Turn counter badge overlaid on the top-left corner of each card in the piece-effect hover preview. */
+.pm-card-turns-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 10;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 70%);
+  color: #fff;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+}
+
 /* =============================================================================
    Animation keyframes
    ============================================================================= */

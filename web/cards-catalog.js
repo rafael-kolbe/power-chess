@@ -47,7 +47,7 @@ const PT = {
     name: "Turno Duplo",
     description: "Conceda a si mesmo 1 jogada extra por um turno.",
     example:
-      "1. Você tem um peão em e4.\n2. Você ativa \"Turno Duplo\".\n3. A ignição resolve no turno seguinte.\n4. No turno seguinte você move o peão para e5.\n5. Então você captura um peão em f6 com o peão em e5."
+      "1. Você tem um peão em e4.\n2. Você ativa \"Turno Duplo\".\n3. A ignição resolve em 2 turnos.\n4. Você move o peão para e5.\n5. Então você captura um peão em f6 com o peão em e5."
   },
   "mana-burn": {
     name: "Queimadura de Mana",

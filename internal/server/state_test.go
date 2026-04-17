@@ -792,3 +792,42 @@ func TestGameplayStateServiceOpenClose(t *testing.T) {
 		t.Fatalf("unexpected close state snapshot: %+v", snap)
 	}
 }
+
+// TestSnapshotDoubleTurnActiveForPopulated verifies that SnapshotForPlayer includes
+// doubleTurnActiveFor when the Double Turn effect is active for that player.
+func TestSnapshotDoubleTurnActiveForPopulated(t *testing.T) {
+	room, err := NewRoomSession("room-dt-snap")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	room.Engine.Chess = board
+	room.Engine.State.MulliganPhaseActive = false
+	room.Engine.State.Started = true
+	room.Engine.State.CurrentTurn = gameplay.PlayerA
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	room.RegisterPlayerConnection(gameplay.PlayerB)
+
+	// Directly inject the extra-move grant to simulate Double Turn resolver having fired.
+	room.Engine.SetExtraMovesRemainingForTest(gameplay.PlayerA, 1)
+
+	snap := room.SnapshotSafe()
+	if snap.DoubleTurnActiveFor != string(gameplay.PlayerA) {
+		t.Fatalf("expected doubleTurnActiveFor=%q, got %q", gameplay.PlayerA, snap.DoubleTurnActiveFor)
+	}
+
+	// After consuming the extra move via a chess move the field should clear.
+	if err := room.Engine.SubmitMove(gameplay.PlayerA, chess.Move{
+		From: chess.Pos{Row: 7, Col: 4},
+		To:   chess.Pos{Row: 7, Col: 3},
+	}); err != nil {
+		t.Fatalf("SubmitMove: %v", err)
+	}
+	snap = room.SnapshotSafe()
+	if snap.DoubleTurnActiveFor != "" {
+		t.Fatalf("expected doubleTurnActiveFor empty after extra move consumed, got %q", snap.DoubleTurnActiveFor)
+	}
+}

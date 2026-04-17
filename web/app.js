@@ -1546,16 +1546,21 @@ import {
         return [];
     }
 
-    function pieceActivePowerAura(snapshot, r, c) {
+    /**
+     * Returns all active power-type per-piece effects that apply to the square at (r, c).
+     * Replaces the former single-result pieceActivePowerAura.
+     */
+    function pieceActivePowerAuras(snapshot, r, c) {
         const fx = snapshot?.activePieceEffects;
-        if (!Array.isArray(fx)) return null;
+        if (!Array.isArray(fx)) return [];
+        const result = [];
         for (const e of fx) {
             if (Number(e.turnsRemaining || 0) <= 0) continue;
             if (Number(e.row) !== r || Number(e.col) !== c) continue;
             const t = String(getCardDef(e.cardId)?.type || "").toLowerCase();
-            if (t === "power") return e;
+            if (t === "power") result.push(e);
         }
-        return null;
+        return result;
     }
 
     function fileLetterFromDisplayEdge(displayRow, displayCol) {
@@ -2185,6 +2190,53 @@ import {
         pmEl.matchCardPreview.classList.remove("hidden");
         pmPreviewCard = anchorEl;
         // Double rAF so the card renders and offsetWidth/offsetHeight are available.
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => positionCardPreview(anchorEl));
+        });
+    }
+
+    /**
+     * Shows a stacked multi-card preview for piece effects. Each entry is {cardData, turnsRemaining}.
+     * When turnsRemaining is null the per-card turn badge is omitted.
+     */
+    function showPieceEffectsPreview(effects, anchorEl) {
+        if (!pmEl.matchCardPreview || !effects || effects.length === 0) return;
+        pmEl.matchCardPreview.innerHTML = "";
+        delete pmEl.matchCardPreview.dataset.cardId;
+
+        for (const { cardData, turnsRemaining } of effects) {
+            if (!cardData) continue;
+            const cid = cardData.id != null ? String(cardData.id) : "";
+            const wrapper = document.createElement("div");
+            wrapper.style.position = "relative";
+            wrapper.style.display = "inline-block";
+            const card = createPowerCard({
+                type: cardData.type,
+                name: cardData.name,
+                description: cardData.description,
+                example: cardData.example,
+                mana: cardData.manaCost ?? cardData.mana,
+                ignition: cardData.ignition,
+                cooldown: cardData.cooldown,
+                cardWidth: "260px",
+                showExampleInitially: Boolean(cid && matchHandExampleMode.get(cid) === true),
+                onExampleToggle: (showing) => {
+                    if (cid) matchHandExampleMode.set(cid, showing);
+                    syncAllMatchPowerCardMinis(cid, showing);
+                },
+            });
+            wrapper.appendChild(card);
+            if (turnsRemaining != null) {
+                const badge = document.createElement("span");
+                badge.className = "pm-card-turns-badge";
+                badge.textContent = `${turnsRemaining}t`;
+                wrapper.appendChild(badge);
+            }
+            pmEl.matchCardPreview.appendChild(wrapper);
+        }
+
+        pmEl.matchCardPreview.classList.remove("hidden");
+        pmPreviewCard = anchorEl;
         requestAnimationFrame(() => {
             requestAnimationFrame(() => positionCardPreview(anchorEl));
         });
@@ -4643,8 +4695,12 @@ import {
                 if (selectedKey === posKey(r, c)) sq.classList.add("selected");
                 if (moveSet.has(posKey(r, c))) sq.classList.add("move");
                 if (targetKeySet.has(posKey(r, c))) sq.classList.add("target-selected");
-                const auraFx = code ? pieceActivePowerAura(lastSnapshot, r, c) : null;
-                if (auraFx) {
+                const auraFxArr = code ? pieceActivePowerAuras(lastSnapshot, r, c) : [];
+                // Double Turn grants an extra move to all own pieces — highlight them globally.
+                const isDoubleTurnPiece =
+                    !!(code && isOwnPiece(code) && lastSnapshot?.doubleTurnActiveFor === playerEl.value);
+                const hasAura = auraFxArr.length > 0 || isDoubleTurnPiece;
+                if (hasAura) {
                     sq.classList.add("piece-effect-aura-power");
                 }
                 if (pendingCap?.active && capToR === r && capToC === c) {
@@ -4662,11 +4718,15 @@ import {
                     img.draggable = false;
                     sq.appendChild(img);
                 }
-                if (auraFx) {
-                    const turnsLeft = Math.max(Number(auraFx.turnsRemaining || 0), 0);
+                // Badge shows minimum turnsRemaining from per-piece effects (not Double Turn).
+                if (auraFxArr.length > 0) {
+                    const minTurns = auraFxArr.reduce(
+                        (min, e) => Math.min(min, Math.max(Number(e.turnsRemaining || 0), 0)),
+                        Infinity,
+                    );
                     const turnBadge = document.createElement("span");
                     turnBadge.className = "sq-effect-turn-badge";
-                    turnBadge.textContent = `${turnsLeft}t`;
+                    turnBadge.textContent = `${minTurns}t`;
                     sq.appendChild(turnBadge);
                 }
                 sq.title = code ? `${code} ${logicalToAlgebraic(r, c)}` : logicalToAlgebraic(r, c);
@@ -4675,11 +4735,21 @@ import {
                 sq.dataset.code = code;
                 sq.draggable = !!(code && isOwnPiece(code) && canInteractChessPieces());
 
-                if (auraFx && code) {
+                if (hasAura && code) {
                     sq.addEventListener("mouseenter", () => {
                         if (boardEnchantHoverSuppressed) return;
-                        const data = cardDataFromCatalogRow(getCardDef(auraFx.cardId));
-                        if (data) showCardPreview(data, sq);
+                        // Build list of effects to display: per-piece effects first, then Double Turn.
+                        const effectsList = auraFxArr
+                            .map((e) => ({
+                                cardData: cardDataFromCatalogRow(getCardDef(e.cardId)),
+                                turnsRemaining: Math.max(Number(e.turnsRemaining || 0), 0),
+                            }))
+                            .filter((e) => e.cardData != null);
+                        if (isDoubleTurnPiece) {
+                            const dtData = cardDataFromCatalogRow(getCardDef("double-turn"));
+                            if (dtData) effectsList.push({ cardData: dtData, turnsRemaining: null });
+                        }
+                        if (effectsList.length > 0) showPieceEffectsPreview(effectsList, sq);
                     });
                     sq.addEventListener("mousemove", () => {
                         if (pmPreviewCard === sq) positionCardPreview(sq);

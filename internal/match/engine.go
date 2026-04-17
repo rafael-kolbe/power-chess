@@ -51,6 +51,8 @@ type Engine struct {
 	ignitionTargets map[gameplay.PlayerID][]chess.Pos
 	// ignitionTargetCard stores which card owns ignitionTargets for each seat.
 	ignitionTargetCard map[gameplay.PlayerID]gameplay.CardID
+	// extraMovesRemaining tracks bonus moves granted by Double Turn (per seat).
+	extraMovesRemaining map[gameplay.PlayerID]int
 }
 
 // ActivationFXEvent is one ignition resolution for client animations (glow + fly to cooldown).
@@ -94,7 +96,8 @@ func NewEngine(state *gameplay.MatchState, board *chess.Game) *Engine {
 			gameplay.PlayerA: {},
 			gameplay.PlayerB: {},
 		},
-		ignitionTargetCard: map[gameplay.PlayerID]gameplay.CardID{},
+		ignitionTargetCard:  map[gameplay.PlayerID]gameplay.CardID{},
+		extraMovesRemaining: map[gameplay.PlayerID]int{},
 	}
 }
 
@@ -419,6 +422,7 @@ func (e *Engine) ActivatePlayerSkill(pid gameplay.PlayerID) error {
 		return err
 	}
 	e.expireMovementGrantsAfterOwnerTurn(pid)
+	delete(e.extraMovesRemaining, pid)
 	e.Chess.Turn = color.Opponent()
 	return e.StartTurn(e.State.CurrentTurn)
 }
@@ -487,6 +491,14 @@ func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 	}
 	if captureForMana {
 		e.State.GrantManaForChessCapture(pid)
+	}
+	// If the player has an extra move remaining (granted by Double Turn), consume it
+	// without ending the turn. Restore Chess.Turn so the same player moves again.
+	if e.extraMovesRemaining[pid] > 0 {
+		e.extraMovesRemaining[pid]--
+		e.Chess.Turn = toColor(pid)
+		e.reconcileTurnState()
+		return nil
 	}
 	e.expireMovementGrantsAfterOwnerTurn(pid)
 	if err := e.State.EndTurn(pid); err != nil {
@@ -563,6 +575,23 @@ func (e *Engine) PendingMove() (PendingMoveAction, bool) {
 		return PendingMoveAction{}, false
 	}
 	return *e.pendingMove, true
+}
+
+// DoubleTurnActiveFor returns the PlayerID for whom an extra move is currently available,
+// or an empty string if no Double Turn effect is active.
+func (e *Engine) DoubleTurnActiveFor() gameplay.PlayerID {
+	for pid, n := range e.extraMovesRemaining {
+		if n > 0 {
+			return pid
+		}
+	}
+	return ""
+}
+
+// SetExtraMovesRemainingForTest directly sets the extra-move counter for a player.
+// This is intended for tests only; do not call from production code.
+func (e *Engine) SetExtraMovesRemainingForTest(pid gameplay.PlayerID, n int) {
+	e.extraMovesRemaining[pid] = n
 }
 
 func toColor(pid gameplay.PlayerID) chess.Color {

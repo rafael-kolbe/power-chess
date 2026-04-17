@@ -20,10 +20,10 @@ globalThis.__POWER_CHESS_CARD_METADATA__ = [
     "ignition": 2,
     "cooldown": 9,
     "targets": 0,
-    "effectDuration": 0,
+    "effectDuration": 1,
     "name": "Double Turn",
     "description": "Give yourself 1 extra move for one turn.",
-    "example": "1. You have a pawn on e4.\n2. You activate \"Double Turn\".\n3. Ignition succeeds the next turn.\n4. Next turn you move the pawn to e5.\n5. Then you capture a pawn on f6 with the pawn on e5."
+    "example": "1. You have a pawn on e4.\n2. You activate \"Double Turn\".\n3. Ignition succeeds 2 turns from now.\n4. You move the pawn to e5.\n5. Then you capture a pawn on f6 with the pawn on e5."
   },
   {
     "id": "mana-burn",

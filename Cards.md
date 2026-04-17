@@ -22,13 +22,13 @@ Give yourself 1 extra move for one turn.
 ## Ignition: 2
 ## Cooldown: 9
 ## Targets: 0
-## Effect duration: 0
+## Effect duration: 1
 ## Example:
 ```
 1. You have a pawn on e4.
 2. You activate "Double Turn".
-3. Ignition succeeds the next turn.
-4. Next turn you move the pawn to e5.
+3. Ignition succeeds 2 turns from now.
+4. You move the pawn to e5.
 5. Then you capture a pawn on f6 with the pawn on e5.
 ```
 

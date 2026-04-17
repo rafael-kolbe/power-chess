@@ -551,6 +551,9 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 			TurnsRemaining: g.RemainingOwnerTurns,
 		})
 	}
+	if dtPID := r.Engine.DoubleTurnActiveFor(); dtPID != "" {
+		payload.DoubleTurnActiveFor = string(dtPID)
+	}
 	if pm, ok := r.Engine.PendingMove(); ok {
 		payload.PendingCapture = PendingCaptureState{
 			Active:  true,
