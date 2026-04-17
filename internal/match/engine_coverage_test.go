@@ -75,7 +75,7 @@ func TestActivatePlayerSkillRequiresChessTurnAlignment(t *testing.T) {
 }
 
 func TestActivatePlayerSkillSuccessAndAdvancesTurn(t *testing.T) {
-	card := gameplay.CardInstance{InstanceID: "dt1", CardID: CardDoubleTurn, ManaCost: 4, Ignition: 1, Cooldown: 5}
+	card := gameplay.CardInstance{InstanceID: "dt1", CardID: CardDoubleTurn, ManaCost: 6, Ignition: 2, Cooldown: 9}
 	state, _ := gameplay.NewMatchState(testDeckWith(card), testDeckWith(card))
 	board := chess.NewGame()
 	e := NewEngine(state, board)

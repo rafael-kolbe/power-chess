@@ -281,7 +281,7 @@ func TestIgniteReactionSkippedWhenOpponentReactionOff(t *testing.T) {
 	s.MulliganPhaseActive = false
 	s.Started = true
 	s.CurrentTurn = gameplay.PlayerA
-	dt := gameplay.CardInstance{InstanceID: "dt1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}
+	dt := gameplay.CardInstance{InstanceID: "dt1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 9}
 	s.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{dt}
 	s.Players[gameplay.PlayerA].Mana = 10
 	s.Players[gameplay.PlayerB].Mana = 10
@@ -305,10 +305,10 @@ func TestIgniteReactionSkippedWhenOpponentReactionOff(t *testing.T) {
 		t.Fatalf("expected ignite reaction window closed, got %+v", rw)
 	}
 	if !s.Players[gameplay.PlayerA].Ignition.Occupied {
-		t.Fatalf("expected double-turn to stay in ignition while burning (ignition 1)")
+		t.Fatalf("expected double-turn to stay in ignition while burning (ignition 2)")
 	}
-	if s.Players[gameplay.PlayerA].Ignition.TurnsRemaining != 1 {
-		t.Fatalf("expected 1 burn turn remaining, got %d", s.Players[gameplay.PlayerA].Ignition.TurnsRemaining)
+	if s.Players[gameplay.PlayerA].Ignition.TurnsRemaining != 2 {
+		t.Fatalf("expected 2 burn turns remaining, got %d", s.Players[gameplay.PlayerA].Ignition.TurnsRemaining)
 	}
 }
 
@@ -322,7 +322,7 @@ func TestIgniteReactionWindowWhenOpponentReactionOn(t *testing.T) {
 	s.MulliganPhaseActive = false
 	s.Started = true
 	s.CurrentTurn = gameplay.PlayerA
-	dt := gameplay.CardInstance{InstanceID: "dt1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}
+	dt := gameplay.CardInstance{InstanceID: "dt1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 9}
 	s.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{dt}
 	s.Players[gameplay.PlayerA].Mana = 10
 	s.Players[gameplay.PlayerB].Mana = 10

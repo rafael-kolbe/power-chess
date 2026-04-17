@@ -18,9 +18,9 @@ Give any piece you control, except the king or a knight, the ability to move as 
 ## Type: Power
 ## Description
 Give yourself 1 extra move for one turn.
-## Cost: 4
-## Ignition: 1
-## Cooldown: 5
+## Cost: 6
+## Ignition: 2
+## Cooldown: 9
 ## Targets: 0
 ## Effect duration: 0
 ## Example:
@@ -366,5 +366,5 @@ This card can only be activated if you have a card in your ignition slot. Target
 1. You have "Double Turn" in your ignition slot.
 2. Your opponent activates "Extinguish" on your "Double Turn".
 3. You activate "Save It For Later" as retribution.
-4. The "Double Turn" card is moved back to your hand and you gain 4 mana.
+4. The "Double Turn" card is moved back to your hand and you gain 6 mana.
 ```

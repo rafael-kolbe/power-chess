@@ -16,9 +16,9 @@ globalThis.__POWER_CHESS_CARD_METADATA__ = [
   {
     "id": "double-turn",
     "type": "power",
-    "mana": 4,
-    "ignition": 1,
-    "cooldown": 5,
+    "mana": 6,
+    "ignition": 2,
+    "cooldown": 9,
     "targets": 0,
     "effectDuration": 0,
     "name": "Double Turn",
@@ -263,6 +263,6 @@ globalThis.__POWER_CHESS_CARD_METADATA__ = [
     "effectDuration": 0,
     "name": "Save It For Later",
     "description": "This card can only be activated if you have a card in your ignition slot. Target that card and move it back to your hand, gaining the mana cost of the card as mana.",
-    "example": "1. You have \"Double Turn\" in your ignition slot.\n2. Your opponent activates \"Extinguish\" on your \"Double Turn\".\n3. You activate \"Save It For Later\" as retribution.\n4. The \"Double Turn\" card is moved back to your hand and you gain 4 mana."
+    "example": "1. You have \"Double Turn\" in your ignition slot.\n2. Your opponent activates \"Extinguish\" on your \"Double Turn\".\n3. You activate \"Save It For Later\" as retribution.\n4. The \"Double Turn\" card is moved back to your hand and you gain 6 mana."
   }
 ];

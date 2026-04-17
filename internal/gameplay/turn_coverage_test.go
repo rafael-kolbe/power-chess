@@ -78,7 +78,7 @@ func TestGrantManaForChessCaptureDoesNotExceedMax(t *testing.T) {
 func TestConsumeCardFromHandSucceeds(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
 	p := s.Players[PlayerA]
-	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}
+	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 9}
 	p.Hand = []CardInstance{card}
 	p.Mana = 10
 
@@ -92,11 +92,11 @@ func TestConsumeCardFromHandSucceeds(t *testing.T) {
 	if len(p.Hand) != 0 {
 		t.Fatalf("hand should be empty after consuming only card")
 	}
-	if p.Mana != 6 {
-		t.Fatalf("expected mana 6 after consuming 4-cost card, got %d", p.Mana)
+	if p.Mana != 4 {
+		t.Fatalf("expected mana 4 after consuming 6-cost card, got %d", p.Mana)
 	}
-	if p.EnergizedMana != 4 {
-		t.Fatalf("expected energized mana 4, got %d", p.EnergizedMana)
+	if p.EnergizedMana != 6 {
+		t.Fatalf("expected energized mana 6, got %d", p.EnergizedMana)
 	}
 }
 
@@ -115,7 +115,7 @@ func TestConsumeCardFromHandErrorsOnBadIndex(t *testing.T) {
 func TestConsumeCardFromHandErrorsOnInsufficientMana(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
 	p := s.Players[PlayerA]
-	p.Hand = []CardInstance{{InstanceID: "c1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}}
+	p.Hand = []CardInstance{{InstanceID: "c1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 9}}
 	p.Mana = 0
 
 	if _, err := s.ConsumeCardFromHand(PlayerA, 0); err == nil {
@@ -127,15 +127,15 @@ func TestConsumeCardFromHandErrorsOnInsufficientMana(t *testing.T) {
 
 func TestSendCardToCooldownAppendsToCooldowns(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
-	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}
+	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 9}
 
 	s.SendCardToCooldown(PlayerA, card)
 	p := s.Players[PlayerA]
 	if len(p.Cooldowns) != 1 {
 		t.Fatalf("expected 1 cooldown entry, got %d", len(p.Cooldowns))
 	}
-	if p.Cooldowns[0].TurnsRemaining != 5 {
-		t.Fatalf("expected cooldown turns 5, got %d", p.Cooldowns[0].TurnsRemaining)
+	if p.Cooldowns[0].TurnsRemaining != 9 {
+		t.Fatalf("expected cooldown turns 9, got %d", p.Cooldowns[0].TurnsRemaining)
 	}
 	if p.Cooldowns[0].Card.CardID != "double-turn" {
 		t.Fatalf("wrong card in cooldown")
@@ -208,7 +208,7 @@ func TestTickCooldownsRoutesPowerToDeck(t *testing.T) {
 
 func TestResolveIgnitionClearsSlotAndQueuesEvent(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
-	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}
+	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 9}
 	s.Players[PlayerA].Ignition = IgnitionSlot{Card: card, TurnsRemaining: 0, Occupied: true, ActivationOwner: PlayerA}
 
 	if err := s.ResolveIgnitionFor(PlayerA, true); err != nil {
@@ -389,7 +389,7 @@ func TestSelectPlayerSkillRejectsInvalidSkill(t *testing.T) {
 
 func TestTickCooldownsReturnsCardToDeckWhenExpired(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
-	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 1}
+	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 1}
 	p := s.Players[PlayerA]
 	p.Cooldowns = []CooldownEntry{{Card: card, TurnsRemaining: 1}}
 	deckBefore := len(p.Deck)
@@ -406,7 +406,7 @@ func TestTickCooldownsReturnsCardToDeckWhenExpired(t *testing.T) {
 
 func TestTickCooldownsKeepsCardsWithRemainingTurns(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
-	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}
+	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 9}
 	p := s.Players[PlayerA]
 	p.Cooldowns = []CooldownEntry{{Card: card, TurnsRemaining: 3}}
 

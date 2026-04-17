@@ -213,7 +213,7 @@ func TestIgnitionZeroNeedsReactionResolveBeforeNextActivation(t *testing.T) {
 }
 
 func TestSubmitMoveBlockedDuringIgniteReaction(t *testing.T) {
-	doubleTurn := gameplay.CardInstance{InstanceID: "dt1", CardID: CardDoubleTurn, ManaCost: 4, Ignition: 1, Cooldown: 5}
+	doubleTurn := gameplay.CardInstance{InstanceID: "dt1", CardID: CardDoubleTurn, ManaCost: 6, Ignition: 2, Cooldown: 9}
 	state, _ := gameplay.NewMatchState(testDeckWith(doubleTurn), testDeckWith(doubleTurn))
 	state.CurrentTurn = gameplay.PlayerA
 	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{doubleTurn}
