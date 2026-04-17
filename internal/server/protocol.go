@@ -138,10 +138,15 @@ type ActivePieceEffectSnapshot struct {
 
 // ActivateCardEventPayload is server→client: ignition finished and the effect resolution step ran.
 type ActivateCardEventPayload struct {
-	PlayerID string `json:"playerId"`
-	CardID   string `json:"cardId"`
-	CardType string `json:"cardType,omitempty"`
-	Success  bool   `json:"success"`
+	PlayerID          string `json:"playerId"`
+	CardID            string `json:"cardId"`
+	CardType          string `json:"cardType,omitempty"`
+	Success           bool   `json:"success"`
+	RetainIgnition    bool   `json:"retainIgnition,omitempty"`
+	// NegatesActivationOf is the player ID whose card in the ignition zone had its activation
+	// negated by this event (EffectNegated transitioned false→true). Non-empty only when this
+	// event caused that transition. Client must show the negate overlay immediately after the glow.
+	NegatesActivationOf string `json:"negatesActivationOf,omitempty"`
 }
 
 // ConfirmMulliganPayload submits which hand cards (by index) are returned to the deck for the mulligan.
@@ -248,9 +253,10 @@ type PlayerHUDState struct {
 	// ReactionMode is off / on / auto — server authority for when to open reaction windows.
 	ReactionMode string `json:"reactionMode,omitempty"`
 	// Per-player ignition zone (public to both players).
-	IgnitionOn             bool   `json:"ignitionOn,omitempty"`
-	IgnitionCard           string `json:"ignitionCard,omitempty"`
-	IgnitionTurnsRemaining int    `json:"ignitionTurnsRemaining,omitempty"`
+	IgnitionOn               bool   `json:"ignitionOn,omitempty"`
+	IgnitionCard             string `json:"ignitionCard,omitempty"`
+	IgnitionTurnsRemaining   int    `json:"ignitionTurnsRemaining,omitempty"`
+	IgnitionEffectNegated    bool   `json:"ignitionEffectNegated,omitempty"`
 }
 
 // PendingEffectState describes unresolved effects that need player input.

@@ -2085,6 +2085,7 @@ import {
                     p.ignitionOn ? "1" : "0",
                     p.ignitionCard || "",
                     String(p.ignitionTurnsRemaining ?? 0),
+                    p.ignitionEffectNegated ? "n" : "",
                 ].join(":"),
             )
             .sort()
@@ -3128,6 +3129,41 @@ import {
      * @param {boolean} success
      * @returns {Promise<void>}
      */
+    /**
+     * After a failed activation glow: three B/W chroma pulses, hold ~1s on the last, then restore.
+     * @param {HTMLElement | null} cardVisualEl usually `.power-card` inside the ignition mount
+     * @returns {Promise<void>}
+     */
+    async function playNegationChromaSequence(cardVisualEl) {
+        if (!(cardVisualEl instanceof HTMLElement)) return;
+        const bw = "grayscale(1) contrast(1.4) brightness(1.08)";
+        const flashMs = 170;
+        const gapMs = 150;
+        cardVisualEl.style.willChange = "filter";
+        for (let i = 0; i < 3; i++) {
+            cardVisualEl.style.transition = `filter ${flashMs}ms ease`;
+            cardVisualEl.style.filter = bw;
+            await new Promise((r) => setTimeout(r, flashMs));
+            if (i < 2) {
+                cardVisualEl.style.filter = "none";
+                await new Promise((r) => setTimeout(r, gapMs));
+            }
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+        cardVisualEl.style.filter = "none";
+        cardVisualEl.style.transition = "";
+        cardVisualEl.style.willChange = "";
+    }
+
+    /**
+     * @param {HTMLElement | null} wrap ignition mount or staged overlay
+     * @returns {HTMLElement | null}
+     */
+    function ignitionActivationCardVisual(wrap) {
+        if (!wrap) return null;
+        return wrap.querySelector(".power-card") || wrap;
+    }
+
     async function playEffectActivationGlow(wrapEl, typeLower, success) {
         if (!wrapEl) return;
         const rect = wrapEl.getBoundingClientRect();
@@ -3284,34 +3320,50 @@ import {
             }
             const typeLower = String(payload.cardType || getCardDef(cid)?.type || "").toLowerCase();
             const success = !!payload.success;
+            const retainIgnition = !!payload.retainIgnition;
+            const negatesActivationOf = String(payload.negatesActivationOf || "");
             const cooldownDeferral = payload._cooldownOdometerDeferral;
             const cooldownContainer = isSelf ? pmEl.cooldownCardsSelf : pmEl.cooldownCardsOpp;
             const pidSnap = lastSnapshot?.players?.find((p) => p.playerId === pid);
-            blockGameplayInputForEffects(2000);
+            const failExtraMs = !success ? 3200 : 0;
+            blockGameplayInputForEffects(2000 + failExtraMs);
             const glowPromise = playEffectActivationGlow(wrap, typeLower, success);
             const manaBarPromise =
                 success && cid === "energy-gain"
                     ? playManaBarEnergyGainGlow(manaBarElForPlayerId(pid))
                     : Promise.resolve();
             await Promise.all([glowPromise, manaBarPromise]);
-            const clearedIgnitionCardEl = isSelf ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
-            const clearedIgnitionCounterEl = isSelf ? pmEl.ignitionCounterSelf : pmEl.ignitionCounterOpp;
-            if (clearedIgnitionCardEl) {
-                clearedIgnitionCardEl.innerHTML = "";
-                delete clearedIgnitionCardEl.dataset.cardId;
-                clearedIgnitionCardEl.classList.remove("pm-ignition-staged");
-                clearedIgnitionCardEl
-                    .querySelectorAll(".pm-ignition-staged-overlay")
-                    .forEach((el) => el.remove());
+            // If this activation negated another player's card activation, place the negate overlay
+            // now — before the next activate_card event (the negated card's fail animation) runs.
+            if (negatesActivationOf) {
+                applyNegateOverlayToIgnition(negatesActivationOf);
             }
-            if (clearedIgnitionCounterEl) {
-                clearedIgnitionCounterEl.classList.add("hidden");
+            if (!success) {
+                const vis = ignitionActivationCardVisual(wrap);
+                await playNegationChromaSequence(vis);
             }
-            if (cooldownDeferral) {
-                await applyIgnitionResolveThenCooldownOdometers(cooldownDeferral);
+            if (retainIgnition) {
                 if (lastSnapshot) renderIgnitionZone(lastSnapshot);
-            } else if (cooldownContainer && pidSnap) {
-                renderCooldownList(cooldownContainer, pidSnap.cooldownPreview || []);
+            } else {
+                const clearedIgnitionCardEl = isSelf ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
+                const clearedIgnitionCounterEl = isSelf ? pmEl.ignitionCounterSelf : pmEl.ignitionCounterOpp;
+                if (clearedIgnitionCardEl) {
+                    clearedIgnitionCardEl.innerHTML = "";
+                    delete clearedIgnitionCardEl.dataset.cardId;
+                    clearedIgnitionCardEl.classList.remove("pm-ignition-staged");
+                    clearedIgnitionCardEl
+                        .querySelectorAll(".pm-ignition-staged-overlay")
+                        .forEach((el) => el.remove());
+                }
+                if (clearedIgnitionCounterEl) {
+                    clearedIgnitionCounterEl.classList.add("hidden");
+                }
+                if (cooldownDeferral) {
+                    await applyIgnitionResolveThenCooldownOdometers(cooldownDeferral);
+                    if (lastSnapshot) renderIgnitionZone(lastSnapshot);
+                } else if (cooldownContainer && pidSnap) {
+                    renderCooldownList(cooldownContainer, pidSnap.cooldownPreview || []);
+                }
             }
         } finally {
             send("client_fx_release", {});
@@ -3554,6 +3606,30 @@ import {
         mountStagedCard(slot);
     }
 
+    /**
+     * Immediately adds the negate overlay to the ignition card of the given player without
+     * waiting for a snapshot. Called right after the negating card's glow animation completes
+     * so the overlay is visible before the negated card's own fail animation plays.
+     * @param {string} targetPid - player ID whose ignition card was negated
+     */
+    function applyNegateOverlayToIgnition(targetPid) {
+        const localPID = playerEl.value;
+        const isSelf = targetPid === localPID;
+        const cardEl = isSelf ? pmEl.ignitionCardSelf : pmEl.ignitionCardOpp;
+        if (!cardEl || !cardEl.dataset.cardId) return;
+        // Remove any stale overlay before inserting a fresh one.
+        cardEl.querySelectorAll(".pm-ignition-negate-overlay").forEach((el) => el.remove());
+        const ov = document.createElement("div");
+        ov.className = "pm-ignition-negate-overlay";
+        ov.setAttribute("aria-hidden", "true");
+        const img = document.createElement("img");
+        img.className = "pm-ignition-negate-overlay__img";
+        img.src = "/public/negate.png";
+        img.alt = "";
+        ov.appendChild(img);
+        cardEl.appendChild(ov);
+    }
+
     function renderIgnitionZone(snapshot) {
         const localPID = playerEl.value;
         const selfHud = hudForSeat(snapshot, localPID);
@@ -3617,6 +3693,17 @@ import {
                 });
                 cardEl.appendChild(card);
                 attachCardHover(cardEl, { ...def, id: cid, manaCost: def.mana });
+                if (hud.ignitionEffectNegated) {
+                    const ov = document.createElement("div");
+                    ov.className = "pm-ignition-negate-overlay";
+                    ov.setAttribute("aria-hidden", "true");
+                    const img = document.createElement("img");
+                    img.className = "pm-ignition-negate-overlay__img";
+                    img.src = "/public/negate.png";
+                    img.alt = "";
+                    ov.appendChild(img);
+                    cardEl.appendChild(ov);
+                }
             }
         };
 
