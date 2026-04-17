@@ -2,7 +2,7 @@
  * Builds a power card DOM node using static template PNGs under /public/cards/.
  * All templates share dimensions 639×965; text is overlaid with percentage positioning.
  *
- * @typedef {"continuous"|"counter"|"power"|"retribution"} PowerCardType
+ * @typedef {"continuous"|"counter"|"disruption"|"power"|"retribution"} PowerCardType
  * @typedef {Object} PowerCardOptions
  * @property {PowerCardType|string} type Card frame / color family
  * @property {string} [name] Title shown in top parchment strip
@@ -23,6 +23,7 @@
   const TYPE_META = {
     continuous: { className: "power-card--continuous" },
     counter: { className: "power-card--counter" },
+    disruption: { className: "power-card--disruption" },
     power: { className: "power-card--power" },
     retribution: { className: "power-card--retribution" }
   };
@@ -47,6 +48,7 @@
     const labels = {
       power: "POWER CARD",
       counter: "COUNTER CARD",
+      disruption: "DISRUPTION CARD",
       retribution: "RETRIBUTION CARD",
       continuous: "CONTINUOUS CARD"
     };

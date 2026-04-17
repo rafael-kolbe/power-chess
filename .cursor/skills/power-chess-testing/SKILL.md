@@ -18,6 +18,17 @@ go tool cover -html=coverage.out
 
 Before any commit: run `go test ./...` first. Only commit when all tests pass.
 
+## Backend TDD policy (mandatory)
+
+For backend code changes, follow this order:
+1. Write/adjust a failing test that captures the target behavior (red).
+2. Implement the minimal production code to make the test pass (green).
+3. Refactor while keeping all tests green (refactor).
+
+Do not start backend implementation from production code first when behavior is changing.
+
+For card-effect workstreams, branch naming must follow `feature/<card-id>` (for example `feature/knight-touch`) and the team should deliver one card at a time under the same TDD cycle.
+
 ## Go test locations
 
 | Package | File | What it covers |

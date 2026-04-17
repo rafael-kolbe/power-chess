@@ -78,7 +78,7 @@ func TestGrantManaForChessCaptureDoesNotExceedMax(t *testing.T) {
 func TestConsumeCardFromHandSucceeds(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
 	p := s.Players[PlayerA]
-	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}
+	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 9}
 	p.Hand = []CardInstance{card}
 	p.Mana = 10
 
@@ -92,11 +92,11 @@ func TestConsumeCardFromHandSucceeds(t *testing.T) {
 	if len(p.Hand) != 0 {
 		t.Fatalf("hand should be empty after consuming only card")
 	}
-	if p.Mana != 6 {
-		t.Fatalf("expected mana 6 after consuming 4-cost card, got %d", p.Mana)
+	if p.Mana != 4 {
+		t.Fatalf("expected mana 4 after consuming 6-cost card, got %d", p.Mana)
 	}
-	if p.EnergizedMana != 4 {
-		t.Fatalf("expected energized mana 4, got %d", p.EnergizedMana)
+	if p.EnergizedMana != 6 {
+		t.Fatalf("expected energized mana 6, got %d", p.EnergizedMana)
 	}
 }
 
@@ -115,7 +115,7 @@ func TestConsumeCardFromHandErrorsOnBadIndex(t *testing.T) {
 func TestConsumeCardFromHandErrorsOnInsufficientMana(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
 	p := s.Players[PlayerA]
-	p.Hand = []CardInstance{{InstanceID: "c1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}}
+	p.Hand = []CardInstance{{InstanceID: "c1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 9}}
 	p.Mana = 0
 
 	if _, err := s.ConsumeCardFromHand(PlayerA, 0); err == nil {
@@ -127,15 +127,15 @@ func TestConsumeCardFromHandErrorsOnInsufficientMana(t *testing.T) {
 
 func TestSendCardToCooldownAppendsToCooldowns(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
-	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}
+	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 9}
 
 	s.SendCardToCooldown(PlayerA, card)
 	p := s.Players[PlayerA]
 	if len(p.Cooldowns) != 1 {
 		t.Fatalf("expected 1 cooldown entry, got %d", len(p.Cooldowns))
 	}
-	if p.Cooldowns[0].TurnsRemaining != 5 {
-		t.Fatalf("expected cooldown turns 5, got %d", p.Cooldowns[0].TurnsRemaining)
+	if p.Cooldowns[0].TurnsRemaining != 9 {
+		t.Fatalf("expected cooldown turns 9, got %d", p.Cooldowns[0].TurnsRemaining)
 	}
 	if p.Cooldowns[0].Card.CardID != "double-turn" {
 		t.Fatalf("wrong card in cooldown")
@@ -204,11 +204,94 @@ func TestTickCooldownsRoutesPowerToDeck(t *testing.T) {
 	}
 }
 
+// --- tickIgnition ---
+
+func TestTickIgnitionContinuousQueuesMidTurnPulse(t *testing.T) {
+	s, _ := NewMatchState(StarterDeck(), StarterDeck())
+	card := CardInstance{InstanceID: "c1", CardID: "clairvoyance", ManaCost: 7, Ignition: 3, Cooldown: 0}
+	s.Players[PlayerA].Ignition = IgnitionSlot{
+		Card: card, TurnsRemaining: 3, Occupied: true, ActivationOwner: PlayerA,
+	}
+	s.tickIgnition(PlayerA)
+	if len(s.ResolvedQueue) != 1 || !s.ResolvedQueue[0].MidTurn || !s.ResolvedQueue[0].Success {
+		t.Fatalf("expected mid-turn success event, got %+v", s.ResolvedQueue)
+	}
+	if s.Players[PlayerA].Ignition.TurnsRemaining != 2 {
+		t.Fatalf("expected 2 turns left, got %d", s.Players[PlayerA].Ignition.TurnsRemaining)
+	}
+}
+
+func TestTickIgnitionNegatedPowerFinalFails(t *testing.T) {
+	s, _ := NewMatchState(StarterDeck(), StarterDeck())
+	card := CardInstance{InstanceID: "c1", CardID: "energy-gain", ManaCost: 0, Ignition: 1, Cooldown: 2}
+	s.Players[PlayerA].Ignition = IgnitionSlot{
+		Card: card, TurnsRemaining: 1, Occupied: true, ActivationOwner: PlayerA,
+		EffectNegated: true,
+	}
+	s.tickIgnition(PlayerA)
+	if s.Players[PlayerA].Ignition.Occupied {
+		t.Fatal("expected ignition cleared after final tick")
+	}
+	if len(s.ResolvedQueue) != 1 || s.ResolvedQueue[0].Success || s.ResolvedQueue[0].MidTurn {
+		t.Fatalf("expected final fail event, got %+v", s.ResolvedQueue[0])
+	}
+}
+
+func TestTickIgnitionContinuousNegatedMidPulseFails(t *testing.T) {
+	s, _ := NewMatchState(StarterDeck(), StarterDeck())
+	card := CardInstance{InstanceID: "c1", CardID: "clairvoyance", ManaCost: 7, Ignition: 3, Cooldown: 0}
+	s.Players[PlayerA].Ignition = IgnitionSlot{
+		Card: card, TurnsRemaining: 3, Occupied: true, ActivationOwner: PlayerA,
+		EffectNegated: true,
+	}
+	s.tickIgnition(PlayerA)
+	if len(s.ResolvedQueue) != 1 || !s.ResolvedQueue[0].MidTurn || s.ResolvedQueue[0].Success {
+		t.Fatalf("expected mid fail, got %+v", s.ResolvedQueue[0])
+	}
+	if s.Players[PlayerA].Ignition.TurnsRemaining != 2 || !s.Players[PlayerA].Ignition.Occupied {
+		t.Fatal("continuous should stay in ignition")
+	}
+}
+
+// TestTickIgnitionContinuousFinalWhenTurnsRemainingIsOne verifies that when TurnsRemaining==1,
+// the StartTurn decrement brings it to 0 and the FINAL activation fires (not a mid-turn pulse).
+func TestTickIgnitionContinuousFinalWhenTurnsRemainingIsOne(t *testing.T) {
+	s, _ := NewMatchState(StarterDeck(), StarterDeck())
+	card := CardInstance{InstanceID: "c1", CardID: "clairvoyance", ManaCost: 7, Ignition: 3, Cooldown: 0}
+	s.Players[PlayerA].Ignition = IgnitionSlot{
+		Card: card, TurnsRemaining: 1, Occupied: true, ActivationOwner: PlayerA,
+	}
+	s.tickIgnition(PlayerA)
+	if s.Players[PlayerA].Ignition.Occupied {
+		t.Fatal("expected ignition cleared: T=1 ticked to 0 → final resolve")
+	}
+	if len(s.ResolvedQueue) != 1 || s.ResolvedQueue[0].MidTurn {
+		t.Fatalf("expected final (non-MidTurn) event, got %+v", s.ResolvedQueue)
+	}
+}
+
+// TestTickIgnitionContinuousFinalWhenTurnsRemainingIsZero verifies that when TurnsRemaining is
+// already 0 (counter expired last tick), the StartTurn call fires the final activation.
+func TestTickIgnitionContinuousFinalWhenTurnsRemainingIsZero(t *testing.T) {
+	s, _ := NewMatchState(StarterDeck(), StarterDeck())
+	card := CardInstance{InstanceID: "c1", CardID: "clairvoyance", ManaCost: 7, Ignition: 3, Cooldown: 0}
+	s.Players[PlayerA].Ignition = IgnitionSlot{
+		Card: card, TurnsRemaining: 0, Occupied: true, ActivationOwner: PlayerA,
+	}
+	s.tickIgnition(PlayerA)
+	if s.Players[PlayerA].Ignition.Occupied {
+		t.Fatal("expected ignition cleared after final tick")
+	}
+	if len(s.ResolvedQueue) != 1 || s.ResolvedQueue[0].MidTurn {
+		t.Fatalf("expected final non-mid event, got %+v", s.ResolvedQueue[0])
+	}
+}
+
 // --- ResolveIgnition ---
 
 func TestResolveIgnitionClearsSlotAndQueuesEvent(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
-	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}
+	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 9}
 	s.Players[PlayerA].Ignition = IgnitionSlot{Card: card, TurnsRemaining: 0, Occupied: true, ActivationOwner: PlayerA}
 
 	if err := s.ResolveIgnitionFor(PlayerA, true); err != nil {
@@ -389,7 +472,7 @@ func TestSelectPlayerSkillRejectsInvalidSkill(t *testing.T) {
 
 func TestTickCooldownsReturnsCardToDeckWhenExpired(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
-	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 1}
+	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 1}
 	p := s.Players[PlayerA]
 	p.Cooldowns = []CooldownEntry{{Card: card, TurnsRemaining: 1}}
 	deckBefore := len(p.Deck)
@@ -406,7 +489,7 @@ func TestTickCooldownsReturnsCardToDeckWhenExpired(t *testing.T) {
 
 func TestTickCooldownsKeepsCardsWithRemainingTurns(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
-	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}
+	card := CardInstance{InstanceID: "c1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 9}
 	p := s.Players[PlayerA]
 	p.Cooldowns = []CooldownEntry{{Card: card, TurnsRemaining: 3}}
 

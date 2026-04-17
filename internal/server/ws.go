@@ -246,7 +246,6 @@ func (c *Client) readLoop() {
 			c.sendError(ErrorActionFailed, err.Error())
 			continue
 		}
-		c.server.matchDebugLogLine(clientDebugLogRoomID(c), fmt.Sprintf("ok type=%s id=%s player=%s", env.Type, env.ID, c.playerID))
 	}
 }
 
@@ -275,6 +274,8 @@ func (c *Client) handle(env Envelope) error {
 		return c.handleSubmitMove(env)
 	case MessageIgniteCard:
 		return c.handleIgniteCard(env)
+	case MessageSubmitIgnitionTargets:
+		return c.handleSubmitIgnitionTargets(env)
 	case MessageDrawCard:
 		return c.handleDrawCard(env)
 	case MessageConfirmMulligan:
@@ -304,7 +305,7 @@ func (c *Client) handle(env Envelope) error {
 	}
 }
 
-// handleClientTrace appends browser debug text to the server process log when ADMIN_DEBUG_MATCH is enabled.
+// handleClientTrace accepts batched browser debug text when ADMIN_DEBUG_MATCH is enabled (no server logging).
 func (c *Client) handleClientTrace(env Envelope) error {
 	if !c.server.adminDebugMatch {
 		return protocolError{code: ErrorDebugDisabled, message: "admin_debug_match_disabled"}
@@ -316,12 +317,6 @@ func (c *Client) handleClientTrace(env Envelope) error {
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		return err
 	}
-	text := strings.TrimSpace(p.Text)
-	if text == "" {
-		return c.sendAck(env, "ok", "", "")
-	}
-	line := compactClientTraceLogLine(text)
-	log.Printf("client_trace room=%s player=%s %s", c.room.RoomID, c.playerID, line)
 	return c.sendAck(env, "ok", "", "")
 }
 
@@ -506,7 +501,7 @@ func (c *Client) handleJoinMatch(env Envelope) error {
 		if env.ID != "" && !room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
-		selected, assignErr := room.assignJoinPlayer(p)
+		selected, assignErr := room.assignJoinPlayer(p, c.authUserID)
 		if assignErr != nil {
 			return assignErr
 		}
@@ -594,6 +589,10 @@ func (c *Client) handleIgniteCard(env Envelope) error {
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		return err
 	}
+	targetPieces := make([]chess.Pos, 0, len(p.TargetPieces))
+	for _, piece := range p.TargetPieces {
+		targetPieces = append(targetPieces, chess.Pos{Row: piece.Row, Col: piece.Col})
+	}
 	if !c.room.BothPlayersConnected() {
 		return protocolError{code: ErrorActionFailed, message: "waiting_for_opponent"}
 	}
@@ -602,8 +601,21 @@ func (c *Client) handleIgniteCard(env Envelope) error {
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
 		}
+		hand := c.room.Engine.State.Players[c.playerID].Hand
+		if p.HandIndex < 0 || p.HandIndex >= len(hand) {
+			return errors.New("invalid hand index")
+		}
+		cardID := hand[p.HandIndex].CardID
+		if _, ok := gameplay.CardDefinitionByID(cardID); !ok {
+			return errors.New("unknown card definition")
+		}
+		if len(targetPieces) > 0 {
+			if owner, _, _, has := c.room.Engine.IgnitionTargetSnapshot(); has && owner != c.playerID {
+				return errors.New("target_pieces already locked for another player")
+			}
+		}
 		_, prevStack, hadOpenWindow := c.room.Engine.ReactionWindowSnapshot()
-		if err := c.room.Engine.ActivateCard(c.playerID, p.HandIndex); err != nil {
+		if err := c.room.Engine.ActivateCardWithTargets(c.playerID, p.HandIndex, targetPieces); err != nil {
 			return err
 		}
 		now := time.Now()
@@ -612,6 +624,67 @@ func (c *Client) handleIgniteCard(env Envelope) error {
 			if ok && newStack > 0 {
 				c.room.NoteReactionChainExtendedUnsafe(now)
 			}
+		}
+		if err := c.room.maybeAutoResolveIgniteReactionUnsafe(); err != nil {
+			return err
+		}
+		if err := c.room.maybeAutoFinalizeIgniteChainIfStuckUnsafe(); err != nil {
+			return err
+		}
+		if err := c.room.maybeAutoFinalizeCounterChainIfStuckUnsafe(); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		if errors.Is(err, errDuplicateRequest) {
+			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
+		}
+		return err
+	}
+	_ = c.sendAck(env, "ok", "", "")
+	// Disruption (ignition 0): first snapshot shows the card in ignition; then resolve so
+	// activate_card + final snapshot match client glow-then-cooldown sequencing.
+	if c.room.Engine.HasPendingDisruptionSameTurnResolve() {
+		c.room.BroadcastSnapshot()
+		if err := c.room.Execute(func() error {
+			return c.room.Engine.FinishDisruptionSameTurnResolveIfPending()
+		}); err != nil {
+			return err
+		}
+	}
+	c.room.EvaluateMatchOutcome()
+	_ = c.server.persistRoom(context.Background(), c.room)
+	c.room.TouchActivity()
+	c.room.BroadcastSnapshot()
+	return nil
+}
+
+// handleSubmitIgnitionTargets locks board targets for a target-requiring card already in ignition.
+func (c *Client) handleSubmitIgnitionTargets(env Envelope) error {
+	if c.room == nil {
+		return protocolError{code: ErrorJoinRequired, message: "join_match is required before submit_ignition_targets"}
+	}
+	var p SubmitIgnitionTargetsPayload
+	if err := json.Unmarshal(env.Payload, &p); err != nil {
+		return err
+	}
+	targetPieces := make([]chess.Pos, 0, len(p.TargetPieces))
+	for _, piece := range p.TargetPieces {
+		targetPieces = append(targetPieces, chess.Pos{Row: piece.Row, Col: piece.Col})
+	}
+	if !c.room.BothPlayersConnected() {
+		return protocolError{code: ErrorActionFailed, message: "waiting_for_opponent"}
+	}
+	if err := c.room.Execute(func() error {
+		requestKey := c.requestKey(env)
+		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
+			return errDuplicateRequest
+		}
+		if owner, _, _, has := c.room.Engine.IgnitionTargetSnapshot(); has && owner != c.playerID {
+			return errors.New("target_pieces already locked for another player")
+		}
+		if err := c.room.Engine.SubmitIgnitionTargets(c.playerID, targetPieces); err != nil {
+			return err
 		}
 		if err := c.room.maybeAutoResolveIgniteReactionUnsafe(); err != nil {
 			return err

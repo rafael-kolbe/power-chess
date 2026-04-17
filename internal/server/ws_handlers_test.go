@@ -452,11 +452,43 @@ func TestHandleIgniteCardSucceeds(t *testing.T) {
 	sendEnv(t, cA, Envelope{
 		ID:      "ac2",
 		Type:    MessageIgniteCard,
-		Payload: MustPayload(IgniteCardPayload{HandIndex: 0}),
+		Payload: MustPayload(IgniteCardPayload{
+			HandIndex: 0,
+			TargetPieces: []TargetPiecePayload{
+				{Row: 6, Col: 4},
+			},
+		}),
 	})
 	if _, found := drainUntilType(t, cA, MessageAck, 10); !found {
 		t.Fatal("expected ack for ignite_card")
 	}
+}
+
+func TestHandleIgniteCardKnightTouchPlaceThenSubmitTargets(t *testing.T) {
+	t.Setenv("ADMIN_DEBUG_MATCH", "1")
+	_, wsURL := wsSetup(t)
+	cA, cB := joinTwoPlayers(t, wsURL, "923")
+	applyDebugFixtureFromClient(t, cA)
+	confirmMulliganBoth(t, cA, cB)
+	sendEnv(t, cA, Envelope{
+		ID:      "ac-place",
+		Type:    MessageIgniteCard,
+		Payload: MustPayload(IgniteCardPayload{HandIndex: 0}),
+	})
+	if _, found := drainUntilType(t, cA, MessageAck, 10); !found {
+		t.Fatal("expected ack for ignite_card without target_pieces (hand→ignition only)")
+	}
+	sendEnv(t, cA, Envelope{
+		ID:   "submit-targets",
+		Type: MessageSubmitIgnitionTargets,
+		Payload: MustPayload(SubmitIgnitionTargetsPayload{
+			TargetPieces: []TargetPiecePayload{{Row: 6, Col: 4}},
+		}),
+	})
+	if _, found := drainUntilType(t, cA, MessageAck, 10); !found {
+		t.Fatal("expected ack for submit_ignition_targets")
+	}
+	_ = cB
 }
 
 func TestHandleIgniteCardRejectsInvalidIndex(t *testing.T) {

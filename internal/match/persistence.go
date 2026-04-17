@@ -9,12 +9,21 @@ import (
 
 // PersistedEngineState is a JSON-serializable snapshot of engine runtime state.
 type PersistedEngineState struct {
-	Chess          chess.Game                `json:"chess"`
-	Match          gameplay.MatchState       `json:"match"`
-	PendingEffects []PersistedPendingEffect  `json:"pendingEffects"`
-	ReactionWindow *ReactionWindow           `json:"reactionWindow,omitempty"`
-	ReactionStack  []PersistedReactionAction `json:"reactionStack"`
-	PendingMove    *PendingMoveAction        `json:"pendingMove,omitempty"`
+	Chess               chess.Game                    `json:"chess"`
+	Match               gameplay.MatchState           `json:"match"`
+	PendingEffects      []PersistedPendingEffect      `json:"pendingEffects"`
+	ReactionWindow      *ReactionWindow               `json:"reactionWindow,omitempty"`
+	ReactionStack       []PersistedReactionAction     `json:"reactionStack"`
+	PendingMove         *PendingMoveAction            `json:"pendingMove,omitempty"`
+	MovementGrants      []MovementGrant               `json:"movementGrants,omitempty"`
+	IgnitionTargetLocks []PersistedIgnitionTargetLock `json:"ignitionTargetLocks,omitempty"`
+}
+
+// PersistedIgnitionTargetLock stores locked ignite target squares for resume-after-reconnect.
+type PersistedIgnitionTargetLock struct {
+	Owner  gameplay.PlayerID `json:"owner"`
+	CardID gameplay.CardID   `json:"cardId"`
+	Pieces []chess.Pos       `json:"pieces"`
 }
 
 // PersistedPendingEffect stores pending effect metadata without function pointers.
@@ -36,7 +45,7 @@ func (e *Engine) ExportState() PersistedEngineState {
 		Chess:          *e.Chess.Clone(),
 		Match:          *e.State,
 		ReactionWindow: nil,
-		ReactionStack:  make([]PersistedReactionAction, 0, len(e.reactionStack)),
+		ReactionStack:  make([]PersistedReactionAction, 0, e.reactions.Len()),
 		PendingMove:    nil,
 	}
 	for _, pid := range []gameplay.PlayerID{gameplay.PlayerA, gameplay.PlayerB} {
@@ -52,7 +61,7 @@ func (e *Engine) ExportState() PersistedEngineState {
 		rw.EligibleTypes = append([]gameplay.CardType(nil), rw.EligibleTypes...)
 		out.ReactionWindow = &rw
 	}
-	for _, ra := range e.reactionStack {
+	for _, ra := range e.reactions.Actions() {
 		out.ReactionStack = append(out.ReactionStack, PersistedReactionAction{
 			Owner:  ra.Owner,
 			Card:   ra.Card,
@@ -62,6 +71,22 @@ func (e *Engine) ExportState() PersistedEngineState {
 	if e.pendingMove != nil {
 		pm := *e.pendingMove
 		out.PendingMove = &pm
+	}
+	out.MovementGrants = append(out.MovementGrants, e.movementGrants...)
+	for _, pid := range []gameplay.PlayerID{gameplay.PlayerA, gameplay.PlayerB} {
+		cardID, ok := e.ignitionTargetCard[pid]
+		if !ok {
+			continue
+		}
+		pieces := append([]chess.Pos(nil), e.ignitionTargets[pid]...)
+		if len(pieces) == 0 {
+			continue
+		}
+		out.IgnitionTargetLocks = append(out.IgnitionTargetLocks, PersistedIgnitionTargetLock{
+			Owner:  pid,
+			CardID: cardID,
+			Pieces: pieces,
+		})
 	}
 	return out
 }
@@ -81,6 +106,7 @@ func NewEngineFromState(snapshot PersistedEngineState) (*Engine, error) {
 		pm := *snapshot.PendingMove
 		e.pendingMove = &pm
 	}
+	e.movementGrants = append([]MovementGrant(nil), snapshot.MovementGrants...)
 	for _, pe := range snapshot.PendingEffects {
 		resolver, ok := e.resolvers[pe.CardID]
 		if !ok {
@@ -97,12 +123,22 @@ func NewEngineFromState(snapshot PersistedEngineState) (*Engine, error) {
 		if !ok {
 			return nil, errors.New("missing resolver for persisted reaction stack")
 		}
-		e.reactionStack = append(e.reactionStack, ReactionAction{
+		e.reactions.Push(ReactionAction{
 			Owner:    ra.Owner,
 			Card:     ra.Card,
 			Target:   ra.Target,
 			Resolver: resolver,
 		})
+	}
+	for _, lock := range snapshot.IgnitionTargetLocks {
+		if lock.Owner != gameplay.PlayerA && lock.Owner != gameplay.PlayerB {
+			return nil, errors.New("invalid ignition target lock owner")
+		}
+		if lock.CardID == "" || len(lock.Pieces) == 0 {
+			return nil, errors.New("invalid ignition target lock payload")
+		}
+		e.ignitionTargetCard[lock.Owner] = lock.CardID
+		e.ignitionTargets[lock.Owner] = append([]chess.Pos(nil), lock.Pieces...)
 	}
 	return e, nil
 }

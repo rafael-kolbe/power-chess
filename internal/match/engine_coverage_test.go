@@ -75,7 +75,7 @@ func TestActivatePlayerSkillRequiresChessTurnAlignment(t *testing.T) {
 }
 
 func TestActivatePlayerSkillSuccessAndAdvancesTurn(t *testing.T) {
-	card := gameplay.CardInstance{InstanceID: "dt1", CardID: CardDoubleTurn, ManaCost: 4, Ignition: 1, Cooldown: 5}
+	card := gameplay.CardInstance{InstanceID: "dt1", CardID: CardDoubleTurn, ManaCost: 6, Ignition: 2, Cooldown: 9}
 	state, _ := gameplay.NewMatchState(testDeckWith(card), testDeckWith(card))
 	board := chess.NewGame()
 	e := NewEngine(state, board)
@@ -234,7 +234,7 @@ func TestLoneCounterOnStackResolvesNoOp(t *testing.T) {
 	markInPlayForTest(state)
 
 	resolver := e.resolvers[CardBlockade]
-	e.reactionStack = []ReactionAction{{Owner: gameplay.PlayerA, Card: blockade, Resolver: resolver}}
+	e.reactions.Push(ReactionAction{Owner: gameplay.PlayerA, Card: blockade, Resolver: resolver})
 	e.ReactionWindow = &ReactionWindow{Open: true, Trigger: "capture_attempt", Actor: gameplay.PlayerA}
 
 	if err := e.ResolveReactionStack(); err != nil {

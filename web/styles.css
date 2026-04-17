@@ -530,6 +530,17 @@ button:disabled {
   flex-direction: column-reverse;
 }
 
+/*
+ * Seat A stack is always name → mana → capture in DOM (bottom band for viewer A, top for viewer B).
+ * Seat B stack is always capture → mana → name in DOM (top band for viewer A, bottom for viewer B).
+ * Board column-reverse swaps which stack is top/bottom; reverse each stack so both viewers see:
+ * own band: name → mana → capture; opponent band: capture → mana → name.
+ */
+.board-wrap.board-wrap-perspective-b .player-a-stack,
+.board-wrap.board-wrap-perspective-b .player-b-stack {
+  flex-direction: column-reverse;
+}
+
 .side-clock {
   padding: 8px 10px;
   font-size: 14px;
@@ -586,6 +597,27 @@ button:disabled {
 
 .bar.mana-bar .fill {
   background: linear-gradient(180deg, #5eb0ff, #2a7ccc);
+}
+
+/* Energy Gain (+4): mana bar pulse after successful effect activation (activate_card), not on entering ignition */
+.bar.mana-bar.pm-mana-gain-flash {
+  overflow: visible;
+  z-index: 4;
+  animation: pm-mana-gain-bar-glow 0.75s ease-out forwards;
+}
+
+@keyframes pm-mana-gain-bar-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 rgb(100 190 255 / 0%),
+      inset 0 1px 0 rgb(255 255 255 / 5%);
+  }
+  45% {
+    box-shadow:
+      0 0 16px 5px rgb(120 200 255 / 55%),
+      inset 0 1px 0 rgb(255 255 255 / 8%);
+  }
 }
 
 .bar.energized-bar .fill {
@@ -718,6 +750,11 @@ button:disabled {
   cursor: grab;
 }
 
+/* Buffed opponent pieces: show that hover reveals card info (not draggable). */
+.sq.piece.sq--foreign-buff {
+  cursor: help;
+}
+
 .sq.sq--piece-dragging {
   cursor: grabbing;
 }
@@ -737,6 +774,53 @@ button:disabled {
 
 .sq.drop-target {
   box-shadow: inset 0 0 0 3px rgb(255 225 120 / 95%);
+}
+
+.sq.target-selected {
+  box-shadow: inset 0 0 0 3px rgb(80 170 255 / 98%);
+}
+
+.sq.target-selected::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border: 2px dotted rgb(105 190 255 / 95%);
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.sq.piece-effect-aura-power {
+  box-shadow:
+    inset 0 0 0 2px rgb(86 214 132 / 92%),
+    0 0 10px 2px rgb(86 214 132 / 40%);
+}
+
+/* Turns remaining for on-board card effects (effect_duration); bottom-right of square. */
+.sq .sq-effect-turn-badge {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  z-index: 2;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  color: #fff;
+  text-shadow:
+    0 0 4px rgb(0 0 0 / 90%),
+    0 1px 2px rgb(0 0 0 / 75%);
+  pointer-events: none;
+  letter-spacing: 0.02em;
+}
+
+/* Match header: "Effect turns" = Hover — badge only while pointer is over the enchanted square. */
+.board-frame.effect-duration-badges-hover-only .sq .sq-effect-turn-badge {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.board-frame.effect-duration-badges-hover-only .sq.piece-effect-aura-power:hover .sq-effect-turn-badge {
+  opacity: 1;
 }
 
 .sq .sq-coord {
@@ -1644,6 +1728,29 @@ pre {
   overflow: hidden;
 }
 
+/* Opponent negation (Extinguish): symbol over ignition card; pointer-events none so hover uses card beneath */
+.pm-ignition-negate-overlay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 80%;
+  max-width: 100%;
+  z-index: 4;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pm-ignition-negate-overlay__img {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  opacity: 0.5;
+  filter: drop-shadow(0 0 4px rgba(220, 60, 60, 0.95));
+}
+
 /* Queued reaction card (stack top); may fill the slot or sit above an existing ignition card. */
 .pm-ignition-card.pm-ignition-staged {
   outline: 2px dashed rgba(120, 200, 255, 0.9);
@@ -2165,6 +2272,24 @@ pre {
   opacity: 0;
 }
 
+/* Turn counter badge overlaid on the top-left corner of each card in the piece-effect hover preview. */
+.pm-card-turns-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 10;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 70%);
+  color: #fff;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+}
+
 /* =============================================================================
    Animation keyframes
    ============================================================================= */
@@ -2193,6 +2318,38 @@ pre {
 
 .pm-zone--ignition.pm-ignition-activating {
   animation: pm-ignition-activate 0.6s ease-out forwards;
+}
+
+.pm-zone--ignition.pm-ignition-targeting {
+  position: relative;
+}
+
+.pm-zone--ignition.pm-ignition-targeting::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 16px;
+  border: 2px solid rgb(247 209 90 / 88%);
+  box-shadow:
+    0 0 0 1px rgb(255 235 170 / 78%),
+    0 0 18px 6px rgb(250 205 90 / 36%);
+  animation: pm-ignition-target-ring 1.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes pm-ignition-target-ring {
+  0% {
+    transform: scale(0.98);
+    opacity: 0.72;
+  }
+  50% {
+    transform: scale(1.02);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.98);
+    opacity: 0.72;
+  }
 }
 
 /* Reaction stack resolve — full-width banner (see showResolvingEffectsBanner in app.js). */

@@ -44,7 +44,7 @@ func TestDrawCardManaAndHandLimit(t *testing.T) {
 func TestActivateCardConsumesManaAndAddsEnergized(t *testing.T) {
 	s, _ := NewMatchState(StarterDeck(), StarterDeck())
 	p := s.Players[PlayerA]
-	p.Hand = []CardInstance{{InstanceID: "x1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}}
+	p.Hand = []CardInstance{{InstanceID: "x1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 9}}
 	p.Mana = 10
 	card := p.Hand[0]
 	if err := s.ActivateCard(PlayerA, 0); err != nil {

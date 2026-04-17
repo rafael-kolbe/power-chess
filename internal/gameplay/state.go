@@ -15,6 +15,7 @@ const (
 	DefaultDrawCardManaCost     = 2
 	DefaultExtraManaPerTurnCap  = 1
 	DefaultIgnitionSlotCapacity = 1
+	errNotEnoughMana            = "not enough mana"
 )
 
 type PlayerID string
@@ -43,10 +44,14 @@ type PieceRef struct {
 
 // IgnitionSlot stores the currently igniting card (single slot).
 type IgnitionSlot struct {
-	Card            CardInstance
-	TurnsRemaining  int
-	Occupied        bool
-	ActivationOwner PlayerID
+	Card             CardInstance
+	TurnsRemaining   int
+	Occupied         bool
+	ActivationOwner  PlayerID
+	// EffectNegated is true when an opponent effect (e.g. Extinguish) marked this ignition
+	// activation as negated; resolution uses failure and the UI shows a negate overlay until the
+	// card leaves the ignition zone.
+	EffectNegated bool `json:"effectNegated,omitempty"`
 }
 
 // CooldownEntry tracks a card and remaining cooldown turns.
@@ -104,6 +109,9 @@ type ResolvedIgnitionEvent struct {
 	Owner   PlayerID
 	Card    CardInstance
 	Success bool
+	// MidTurn is true for Continuous cards: an activation pulse while the card stays in ignition
+	// (retain slot). The engine still applies the card resolver for that pulse (then activate_card FX).
+	MidTurn bool `json:"midTurn,omitempty"`
 }
 
 // NewMatchState creates an initialized match with default rules and full decks (no opening draw).
@@ -168,8 +176,12 @@ func (s *MatchState) StartTurn(pid PlayerID) error {
 	s.Started = true
 	p.ExtraManaGainedTurn = 0
 	s.addMana(pid, 1)
-	s.tickCooldowns(pid)
+	// Ignition burn is processed before decrementing cooldown rows so resolution order matches
+	// rules text (counter hits 0 → effect, then other recharge timers tick). Newly cooled cards
+	// are appended in Engine.processResolvedIgnitions after this method returns, so they are not
+	// decremented in the same StartTurn tick.
 	s.tickIgnition(pid)
+	s.tickCooldowns(pid)
 	return nil
 }
 
@@ -221,7 +233,7 @@ func (s *MatchState) GrantManaForChessCapture(pid PlayerID) {
 func (s *MatchState) DrawCard(pid PlayerID) error {
 	p := s.Players[pid]
 	if p.Mana < DefaultDrawCardManaCost {
-		return errors.New("not enough mana")
+		return errors.New(errNotEnoughMana)
 	}
 	if len(p.Hand) >= DefaultMaxHandSize {
 		return errors.New("hand is full")
@@ -238,9 +250,13 @@ func (s *MatchState) drawCardNoCost(pid PlayerID) error {
 	if len(p.Hand) >= DefaultMaxHandSize {
 		return errors.New("hand is full")
 	}
-	card := p.Deck[0]
-	p.Deck = p.Deck[1:]
-	p.Hand = append(p.Hand, card)
+	svc := NewZoneService()
+	_, nextDeck, nextHand, err := svc.MoveCardBetweenSlices(p.Deck, p.Hand, 0)
+	if err != nil {
+		return err
+	}
+	p.Deck = nextDeck
+	p.Hand = nextHand
 	return nil
 }
 
@@ -258,17 +274,23 @@ func (s *MatchState) ActivateCard(pid PlayerID, handIndex int) error {
 		return errors.New("ignition slot occupied")
 	}
 	if p.Mana < card.ManaCost {
-		return errors.New("not enough mana")
+		return errors.New(errNotEnoughMana)
 	}
 	p.Mana -= card.ManaCost
 	s.addEnergizedMana(pid, card.ManaCost)
 
-	p.Hand = append(p.Hand[:handIndex], p.Hand[handIndex+1:]...)
+	svc := NewZoneService()
+	_, nextHand, _, err := svc.MoveCardBetweenSlices(p.Hand, nil, handIndex)
+	if err != nil {
+		return err
+	}
+	p.Hand = nextHand
 	p.Ignition = IgnitionSlot{
-		Card:            card,
-		TurnsRemaining:  card.Ignition,
-		Occupied:        true,
-		ActivationOwner: pid,
+		Card:             card,
+		TurnsRemaining:   card.Ignition,
+		Occupied:         true,
+		ActivationOwner:  pid,
+		EffectNegated:    false,
 	}
 	return nil
 }
@@ -281,11 +303,16 @@ func (s *MatchState) ConsumeCardFromHand(pid PlayerID, handIndex int) (CardInsta
 	}
 	card := p.Hand[handIndex]
 	if p.Mana < card.ManaCost {
-		return CardInstance{}, errors.New("not enough mana")
+		return CardInstance{}, errors.New(errNotEnoughMana)
 	}
 	p.Mana -= card.ManaCost
 	s.addEnergizedMana(pid, card.ManaCost)
-	p.Hand = append(p.Hand[:handIndex], p.Hand[handIndex+1:]...)
+	svc := NewZoneService()
+	_, nextHand, _, err := svc.MoveCardBetweenSlices(p.Hand, nil, handIndex)
+	if err != nil {
+		return CardInstance{}, err
+	}
+	p.Hand = nextHand
 	return card, nil
 }
 
@@ -293,26 +320,7 @@ func (s *MatchState) ConsumeCardFromHand(pid PlayerID, handIndex int) (CardInsta
 // Cooldown is zero: Continuous cards are banished; other types return to the deck (see PROJECT.md).
 func (s *MatchState) SendCardToCooldown(pid PlayerID, card CardInstance) {
 	p := s.Players[pid]
-	if card.Cooldown <= 0 {
-		s.routeCardFinishedCooldown(pid, card)
-		return
-	}
-	p.Cooldowns = append(p.Cooldowns, CooldownEntry{
-		Card:           card,
-		TurnsRemaining: card.Cooldown,
-	})
-}
-
-// routeCardFinishedCooldown moves a card whose cooldown timer has reached zero: Continuous cards
-// go to banish; all other types are appended to the deck.
-func (s *MatchState) routeCardFinishedCooldown(pid PlayerID, card CardInstance) {
-	p := s.Players[pid]
-	def, ok := CardDefinitionByID(card.CardID)
-	if ok && def.Type == CardTypeContinuous {
-		p.Banished = append(p.Banished, card)
-		return
-	}
-	p.Deck = append(p.Deck, card)
+	NewZoneService().SendCardToCooldown(p, card)
 }
 
 // ResolveIgnitionFor finalizes ignition for one player's slot and appends a success/failure event.
@@ -340,29 +348,65 @@ func (s *MatchState) PopResolvedIgnitions() []ResolvedIgnitionEvent {
 	return ev
 }
 
-// tickIgnition decrements this player's ignition counter at the start of their turn.
+// tickIgnition runs the start-of-turn ignition logic for one player:
+// all cards decrement their counter; when the counter reaches 0, the final activation fires;
+// Continuous cards also fire a mid-turn activation on every tick where the counter ends up > 0.
 func (s *MatchState) tickIgnition(pid PlayerID) {
 	p := s.Players[pid]
 	if p == nil || !p.Ignition.Occupied {
 		return
 	}
+	cardDef, ok := CardDefinitionByID(p.Ignition.Card.CardID)
+	isContinuous := ok && cardDef.Type == CardTypeContinuous
+
+	// All types: decrement counter at start of owner's turn.
 	if p.Ignition.TurnsRemaining > 0 {
 		p.Ignition.TurnsRemaining--
 	}
+
+	// Counter hit 0: final activation (clears slot, sends to cooldown/banished via engine).
 	if p.Ignition.TurnsRemaining == 0 {
-		_ = s.ResolveIgnitionFor(pid, true)
+		success := !p.Ignition.EffectNegated
+		_ = s.ResolveIgnitionFor(pid, success)
+		return
 	}
+
+	// Continuous only: also fire a mid-turn activation when counter is still > 0 after decrement.
+	if isContinuous {
+		s.queueContinuousMidTurnPulse(pid)
+	}
+}
+
+// PulseContinuousIgnitionMidTurn queues the initial mid-turn activation for a Continuous card in
+// ignition WITHOUT decrementing its counter. Call this once after the ignite_reaction window closes
+// on the turn the card was played. The counter must be > 0 and will only be decremented at the
+// start of the owner's next turn (see tickIgnition).
+func (s *MatchState) PulseContinuousIgnitionMidTurn(owner PlayerID) {
+	s.queueContinuousMidTurnPulse(owner)
+}
+
+// queueContinuousMidTurnPulse appends a MidTurn activation event without touching the counter.
+func (s *MatchState) queueContinuousMidTurnPulse(owner PlayerID) {
+	p := s.Players[owner]
+	success := !p.Ignition.EffectNegated
+	s.ResolvedQueue = append(s.ResolvedQueue, ResolvedIgnitionEvent{
+		Owner:   owner,
+		Card:    p.Ignition.Card,
+		Success: success,
+		MidTurn: true,
+	})
 }
 
 func (s *MatchState) tickCooldowns(pid PlayerID) {
 	p := s.Players[pid]
+	zones := NewZoneService()
 	next := p.Cooldowns[:0]
 	for _, cd := range p.Cooldowns {
 		if cd.TurnsRemaining > 0 {
 			cd.TurnsRemaining--
 		}
 		if cd.TurnsRemaining == 0 {
-			s.routeCardFinishedCooldown(pid, cd.Card)
+			zones.RouteFinishedCooldown(p, cd.Card)
 			continue
 		}
 		next = append(next, cd)
@@ -414,6 +458,14 @@ func (s *MatchState) addMana(pid PlayerID, amount int) {
 	if p.Mana > p.MaxMana {
 		p.Mana = p.MaxMana
 	}
+}
+
+// GrantManaFromCardEffect adds mana after a successful post-ignition effect resolution, capped at MaxMana.
+func (s *MatchState) GrantManaFromCardEffect(pid PlayerID, amount int) {
+	if amount <= 0 {
+		return
+	}
+	s.addMana(pid, amount)
 }
 
 func (s *MatchState) addEnergizedMana(pid PlayerID, amount int) {

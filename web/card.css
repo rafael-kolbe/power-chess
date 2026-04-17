@@ -55,6 +55,10 @@
   background-image: url("/public/cards/counterCard.png");
 }
 
+.power-card--disruption {
+  background-image: url("/public/cards/disruptionCard.png");
+}
+
 .power-card--power {
   background-image: url("/public/cards/powerCard.png");
 }

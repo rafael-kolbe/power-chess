@@ -34,8 +34,9 @@ func TestMarkRequestOnce(t *testing.T) {
 	}
 }
 
-// TestJoinSeatBlockedDuringReconnectGrace ensures a third party cannot take the vacant seat while the grace timer runs.
-func TestJoinSeatBlockedDuringReconnectGrace(t *testing.T) {
+// TestJoinSeatReconnectDuringDisconnectGrace ensures the same seat may be reclaimed during the
+// grace window (e.g. browser refresh), while a different authenticated account cannot steal it.
+func TestJoinSeatReconnectDuringDisconnectGrace(t *testing.T) {
 	room, err := NewRoomSession("room-join-grace")
 	if err != nil {
 		t.Fatalf(newRoomFailedFmt, err)
@@ -43,11 +44,27 @@ func TestJoinSeatBlockedDuringReconnectGrace(t *testing.T) {
 	syncDisconnectBudgetForTest(room, time.Minute)
 	room.RegisterPlayerConnection(gameplay.PlayerA)
 	room.RegisterPlayerConnection(gameplay.PlayerB)
+	room.authUIDByPlayer[gameplay.PlayerA] = 9001
 	room.HandlePlayerDisconnect(gameplay.PlayerA)
 
-	_, err = room.joinSeat(gameplay.PlayerA)
-	if err == nil {
-		t.Fatalf("expected joinSeat to reject while reconnect timer is pending for A")
+	if _, err := room.joinSeat(gameplay.PlayerA, 9001); err != nil {
+		t.Fatalf("expected same account to rejoin seat A during grace, got %v", err)
+	}
+	if _, err := room.joinSeat(gameplay.PlayerA, 9002); err == nil {
+		t.Fatalf("expected different account to be rejected for seat A during grace")
+	}
+
+	room2, err := NewRoomSession("room-join-grace-guest")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	syncDisconnectBudgetForTest(room2, time.Minute)
+	room2.RegisterPlayerConnection(gameplay.PlayerA)
+	room2.RegisterPlayerConnection(gameplay.PlayerB)
+	room2.authUIDByPlayer[gameplay.PlayerA] = 0
+	room2.HandlePlayerDisconnect(gameplay.PlayerA)
+	if _, err := room2.joinSeat(gameplay.PlayerA, 0); err != nil {
+		t.Fatalf("expected guest to rejoin seat A during grace, got %v", err)
 	}
 }
 
@@ -264,7 +281,7 @@ func TestIgniteReactionSkippedWhenOpponentReactionOff(t *testing.T) {
 	s.MulliganPhaseActive = false
 	s.Started = true
 	s.CurrentTurn = gameplay.PlayerA
-	dt := gameplay.CardInstance{InstanceID: "dt1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}
+	dt := gameplay.CardInstance{InstanceID: "dt1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 9}
 	s.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{dt}
 	s.Players[gameplay.PlayerA].Mana = 10
 	s.Players[gameplay.PlayerB].Mana = 10
@@ -288,10 +305,10 @@ func TestIgniteReactionSkippedWhenOpponentReactionOff(t *testing.T) {
 		t.Fatalf("expected ignite reaction window closed, got %+v", rw)
 	}
 	if !s.Players[gameplay.PlayerA].Ignition.Occupied {
-		t.Fatalf("expected double-turn to stay in ignition while burning (ignition 1)")
+		t.Fatalf("expected double-turn to stay in ignition while burning (ignition 2)")
 	}
-	if s.Players[gameplay.PlayerA].Ignition.TurnsRemaining != 1 {
-		t.Fatalf("expected 1 burn turn remaining, got %d", s.Players[gameplay.PlayerA].Ignition.TurnsRemaining)
+	if s.Players[gameplay.PlayerA].Ignition.TurnsRemaining != 2 {
+		t.Fatalf("expected 2 burn turns remaining, got %d", s.Players[gameplay.PlayerA].Ignition.TurnsRemaining)
 	}
 }
 
@@ -305,7 +322,7 @@ func TestIgniteReactionWindowWhenOpponentReactionOn(t *testing.T) {
 	s.MulliganPhaseActive = false
 	s.Started = true
 	s.CurrentTurn = gameplay.PlayerA
-	dt := gameplay.CardInstance{InstanceID: "dt1", CardID: "double-turn", ManaCost: 4, Ignition: 1, Cooldown: 5}
+	dt := gameplay.CardInstance{InstanceID: "dt1", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 9}
 	s.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{dt}
 	s.Players[gameplay.PlayerA].Mana = 10
 	s.Players[gameplay.PlayerB].Mana = 10
@@ -410,6 +427,9 @@ func TestAutoFinalizeIgniteWhenNextCannotExtend(t *testing.T) {
 	if err := room.Execute(func() error {
 		room.resetReactionBudgetsUnsafe()
 		if err := room.Engine.ActivateCard(gameplay.PlayerA, 0); err != nil {
+			return err
+		}
+		if err := room.Engine.SubmitIgnitionTargets(gameplay.PlayerA, []chess.Pos{{Row: 6, Col: 4}}); err != nil {
 			return err
 		}
 		if err := room.maybeAutoResolveIgniteReactionUnsafe(); err != nil {
@@ -750,5 +770,83 @@ func TestRequestRematchSwapsSides(t *testing.T) {
 	snap := room.SnapshotSafe()
 	if snap.PlayerAName != "bob" || snap.PlayerBName != "alice" {
 		t.Fatalf("expected display names swapped with seats, got A=%q B=%q", snap.PlayerAName, snap.PlayerBName)
+	}
+}
+
+// TestGameplayStateServiceOpenClose validates open/closed match state transitions.
+func TestGameplayStateServiceOpenClose(t *testing.T) {
+	room, err := NewRoomSession("room-gameplay-state-service")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	svc := NewGameplayStateService(room)
+	if !svc.IsOpen() {
+		t.Fatalf("new match should start as open")
+	}
+	svc.Close(gameplay.PlayerA, "checkmate")
+	if svc.IsOpen() {
+		t.Fatalf("match should be closed after Close")
+	}
+	snap := room.SnapshotSafe()
+	if !snap.MatchEnded || snap.Winner != string(gameplay.PlayerA) || snap.EndReason != "checkmate" {
+		t.Fatalf("unexpected close state snapshot: %+v", snap)
+	}
+}
+
+// TestSnapshotDoubleTurnActiveForPopulated verifies that SnapshotForPlayer includes
+// doubleTurnActiveFor when the Double Turn effect is active for that player, and that
+// the highlight persists for the full turn (including after the extra move is used).
+func TestSnapshotDoubleTurnActiveForPopulated(t *testing.T) {
+	room, err := NewRoomSession("room-dt-snap")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 0}, chess.Piece{Type: chess.Pawn, Color: chess.White})
+	room.Engine.Chess = board
+	room.Engine.State.MulliganPhaseActive = false
+	room.Engine.State.Started = true
+	room.Engine.State.CurrentTurn = gameplay.PlayerA
+	room.RegisterPlayerConnection(gameplay.PlayerA)
+	room.RegisterPlayerConnection(gameplay.PlayerB)
+
+	// Directly inject the extra-move grant to simulate Double Turn resolver having fired.
+	room.Engine.SetExtraMovesRemainingForTest(gameplay.PlayerA, 1)
+
+	snap := room.SnapshotSafe()
+	if snap.DoubleTurnActiveFor != string(gameplay.PlayerA) {
+		t.Fatalf("expected doubleTurnActiveFor=%q, got %q", gameplay.PlayerA, snap.DoubleTurnActiveFor)
+	}
+	if snap.DoubleTurnTurnsRemaining != 1 {
+		t.Fatalf("expected doubleTurnTurnsRemaining=1, got %d", snap.DoubleTurnTurnsRemaining)
+	}
+
+	// After consuming the extra move (first move), the highlight must STILL be active.
+	// The extra move counter becomes 0 (extra move used), but the visual effect persists.
+	if err := room.Engine.SubmitMove(gameplay.PlayerA, chess.Move{
+		From: chess.Pos{Row: 6, Col: 0},
+		To:   chess.Pos{Row: 5, Col: 0},
+	}); err != nil {
+		t.Fatalf("SubmitMove (extra move): %v", err)
+	}
+	snap = room.SnapshotSafe()
+	if snap.DoubleTurnActiveFor != string(gameplay.PlayerA) {
+		t.Fatalf("expected doubleTurnActiveFor still %q after extra move (highlight persists until end of turn), got %q",
+			gameplay.PlayerA, snap.DoubleTurnActiveFor)
+	}
+
+	// After the second move (end of turn), the highlight must clear.
+	if err := room.Engine.SubmitMove(gameplay.PlayerA, chess.Move{
+		From: chess.Pos{Row: 7, Col: 4},
+		To:   chess.Pos{Row: 7, Col: 3},
+	}); err != nil {
+		t.Fatalf("SubmitMove (regular move, ends turn): %v", err)
+	}
+	snap = room.SnapshotSafe()
+	if snap.DoubleTurnActiveFor != "" {
+		t.Fatalf("expected doubleTurnActiveFor empty after turn ends, got %q", snap.DoubleTurnActiveFor)
 	}
 }

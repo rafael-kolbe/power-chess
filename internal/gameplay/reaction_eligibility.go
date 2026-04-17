@@ -30,6 +30,42 @@ func EligibleForOpeningRetributionAUTO(s *MatchState, pid PlayerID) bool {
 	return false
 }
 
+// EligibleForDisruptionReactionAUTO reports whether pid could queue at least one Disruption card
+// as a response in an ignite_reaction window: the opponent must have a card in their ignition slot,
+// and pid must have a Disruption card in hand with sufficient mana (cooldown duplicate rule applies).
+func EligibleForDisruptionReactionAUTO(s *MatchState, pid PlayerID) bool {
+	if s == nil {
+		return false
+	}
+	p := s.Players[pid]
+	if p == nil {
+		return false
+	}
+	opp := OppositePlayer(pid)
+	oppSlot := s.Players[opp].Ignition
+	if !oppSlot.Occupied {
+		return false
+	}
+	onCooldown := make(map[string]struct{}, len(p.Cooldowns))
+	for _, cd := range p.Cooldowns {
+		onCooldown[string(cd.Card.CardID)] = struct{}{}
+	}
+	for _, c := range p.Hand {
+		def, ok := CardDefinitionByID(c.CardID)
+		if !ok || def.Type != CardTypeDisruption {
+			continue
+		}
+		if _, dup := onCooldown[string(c.CardID)]; dup {
+			continue
+		}
+		if p.Mana < def.Cost {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 // EligibleForCaptureReactionAUTO reports whether pid could queue at least one legal opening
 // response in capture_attempt: Counter only (economy rules only; card text conditions are ignored in AUTO).
 func EligibleForCaptureReactionAUTO(s *MatchState, pid PlayerID) bool {

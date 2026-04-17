@@ -93,7 +93,7 @@ Fluxo típico de ativação:
 3. O oponente pode reagir em janelas permitidas.  
 4. Sucesso ou falha → carta vai para **recarga**; ao terminar, volta ao **deck** (exceto banimento e efeitos específicos).
 
-**Ticks no início de turno (servidor):** +1 mana do jogador da vez (até o máximo); **−1** no contador de **ignição** da carta na zona de ignição **desse jogador** (cada assento tem o seu slot; o tick aplica-se à carta desse jogador quando o turno dele começa); **−1** em cada entrada de **cooldown** do jogador que está começando o turno (entradas que chegam a 0 voltam ao deck).
+**Ticks no início de turno (servidor):** +1 mana do jogador da vez (até o máximo); na zona de ignição **desse jogador**: **Power** (e tipos não-Continuous com burn) só **decrementam** o contador até 0 e **só então** tentam resolver o efeito; **Continuous** tenta **resolver o efeito em cada turno desse jogador** enquanto a carta estiver no slot (incluindo o **primeiro** pulso **no mesmo turno** em que a carta entrou, **depois** de fechar `ignite_reaction`), e o contador desce **uma vez por esse pulso**; quando o contador chega a **0** o slot ainda recebe **mais um** pulso final noutro início de turno antes de ir à recarga/banimento; **−1** em cada entrada de **cooldown** do jogador que está começando o turno (entradas que chegam a 0 voltam ao deck).
 
 ### Janelas de reação (tipos e papéis)
 
@@ -165,8 +165,14 @@ Fluxo típico de ativação:
 
 ## Qualidade e commits
 
-- Toda funcionalidade nova ou bugfix relevante deve incluir **testes**.  
-- Commits na **`branch feature/<feature-name>`** quando a entrega estiver **coesa** e **`go test ./...`** (e E2E quando aplicável) estiver verde.
+- Toda funcionalidade nova ou bugfix relevante deve incluir **testes**.
+- **Padrão obrigatório no backend: TDD (Test-Driven Development)**.
+- Ciclo padrão por alteração de comportamento no backend:
+  1. escrever primeiro um teste que falha (**red**);
+  2. implementar o mínimo para passar (**green**);
+  3. refatorar mantendo a suíte verde (**refactor**).
+- Commits na **`branch feature/<feature-name>`** quando a entrega estiver **coesa** e **`go test ./...`** estiver verde.
+- Para implementação de efeitos de cartas, usar branch no padrão **`feature/<card-id>`** (ex.: `feature/knight-touch`) e entregar uma carta por vez.
 
 ### Política de push (Git)
 
@@ -226,3 +232,29 @@ Ordem aproximada; itens podem ser paralelizados onde fizer sentido.
 - `CardDefinition` + efeitos parametrizados + `CardInstance` (zona: mão, ignição, recarga, deck, banido).  
 - Pipeline: validar → consumir recursos → aplicar efeitos → emitir eventos → validar pós-estado.  
 - Estado temporário (buffs, janelas) com expiração por turno.
+
+### Padrão de implementação de efeitos (escalável)
+
+Aplicar este padrão para todas as novas cartas, evitando lógica espalhada e `if/else` por carta no fluxo principal.
+
+1. **Resolver dedicado por carta**  
+   - Criar um resolver próprio em `internal/match/` (ex.: `resolver_knight_touch.go`).  
+   - Registrar no `DefaultResolvers()` sem alterar o pipeline central.
+
+2. **Estado de efeito genérico no runtime**  
+   - Modelar efeitos temporários como estado estruturado e serializável (ex.: `MovementGrant`).  
+   - Persistir no snapshot do engine (`persistence.go`) para suportar reconexão/restauração.
+
+3. **Capacidades por composição, não substituição**  
+   - Efeitos devem **adicionar capacidades** à peça/jogador (ex.: novo padrão de movimento), sem remover comportamento nativo, salvo quando o texto da carta exigir.
+
+4. **Pontos únicos de aplicação**  
+   - Fluxo central (`SubmitMove`/`applyMoveCore`/resolução de pilha) só consulta serviços/estados genéricos.  
+   - Regras específicas ficam encapsuladas em resolver + tipos de estado do efeito.
+
+5. **Ciclo de vida explícito**  
+   - Definir claramente: criação do efeito, manutenção (ex.: acompanhar posição da peça), expiração por turno/condição e limpeza quando alvo deixa de ser válido.
+
+6. **TDD obrigatório por carta**  
+   - Antes da implementação: testes RED cobrindo ativação, uso do efeito, interação com regras-base e expiração.  
+   - Depois: GREEN mínimo + REFACTOR mantendo cobertura.

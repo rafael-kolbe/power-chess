@@ -14,8 +14,17 @@ alwaysApply: true
 ## O que fazer na prática
 
 - Preferir trabalhar e fazer push em `feature/<nome>`.
+- **Agente / Cursor:** ao começar uma entrega coesa (efeito de carta, protocolo, feature com vários ficheiros), **não assumir** que a branch atual serve. Se estiver em `main` ou `dev`, **criar e mudar** para `feature/<slug>` alinhado ao pedido (ex.: `feature/bishop-touch`) **antes** de acumular commits — ou **perguntar** o nome se o slug não for óbvio. Isto evita repetir o erro de implementar em cima da branch de integração só porque o push a `main`/`dev` já estava restrito.
 - Se o utilizador pedir merge para `main` ou `dev`, **confirmar** que há autorização/consentimento por escrito antes de qualquer push a essas branches.
 - Se não houver certeza, **perguntar** em vez de assumir.
+
+Documentação espelhada (contexto de produto): `PROJECT.md` e `README.md` descrevem o mesmo padrão de branches; **a regra operacional para o agente é este ficheiro**.
+
+## Commits (mensagem e conteúdo)
+
+- **Sempre** que o agente fizer commit de uma feature ou fix coeso, usar uma mensagem que **descreva tudo o que foi feito** nessa entrega (não apenas o título de uma linha): alterações de backend, frontend, protocolo, testes, docs/metadata gerado, e regras — o que um revisor precisaria para entender o PR sem abrir o diff linha a linha.
+- Preferir o corpo do commit em parágrafos ou lista com marcadores; primeira linha pode ser um resumo curto; evitar mensagens vagas (`fix`, `updates`, `wip`).
+- Antes de commitar: **`go test ./...`** verde (ver também `power-chess-standards` para vendor/Docker quando aplicável).
 
 ## Rationale
 

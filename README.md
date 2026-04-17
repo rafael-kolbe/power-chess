@@ -99,11 +99,19 @@ Servidor → cliente: `hello`, `ack`, `error`, `state_snapshot`.
 go test ./...
 ```
 
+### Padrão TDD (backend)
+
+- Backend segue **TDD**: escrever teste que falha -> implementar mínimo -> refatorar com testes verdes.
+- Toda mudança de regra de jogo/protocolo no backend deve começar por teste novo ou ajuste de teste existente cobrindo o comportamento alvo.
+
 ## Git e entregas
 
 - Branch principal: **`main`**.  
 - **Cada funcionalidade grande** deve ser **commitada** de forma coesa e **enviada** para `origin/main` (`git push origin main`) quando estiver pronta e com testes passando.  
 - Antes de commitar: `go test ./...`.
+- Para mudanças de backend: seguir ciclo TDD (red -> green -> refactor).
+- Para desenvolvimento de efeitos de carta: criar branch no padrão `feature/<card-id>` (ex.: `feature/knight-touch`) e implementar uma carta por vez.
+- Padrão arquitetural para efeitos escaláveis (resolver por carta + estado genérico serializável + composição de capacidades) documentado em `PROJECT.md`.
 
 ## Telemetria e persistência
 

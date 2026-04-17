@@ -5,6 +5,8 @@ Give any piece you control, except the king or a knight, the ability to move as 
 ## Cost: 3
 ## Ignition: 0
 ## Cooldown: 2
+## Targets: 1
+## Effect duration: 1
 ## Example:
 ```
 1. You have a pawn on e4.
@@ -16,15 +18,17 @@ Give any piece you control, except the king or a knight, the ability to move as 
 ## Type: Power
 ## Description
 Give yourself 1 extra move for one turn.
-## Cost: 4
-## Ignition: 1
-## Cooldown: 5
+## Cost: 6
+## Ignition: 2
+## Cooldown: 9
+## Targets: 0
+## Effect duration: 1
 ## Example:
 ```
 1. You have a pawn on e4.
 2. You activate "Double Turn".
-3. Ignition succeeds the next turn.
-4. Next turn you move the pawn to e5.
+3. Ignition succeeds 2 turns from now.
+4. You move the pawn to e5.
 5. Then you capture a pawn on f6 with the pawn on e5.
 ```
 
@@ -35,6 +39,8 @@ Target an ignited card from your opponent, burn x mana from your opponent, x bei
 ## Cost: 1
 ## Ignition: 0
 ## Cooldown: 3
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. Opponent activates "Knight Touch"
@@ -49,6 +55,8 @@ Gain 4 mana.
 ## Cost: 0
 ## Ignition: 1
 ## Cooldown: 2
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. You currently have 2 mana.
@@ -64,6 +72,8 @@ Swap positions of one piece you control with one piece your opponent controls up
 ## Cost: 6
 ## Ignition: 1
 ## Cooldown: 6
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. You control a pawn on a3.
@@ -76,12 +86,14 @@ Swap positions of one piece you control with one piece your opponent controls up
 ```
 
 # Mind Control
-## Type: Power 
+## Type: Power
 ## Description
 Target a piece your opponent controls, except the king or a queen, and take control of it for three turns. If the piece is captured, it goes to your opponent's captures.
 ## Cost: 7
 ## Ignition: 2
 ## Cooldown: 10
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. You activate "Mind Control".
@@ -97,6 +109,8 @@ Target a piece you control, except the king, move it to an empty square in the s
 ## Cost: 4
 ## Ignition: 0
 ## Cooldown: 4
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. You control a bishop on b2.
@@ -111,6 +125,8 @@ Target a pawn you control, sacrifice it to gain 6 mana and draw 2 cards.
 ## Cost: 0
 ## Ignition: 0
 ## Cooldown: 10
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. You control a pawn on a3.
@@ -125,6 +141,8 @@ Search your deck for a "Power" card that costs 3 mana or less, except "Archmage 
 ## Cost: 1
 ## Ignition: 0
 ## Cooldown: 2
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. You activate "Archmage Arsenal".
@@ -138,6 +156,8 @@ Give any piece you control, except the king or a rook, the ability to move as if
 ## Cost: 3
 ## Ignition: 0
 ## Cooldown: 2
+## Targets: 1
+## Effect duration: 1
 ## Example:
 ```
 1. You have a knight on b2.
@@ -152,6 +172,8 @@ Give any piece you control, except the king or a bishop, the ability to move as 
 ## Cost: 3
 ## Ignition: 0
 ## Cooldown: 2
+## Targets: 1
+## Effect duration: 1
 ## Example:
 ```
 1. You have a rook on b2.
@@ -166,6 +188,8 @@ Target a card on your opponent's cooldown slot, burn x mana from your opponent, 
 ## Cost: 2
 ## Ignition: 0
 ## Cooldown: 9
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. Opponent has a "Knight Touch" on their cooldown slot.
@@ -183,6 +207,8 @@ If a piece you control would be captured by a piece buffed by a "Power" card thi
 ## Cost: 1
 ## Ignition: 0
 ## Cooldown: 6
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. Opponent activates "Rook Touch" on his knight on e4.
@@ -198,6 +224,8 @@ If a piece you control would be captured by the activation of a "Counter" card t
 ## Cost: 0
 ## Ignition: 0
 ## Cooldown: 3
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. You move your knight on e4 that was buffed by "Rook Touch" to e6 in an attempt to capture the opponent's queen.
@@ -214,6 +242,8 @@ Target a pawn you control that is currently facing an opponent's piece with an e
 ## Cost: 1
 ## Ignition: 1
 ## Cooldown: 7
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. You activate "Backstab".
@@ -231,6 +261,8 @@ Target an ignited card from your opponent and negate its effect.
 ## Cost: 3
 ## Ignition: 0
 ## Cooldown: 5
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. Opponent activates "Knight Touch"
@@ -245,6 +277,8 @@ Consume up to 10 energized mana and gain half the amount as mana.
 ## Cost: 0
 ## Ignition: 1
 ## Cooldown: 2
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. You have 10 energized mana.
@@ -260,6 +294,8 @@ While on the ignition slot, every capture you make drains 1 mana from your oppon
 ## Cost: 3
 ## Ignition: 5
 ## Cooldown: 0
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. You activate "Life Drain".
@@ -274,6 +310,8 @@ While on the ignition slot, reveal your opponent's hand. When this card's igniti
 ## Cost: 7
 ## Ignition: 3
 ## Cooldown: 0
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. You activate "Clairvoyance".
@@ -287,6 +325,8 @@ Randomly choose 10 squares on the board, for each piece you control that is on o
 ## Cost: 10
 ## Ignition: 1
 ## Cooldown: 10
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. You activate "Thunderstorm".
@@ -297,12 +337,14 @@ Randomly choose 10 squares on the board, for each piece you control that is on o
 ```
 
 # Extinguish
-## Type: Power
+## Type: Disruption
 ## Description
 Target a card on your opponent's ignition slot and negate its effect.
 ## Cost: 2
 ## Ignition: 0
 ## Cooldown: 2
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. Opponent has a "Double Turn" in their ignition slot.
@@ -317,10 +359,33 @@ This card can only be activated if you have a card in your ignition slot. Target
 ## Cost: 0
 ## Ignition: 0
 ## Cooldown: 10
+## Targets: 0
+## Effect duration: 0
 ## Example:
 ```
 1. You have "Double Turn" in your ignition slot.
 2. Your opponent activates "Extinguish" on your "Double Turn".
 3. You activate "Save It For Later" as retribution.
-4. The "Double Turn" card is moved back to your hand and you gain 4 mana.
+4. The "Double Turn" card is moved back to your hand and you gain 6 mana.
 ```
+
+---
+
+# Card Type Reference
+
+## Disruption Cards
+
+**Color:** Orange
+
+**Activation condition:** The opponent must have a card in their ignition slot.
+
+**When can they be played?**
+
+- On your own turn (normal activation, like a Power card), as long as the opponent has a card in their ignition slot.
+- As a reaction during any open ignite_reaction window, as long as the opponent has a card in their ignition slot.
+
+**Restrictions:**
+
+- Cannot be used as a response to a Counter card in a reaction chain.
+- Cannot be played if the opponent's ignition slot is empty.
+

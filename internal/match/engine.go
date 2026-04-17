@@ -2,9 +2,11 @@ package match
 
 import (
 	"errors"
+	"fmt"
 
 	"power-chess/internal/chess"
 	"power-chess/internal/gameplay"
+	matchresolvers "power-chess/internal/match/resolvers"
 )
 
 var errMatchNotStarted = errors.New("match not started")
@@ -25,6 +27,7 @@ const (
 	CardKnightTouch    gameplay.CardID = "knight-touch"
 	CardRookTouch      gameplay.CardID = "rook-touch"
 	CardBishopTouch    gameplay.CardID = "bishop-touch"
+	CardEnergyGain     gameplay.CardID = "energy-gain"
 	CardDoubleTurn     gameplay.CardID = "double-turn"
 	CardStopRightThere gameplay.CardID = "stop-right-there"
 	CardExtinguish     gameplay.CardID = "extinguish"
@@ -39,17 +42,39 @@ type Engine struct {
 	pendingEffects map[gameplay.PlayerID][]PendingEffect
 	resolvers      map[gameplay.CardID]EffectResolver
 	ReactionWindow *ReactionWindow
-	reactionStack  []ReactionAction
+	reactions      *ReactionRuntime
 	pendingMove    *PendingMoveAction
 	// pendingActivationFX holds server→client activate_card events (effect step after ignition reaches 0).
 	pendingActivationFX []ActivationFXEvent
+	// movementGrants stores active movement modifiers granted by resolved card effects.
+	movementGrants []MovementGrant
+	// ignitionTargets stores locked piece targets for the currently ignited card owner.
+	ignitionTargets map[gameplay.PlayerID][]chess.Pos
+	// ignitionTargetCard stores which card owns ignitionTargets for each seat.
+	ignitionTargetCard map[gameplay.PlayerID]gameplay.CardID
+	// extraMovesRemaining tracks bonus moves granted by Double Turn (per seat).
+	extraMovesRemaining map[gameplay.PlayerID]int
+	// doubleTurnEffectTurnsLeft tracks the visual highlight duration for Double Turn (per seat),
+	// independent of extraMovesRemaining. Decremented at end of the owner's turn so the
+	// highlight persists for the full turn even after both moves have been made.
+	doubleTurnEffectTurnsLeft map[gameplay.PlayerID]int
+	// disruptionSameTurnGlowPID is set after a Disruption card is placed in ignition on the owner's
+	// turn; the room broadcasts that state, then calls FinishDisruptionSameTurnResolveIfPending so
+	// clients can run activation glow on the ignition slot before the card moves to cooldown.
+	disruptionSameTurnGlowPID gameplay.PlayerID
 }
 
 // ActivationFXEvent is one ignition resolution for client animations (glow + fly to cooldown).
 type ActivationFXEvent struct {
-	Owner   gameplay.PlayerID
-	CardID  gameplay.CardID
-	Success bool
+	Owner          gameplay.PlayerID
+	CardID         gameplay.CardID
+	Success        bool
+	RetainIgnition bool // true: Continuous mid-burn pulse — client keeps ignition DOM until snapshot catches up
+	// NegatesActivationOf is non-empty when this activation caused the opponent's card to become
+	// activation-negated (EffectNegated changed false→true). The ignition slot remains occupied
+	// but all future activation attempts for that card will resolve as failure.
+	// The client shows the negate overlay immediately after the glow, before subsequent events.
+	NegatesActivationOf gameplay.PlayerID
 }
 
 // PullActivationFXEvents returns and clears pending activation broadcast events.
@@ -61,11 +86,32 @@ func (e *Engine) PullActivationFXEvents() []ActivationFXEvent {
 
 // appendActivationFX records one server→client activate_card animation (effect step: success/fail, then cooldown).
 func (e *Engine) appendActivationFX(owner gameplay.PlayerID, id gameplay.CardID, success bool) {
+	e.appendActivationFXRetain(owner, id, success, false)
+}
+
+func (e *Engine) appendActivationFXRetain(owner gameplay.PlayerID, id gameplay.CardID, success bool, retainIgnition bool) {
 	e.pendingActivationFX = append(e.pendingActivationFX, ActivationFXEvent{
-		Owner:   owner,
-		CardID:  id,
-		Success: success,
+		Owner:          owner,
+		CardID:         id,
+		Success:        success,
+		RetainIgnition: retainIgnition,
 	})
+}
+
+// appendActivationFXNegating records an activate_card event that also negated the opponent's
+// card activation during this activation (e.g. Extinguish). NegatesActivationOf may be empty.
+func (e *Engine) appendActivationFXNegating(owner gameplay.PlayerID, id gameplay.CardID, success bool, negatesActivationOf gameplay.PlayerID) {
+	e.pendingActivationFX = append(e.pendingActivationFX, ActivationFXEvent{
+		Owner:               owner,
+		CardID:              id,
+		Success:             success,
+		NegatesActivationOf: negatesActivationOf,
+	})
+}
+
+// CloneMovementGrants returns a shallow copy of active movement grants for snapshots and persistence.
+func (e *Engine) CloneMovementGrants() []MovementGrant {
+	return append([]MovementGrant(nil), e.movementGrants...)
 }
 
 // NewEngine wires chess state, gameplay state and card resolvers into a single match runtime.
@@ -75,8 +121,15 @@ func NewEngine(state *gameplay.MatchState, board *chess.Game) *Engine {
 		Chess:          board,
 		pendingEffects: map[gameplay.PlayerID][]PendingEffect{},
 		resolvers:      DefaultResolvers(),
-		reactionStack:  []ReactionAction{},
+		reactions:      NewReactionRuntime(),
 		pendingMove:    nil,
+		ignitionTargets: map[gameplay.PlayerID][]chess.Pos{
+			gameplay.PlayerA: {},
+			gameplay.PlayerB: {},
+		},
+		ignitionTargetCard:        map[gameplay.PlayerID]gameplay.CardID{},
+		extraMovesRemaining:       map[gameplay.PlayerID]int{},
+		doubleTurnEffectTurnsLeft: map[gameplay.PlayerID]int{},
 	}
 }
 
@@ -110,6 +163,11 @@ func (e *Engine) DrawCard(pid gameplay.PlayerID) error {
 
 // ActivateCard validates reaction constraints (if any) and delegates activation to gameplay state.
 func (e *Engine) ActivateCard(pid gameplay.PlayerID, handIndex int) error {
+	return e.ActivateCardWithTargets(pid, handIndex, nil)
+}
+
+// ActivateCardWithTargets validates optional target pieces and delegates activation to gameplay state.
+func (e *Engine) ActivateCardWithTargets(pid gameplay.PlayerID, handIndex int, targetPieces []chess.Pos) error {
 	if err := e.errIfOpeningBlocksGameplay(); err != nil {
 		return err
 	}
@@ -127,17 +185,146 @@ func (e *Engine) ActivateCard(pid gameplay.PlayerID, handIndex int) error {
 	if e.ReactionWindow != nil && e.ReactionWindow.Open {
 		return e.QueueReactionCard(pid, handIndex, EffectTarget{})
 	}
+	if def.Type == gameplay.CardTypeDisruption {
+		return e.applyDisruptionOnOwnTurn(pid, handIndex)
+	}
 	if def.Type != gameplay.CardTypePower && def.Type != gameplay.CardTypeContinuous {
 		return errors.New("only Power and Continuous cards can be activated in normal turn flow")
+	}
+	if len(targetPieces) > 0 && def.Targets == 0 {
+		return errors.New("target_pieces not allowed for this card")
+	}
+	// Cards that require piece targets: first ignite_card may move hand→ignition only; targets follow via SubmitIgnitionTargets.
+	if def.Targets > 0 && len(targetPieces) == 0 {
+		if err := e.State.ActivateCard(pid, handIndex); err != nil {
+			return err
+		}
+		e.lockIgnitionTargetPieces(pid, def.ID, nil)
+		return nil
+	}
+	if len(targetPieces) > 0 {
+		if err := e.validateIgnitionTargetPieces(pid, def.ID, targetPieces); err != nil {
+			return err
+		}
 	}
 	if err := e.State.ActivateCard(pid, handIndex); err != nil {
 		return err
 	}
+	e.lockIgnitionTargetPieces(pid, def.ID, targetPieces)
 	if err := e.processResolvedIgnitions(); err != nil {
 		return err
 	}
 	e.maybeOpenIgniteReactionWindow(pid)
 	return nil
+}
+
+// SubmitIgnitionTargets validates and locks board targets for the ignited card that requires Targets,
+// then opens ignite_reaction when the catalog allows retribution against this ignition.
+func (e *Engine) SubmitIgnitionTargets(pid gameplay.PlayerID, targetPieces []chess.Pos) error {
+	if err := e.errIfOpeningBlocksGameplay(); err != nil {
+		return err
+	}
+	if e.State.CurrentTurn != pid {
+		return errors.New("not your turn")
+	}
+	if e.ReactionWindow != nil && e.ReactionWindow.Open {
+		return errors.New("cannot submit ignition targets during a reaction window")
+	}
+	p := e.State.Players[pid]
+	if !p.Ignition.Occupied {
+		return errors.New("ignition slot is empty")
+	}
+	card := p.Ignition.Card
+	def, ok := gameplay.CardDefinitionByID(card.CardID)
+	if !ok || def.Targets == 0 {
+		return errors.New("this ignition does not require targets")
+	}
+	if _, locked := e.ignitionTargetCard[pid]; locked {
+		return errors.New("ignition targets already submitted")
+	}
+	if err := e.validateIgnitionTargetPieces(pid, card.CardID, targetPieces); err != nil {
+		return err
+	}
+	e.lockIgnitionTargetPieces(pid, card.CardID, targetPieces)
+	e.maybeOpenIgniteReactionWindow(pid)
+	return nil
+}
+
+func (e *Engine) lockIgnitionTargetPieces(pid gameplay.PlayerID, cardID gameplay.CardID, targetPieces []chess.Pos) {
+	if len(targetPieces) == 0 {
+		e.ignitionTargets[pid] = nil
+		delete(e.ignitionTargetCard, pid)
+		return
+	}
+	copied := make([]chess.Pos, len(targetPieces))
+	copy(copied, targetPieces)
+	e.ignitionTargets[pid] = copied
+	e.ignitionTargetCard[pid] = cardID
+}
+
+// consumeIgnitionTargets returns and clears locked ignition targets for a specific owner/card.
+func (e *Engine) consumeIgnitionTargets(pid gameplay.PlayerID, cardID gameplay.CardID) []chess.Pos {
+	lockedCardID, ok := e.ignitionTargetCard[pid]
+	if !ok || lockedCardID != cardID {
+		return nil
+	}
+	targets := e.ignitionTargets[pid]
+	delete(e.ignitionTargetCard, pid)
+	e.ignitionTargets[pid] = nil
+	out := make([]chess.Pos, len(targets))
+	copy(out, targets)
+	return out
+}
+
+func (e *Engine) validateIgnitionTargetPieces(pid gameplay.PlayerID, cardID gameplay.CardID, targetPieces []chess.Pos) error {
+	def, ok := gameplay.CardDefinitionByID(cardID)
+	if !ok || def.Targets == 0 || len(targetPieces) == 0 {
+		return nil
+	}
+	if len(targetPieces) != def.Targets {
+		return errors.New("invalid target_pieces count for card")
+	}
+	playerColor := toColor(pid)
+	for _, pos := range targetPieces {
+		if pos.Row < 0 || pos.Row > 7 || pos.Col < 0 || pos.Col > 7 {
+			return errors.New("target piece out of board bounds")
+		}
+		piece := e.Chess.PieceAt(pos)
+		if piece.IsEmpty() {
+			return errors.New("target piece square is empty")
+		}
+		if piece.Color != playerColor {
+			return errors.New("target piece must belong to the activating player")
+		}
+	}
+	return nil
+}
+
+// IgnitionTargetSnapshot returns locked target metadata for reaction-window/snapshot rendering.
+func (e *Engine) IgnitionTargetSnapshot() (gameplay.PlayerID, gameplay.CardID, []chess.Pos, bool) {
+	for _, pid := range []gameplay.PlayerID{gameplay.PlayerA, gameplay.PlayerB} {
+		cardID, targets, ok := e.IgnitionTargetsForPlayer(pid)
+		if !ok {
+			continue
+		}
+		return pid, cardID, targets, true
+	}
+	return "", "", nil, false
+}
+
+// IgnitionTargetsForPlayer returns locked ignition piece coordinates for one seat, if any.
+func (e *Engine) IgnitionTargetsForPlayer(pid gameplay.PlayerID) (gameplay.CardID, []chess.Pos, bool) {
+	cardID, ok := e.ignitionTargetCard[pid]
+	if !ok {
+		return "", nil, false
+	}
+	targets := e.ignitionTargets[pid]
+	if len(targets) == 0 {
+		return "", nil, false
+	}
+	copied := make([]chess.Pos, len(targets))
+	copy(copied, targets)
+	return cardID, copied, true
 }
 
 // maybeOpenIgniteReactionWindow opens ignite_reaction for the opponent when a Power or Continuous
@@ -158,7 +345,13 @@ func (e *Engine) maybeOpenIgniteReactionWindow(activator gameplay.PlayerID) {
 	if cardDef.Type != gameplay.CardTypePower && cardDef.Type != gameplay.CardTypeContinuous {
 		return
 	}
-	eligible := []gameplay.CardType{gameplay.CardTypeRetribution}
+	if cardDef.Targets > 0 {
+		lockCard, ok := e.ignitionTargetCard[activator]
+		if !ok || lockCard != card.CardID || len(e.ignitionTargets[activator]) != cardDef.Targets {
+			return
+		}
+	}
+	eligible := []gameplay.CardType{gameplay.CardTypeRetribution, gameplay.CardTypeDisruption}
 	if gameplay.MaybeCaptureAttemptOnIgnition(card.CardID) {
 		eligible = append(eligible, gameplay.CardTypeCounter)
 	}
@@ -200,6 +393,9 @@ func (e *Engine) SubmitMove(pid gameplay.PlayerID, m chess.Move) error {
 	}
 
 	if e.isCaptureAttempt(pid, m) {
+		if !e.moveWouldApplyAuthoritatively(pid, m) {
+			return fmt.Errorf("illegal move")
+		}
 		e.pendingMove = &PendingMoveAction{PlayerID: pid, Move: m}
 		e.OpenReactionWindow("capture_attempt", pid, []gameplay.CardType{gameplay.CardTypeCounter})
 		return nil
@@ -213,6 +409,47 @@ func (e *Engine) reconcileTurnState() {
 	if e.State.CurrentTurn != expected {
 		e.State.CurrentTurn = expected
 	}
+}
+
+// applyDisruptionOnOwnTurn handles a Disruption card played on the owner's turn.
+// The card enters the ignition slot like other activations (hand → ignition). Disruption does not
+// open ignite_reaction (maybeOpenIgniteReactionWindow only applies to Power/Continuous). Catalog
+// Ignition 0 means the effect resolves on the same turn after a room-driven snapshot so clients
+// can show the card in the ignition zone during activate_card glow, then cooldown.
+func (e *Engine) applyDisruptionOnOwnTurn(pid gameplay.PlayerID, handIndex int) error {
+	if e.State.CurrentTurn != pid {
+		return errors.New("not your turn")
+	}
+	opp := gameplay.OppositePlayer(pid)
+	if !e.State.Players[opp].Ignition.Occupied {
+		return errors.New("disruption cards require the opponent to have a card in ignition")
+	}
+	if err := e.State.ActivateCard(pid, handIndex); err != nil {
+		return err
+	}
+	e.disruptionSameTurnGlowPID = pid
+	return nil
+}
+
+// HasPendingDisruptionSameTurnResolve reports whether the room should broadcast an intermediate
+// snapshot (card visible in ignition) before FinishDisruptionSameTurnResolveIfPending.
+func (e *Engine) HasPendingDisruptionSameTurnResolve() bool {
+	return e.disruptionSameTurnGlowPID != ""
+}
+
+// FinishDisruptionSameTurnResolveIfPending runs ignition resolution for a Disruption placed on the
+// current turn (success=true when no failure path exists). Clears pending state; safe to call when
+// no pending disruption (no-op).
+func (e *Engine) FinishDisruptionSameTurnResolveIfPending() error {
+	if e.disruptionSameTurnGlowPID == "" {
+		return nil
+	}
+	pid := e.disruptionSameTurnGlowPID
+	e.disruptionSameTurnGlowPID = ""
+	if err := e.State.ResolveIgnitionFor(pid, true); err != nil {
+		return err
+	}
+	return e.processResolvedIgnitions()
 }
 
 func (e *Engine) handleResolvedEffect(ev *gameplay.ResolvedIgnitionEvent) error {
@@ -237,13 +474,48 @@ func (e *Engine) handleResolvedEffect(ev *gameplay.ResolvedIgnitionEvent) error 
 func (e *Engine) processResolvedIgnitions() error {
 	for _, ev := range e.State.PopResolvedIgnitions() {
 		evCopy := ev
-		if err := e.handleResolvedEffect(&evCopy); err != nil {
+		negatesActivationOf, err := e.runWithNegationDetection(evCopy.Owner, func() error {
+			return e.handleResolvedEffect(&evCopy)
+		})
+		if err != nil {
 			return err
 		}
-		e.appendActivationFX(evCopy.Owner, evCopy.Card.CardID, evCopy.Success)
+		if evCopy.MidTurn {
+			e.pendingActivationFX = append(e.pendingActivationFX, ActivationFXEvent{
+				Owner:               evCopy.Owner,
+				CardID:              evCopy.Card.CardID,
+				Success:             evCopy.Success,
+				RetainIgnition:      true,
+				NegatesActivationOf: negatesActivationOf,
+			})
+			continue
+		}
+		e.pendingActivationFX = append(e.pendingActivationFX, ActivationFXEvent{
+			Owner:               evCopy.Owner,
+			CardID:              evCopy.Card.CardID,
+			Success:             evCopy.Success,
+			NegatesActivationOf: negatesActivationOf,
+		})
 		e.State.SendCardToCooldown(evCopy.Owner, evCopy.Card)
+		e.ignitionTargets[evCopy.Owner] = nil
+		delete(e.ignitionTargetCard, evCopy.Owner)
 	}
 	return nil
+}
+
+// runWithNegationDetection calls fn (which runs a resolver) and returns the opponent player ID if
+// their ignition card transitioned to EffectNegated=true during the call, or empty string otherwise.
+func (e *Engine) runWithNegationDetection(owner gameplay.PlayerID, fn func() error) (gameplay.PlayerID, error) {
+	opp := gameplay.OppositePlayer(owner)
+	oppSlot := e.State.Players[opp]
+	wasNegated := oppSlot != nil && oppSlot.Ignition.Occupied && oppSlot.Ignition.EffectNegated
+	if err := fn(); err != nil {
+		return "", err
+	}
+	if !wasNegated && oppSlot != nil && oppSlot.Ignition.Occupied && oppSlot.Ignition.EffectNegated {
+		return opp, nil
+	}
+	return "", nil
 }
 
 // ActivatePlayerSkill executes the selected player skill on the current turn and consumes that turn.
@@ -258,6 +530,9 @@ func (e *Engine) ActivatePlayerSkill(pid gameplay.PlayerID) error {
 	if err := e.State.ActivateSpecialAbility(pid); err != nil {
 		return err
 	}
+	e.expireMovementGrantsAfterOwnerTurn(pid)
+	delete(e.extraMovesRemaining, pid)
+	delete(e.doubleTurnEffectTurnsLeft, pid)
 	e.Chess.Turn = color.Opponent()
 	return e.StartTurn(e.State.CurrentTurn)
 }
@@ -295,6 +570,7 @@ func pieceRefFromChessPiece(p chess.Piece) (gameplay.PieceRef, bool) {
 // applyMoveCore applies a validated move without opening capture trigger windows.
 // It is used by normal non-capture flow and pending-move finalization.
 func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
+	e.pruneStaleMovementGrants()
 	captureForMana := e.isCaptureAttempt(pid, m)
 	var captured gameplay.PieceRef
 	haveCaptured := false
@@ -316,15 +592,25 @@ func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 			}
 		}
 	}
-	if err := e.Chess.ApplyMove(m); err != nil {
+	if err := e.applyAuthorizedMove(pid, m); err != nil {
 		return err
 	}
+	e.advanceMovementGrantPosition(pid, m.From, m.To)
 	if haveCaptured {
 		e.State.AddToGraveyard(pid, captured)
 	}
 	if captureForMana {
 		e.State.GrantManaForChessCapture(pid)
 	}
+	// If the player has an extra move remaining (granted by Double Turn), consume it
+	// without ending the turn. Restore Chess.Turn so the same player moves again.
+	if e.extraMovesRemaining[pid] > 0 {
+		e.extraMovesRemaining[pid]--
+		e.Chess.Turn = toColor(pid)
+		e.reconcileTurnState()
+		return nil
+	}
+	e.expireMovementGrantsAfterOwnerTurn(pid)
 	if err := e.State.EndTurn(pid); err != nil {
 		return err
 	}
@@ -332,6 +618,42 @@ func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 		return err
 	}
 	return nil
+}
+
+// applyAuthorizedMove executes a move through normal chess legality, or through pseudo-legal
+// application when an active effect grants an extra movement pattern for this piece.
+func (e *Engine) applyAuthorizedMove(pid gameplay.PlayerID, m chess.Move) error {
+	if e.isStandardLegalMove(m) {
+		return e.Chess.ApplyMove(m)
+	}
+	if e.canUseAugmentedMovement(pid, m) {
+		return e.Chess.ApplyPseudoLegalMove(m)
+	}
+	return fmt.Errorf("illegal move")
+}
+
+// isStandardLegalMove checks whether m is currently legal under standard chess rules.
+func (e *Engine) isStandardLegalMove(m chess.Move) bool {
+	for _, cand := range e.Chess.LegalMovesFrom(m.From) {
+		if cand.To == m.To {
+			return true
+		}
+	}
+	return false
+}
+
+// moveWouldApplyAuthoritatively reports whether applyAuthorizedMove would accept m (including
+// king-in-check rules) without mutating engine state. Used so capture_attempt is not opened for
+// pseudo-legal or pinned captures that are still illegal chess.
+func (e *Engine) moveWouldApplyAuthoritatively(pid gameplay.PlayerID, m chess.Move) bool {
+	if e.isStandardLegalMove(m) {
+		return true
+	}
+	if !e.canUseAugmentedMovement(pid, m) {
+		return false
+	}
+	cp := e.Chess.Clone()
+	return cp.ApplyPseudoLegalMove(m) == nil
 }
 
 // PendingMoveAction represents a not-yet-applied move waiting for reaction window resolution.
@@ -365,6 +687,36 @@ func (e *Engine) PendingMove() (PendingMoveAction, bool) {
 	return *e.pendingMove, true
 }
 
+// DoubleTurnActiveFor returns the PlayerID for whom the Double Turn visual effect is still
+// active (i.e. the owner still has turns remaining on the effect). The highlight persists for
+// the full owner turn even after the extra move has been used.
+// Returns an empty string when no Double Turn effect is active.
+func (e *Engine) DoubleTurnActiveFor() gameplay.PlayerID {
+	for pid, n := range e.doubleTurnEffectTurnsLeft {
+		if n > 0 {
+			return pid
+		}
+	}
+	return ""
+}
+
+// DoubleTurnTurnsRemainingFor returns how many owner turns the Double Turn effect has left,
+// or 0 if no Double Turn effect is active for pid.
+func (e *Engine) DoubleTurnTurnsRemainingFor(pid gameplay.PlayerID) int {
+	return e.doubleTurnEffectTurnsLeft[pid]
+}
+
+// SetExtraMovesRemainingForTest directly sets the extra-move counter and the visual
+// effect duration for a player. The effect duration is set to the same value as n
+// (simulating that the resolver just fired and granted n extra moves).
+// This is intended for tests only; do not call from production code.
+func (e *Engine) SetExtraMovesRemainingForTest(pid gameplay.PlayerID, n int) {
+	e.extraMovesRemaining[pid] = n
+	if n > 0 {
+		e.doubleTurnEffectTurnsLeft[pid] = n
+	}
+}
+
 func toColor(pid gameplay.PlayerID) chess.Color {
 	if pid == gameplay.PlayerA {
 		return chess.White
@@ -379,14 +731,12 @@ func playerFromColor(c chess.Color) gameplay.PlayerID {
 	return gameplay.PlayerB
 }
 
-type EffectTarget struct {
-	PiecePos    *chess.Pos
-	TargetPos   *chess.Pos
-	TargetCard  *gameplay.CardID
-	TargetRow   *int
-	TargetCol   *int
-	TargetIndex *int
-}
+// EffectTarget is an alias for the type defined in the resolvers package, kept here so
+// existing code in internal/match (and its tests) does not need to change its references.
+type EffectTarget = matchresolvers.EffectTarget
+
+// EffectResolver is an alias for the interface defined in the resolvers package.
+type EffectResolver = matchresolvers.EffectResolver
 
 // PendingEffect represents a resolved ignition effect waiting for player target input.
 type PendingEffect struct {
@@ -395,8 +745,67 @@ type PendingEffect struct {
 	Resolver EffectResolver
 }
 
-// EffectResolver is the execution contract for card effects.
-type EffectResolver interface {
-	RequiresTarget() bool
-	Apply(e *Engine, owner gameplay.PlayerID, target EffectTarget) error
+// --- matchresolvers.ResolverEngine implementation ---
+
+// ConsumeIgnitionTargets implements matchresolvers.ResolverEngine.
+func (e *Engine) ConsumeIgnitionTargets(owner gameplay.PlayerID, cardID gameplay.CardID) []chess.Pos {
+	return e.consumeIgnitionTargets(owner, cardID)
+}
+
+// PieceAt implements matchresolvers.ResolverEngine.
+func (e *Engine) PieceAt(pos chess.Pos) chess.Piece {
+	return e.Chess.PieceAt(pos)
+}
+
+// OwnerColor implements matchresolvers.ResolverEngine.
+func (e *Engine) OwnerColor(owner gameplay.PlayerID) chess.Color {
+	return toColor(owner)
+}
+
+// AddMovementGrant implements matchresolvers.ResolverEngine.
+func (e *Engine) AddMovementGrant(owner gameplay.PlayerID, cardID gameplay.CardID, target chess.Pos, kind matchresolvers.MovementGrantKind, durationTurns int) {
+	e.addMovementGrant(MovementGrant{
+		Owner:               owner,
+		SourceCardID:        cardID,
+		Target:              target,
+		Kind:                kind,
+		RemainingOwnerTurns: durationTurns,
+	})
+}
+
+// GrantManaFromCardEffect implements matchresolvers.ResolverEngine.
+func (e *Engine) GrantManaFromCardEffect(pid gameplay.PlayerID, amount int) {
+	e.State.GrantManaFromCardEffect(pid, amount)
+}
+
+// IncrementExtraMoves implements matchresolvers.ResolverEngine.
+// It increments the extra-move counter AND records the effect duration for the visual highlight.
+func (e *Engine) IncrementExtraMoves(pid gameplay.PlayerID) {
+	e.extraMovesRemaining[pid]++
+	// The visual effect highlight lasts for EffectDuration turns; Double Turn has EffectDuration=1.
+	def, ok := gameplay.CardDefinitionByID(CardDoubleTurn)
+	effectTurns := 1
+	if ok && def.EffectDuration > 0 {
+		effectTurns = def.EffectDuration
+	}
+	if e.doubleTurnEffectTurnsLeft[pid] < effectTurns {
+		e.doubleTurnEffectTurnsLeft[pid] = effectTurns
+	}
+}
+
+// NegateOpponentIgnition implements matchresolvers.ResolverEngine.
+func (e *Engine) NegateOpponentIgnition(opponentPID gameplay.PlayerID) error {
+	return e.State.ResolveIgnitionFor(opponentPID, false)
+}
+
+// MarkOpponentCardEffectNegated implements matchresolvers.ResolverEngine. It marks the opponent's
+// ignition card as negated whether the card was just ignited (reaction window) or already burning
+// (initiator play on a later turn). Any resolver may call this to apply a negate effect.
+func (e *Engine) MarkOpponentCardEffectNegated(opponentPID gameplay.PlayerID) error {
+	p := e.State.Players[opponentPID]
+	if p == nil || !p.Ignition.Occupied {
+		return errors.New("opponent ignition slot is empty")
+	}
+	p.Ignition.EffectNegated = true
+	return nil
 }

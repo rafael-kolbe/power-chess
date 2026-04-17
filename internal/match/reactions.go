@@ -31,14 +31,7 @@ type ReactionStackEntry struct {
 
 // ReactionStackEntries returns a copy of queued reaction cards from bottom of stack to top.
 func (e *Engine) ReactionStackEntries() []ReactionStackEntry {
-	if len(e.reactionStack) == 0 {
-		return nil
-	}
-	out := make([]ReactionStackEntry, 0, len(e.reactionStack))
-	for _, a := range e.reactionStack {
-		out = append(out, ReactionStackEntry{Owner: a.Owner, CardID: a.Card.CardID})
-	}
-	return out
+	return e.reactions.Entries()
 }
 
 // OpenReactionWindow starts a reaction phase constrained by allowed card types.
@@ -54,7 +47,7 @@ func (e *Engine) OpenReactionWindow(trigger string, actor gameplay.PlayerID, eli
 // CloseReactionWindow ends the reaction phase and clears queued reactions.
 func (e *Engine) CloseReactionWindow() {
 	e.ReactionWindow = nil
-	e.reactionStack = nil
+	e.reactions.Clear()
 }
 
 // QueueReactionCard consumes a card from hand and pushes it to the reaction stack.
@@ -84,7 +77,7 @@ func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, target 
 	if !allowed {
 		return errors.New("card type not allowed in current reaction window")
 	}
-	if e.ReactionWindow.Trigger == "capture_attempt" && len(e.reactionStack) == 0 {
+	if e.ReactionWindow.Trigger == "capture_attempt" && e.reactions.Len() == 0 {
 		if pid == e.ReactionWindow.Actor {
 			return errors.New("capture reaction chain must be started by the opponent")
 		}
@@ -92,16 +85,25 @@ func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, target 
 			return errors.New("capture reaction chain must start with a Counter card")
 		}
 	}
-	if e.ReactionWindow.Trigger == "ignite_reaction" && len(e.reactionStack) == 0 {
+	if e.ReactionWindow.Trigger == "ignite_reaction" && e.reactions.Len() == 0 {
 		if pid == e.ReactionWindow.Actor {
 			return errors.New("ignite reaction must be started by the opponent")
 		}
-		if def.Type != gameplay.CardTypeRetribution && def.Type != gameplay.CardTypeCounter {
-			return errors.New("ignite reaction must start with a Retribution or Counter card")
+		if def.Type != gameplay.CardTypeRetribution &&
+			def.Type != gameplay.CardTypeCounter &&
+			def.Type != gameplay.CardTypeDisruption {
+			return errors.New("ignite reaction must start with a Retribution, Counter, or Disruption card")
+		}
+		if def.Type == gameplay.CardTypeDisruption {
+			// The actor opened the window precisely because they put a card in ignition,
+			// so this should always be true — checked explicitly as a safety guard.
+			if !e.State.Players[e.ReactionWindow.Actor].Ignition.Occupied {
+				return errors.New("disruption cards require the opponent to have a card in ignition")
+			}
 		}
 	}
-	if len(e.reactionStack) > 0 {
-		prev := e.reactionStack[len(e.reactionStack)-1]
+	if e.reactions.Len() > 0 {
+		prev, _ := e.reactions.Top()
 		prevDef, ok := gameplay.CardDefinitionByID(prev.Card.CardID)
 		if e.ReactionWindow.Trigger == "ignite_reaction" {
 			if ok && prevDef.Type == gameplay.CardTypeRetribution && def.Type != gameplay.CardTypeRetribution {
@@ -128,7 +130,7 @@ func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, target 
 	if err != nil {
 		return err
 	}
-	e.reactionStack = append(e.reactionStack, ReactionAction{
+	e.reactions.Push(ReactionAction{
 		Owner:    pid,
 		Card:     consumed,
 		Target:   target,
@@ -196,10 +198,10 @@ func (e *Engine) CanPlayerExtendIgniteChain(pid gameplay.PlayerID) bool {
 	if e.ReactionWindow == nil || !e.ReactionWindow.Open || e.ReactionWindow.Trigger != "ignite_reaction" {
 		return false
 	}
-	if len(e.reactionStack) == 0 {
+	if e.reactions.Len() == 0 {
 		return false
 	}
-	prev := e.reactionStack[len(e.reactionStack)-1]
+	prev, _ := e.reactions.Top()
 	prevDef, ok := gameplay.CardDefinitionByID(prev.Card.CardID)
 	if !ok {
 		return false
@@ -212,10 +214,10 @@ func (e *Engine) CanPlayerExtendIgniteChain(pid gameplay.PlayerID) bool {
 
 // CanPlayerExtendCaptureReactionChain reports whether pid can extend a non-empty capture_attempt stack.
 func (e *Engine) CanPlayerExtendCaptureReactionChain(pid gameplay.PlayerID) bool {
-	if e.ReactionWindow == nil || !e.ReactionWindow.Open || e.ReactionWindow.Trigger != "capture_attempt" || len(e.reactionStack) == 0 {
+	if e.ReactionWindow == nil || !e.ReactionWindow.Open || e.ReactionWindow.Trigger != "capture_attempt" || e.reactions.Len() == 0 {
 		return false
 	}
-	prev := e.reactionStack[len(e.reactionStack)-1]
+	prev, _ := e.reactions.Top()
 	prevDef, ok := gameplay.CardDefinitionByID(prev.Card.CardID)
 	if !ok {
 		return false
@@ -239,10 +241,10 @@ func (e *Engine) CanPlayerExtendCounterChain(pid gameplay.PlayerID) bool {
 	if e.ReactionWindow.Trigger != "capture_attempt" && e.ReactionWindow.Trigger != "ignite_reaction" {
 		return false
 	}
-	if len(e.reactionStack) == 0 {
+	if e.reactions.Len() == 0 {
 		return false
 	}
-	prev := e.reactionStack[len(e.reactionStack)-1]
+	prev, _ := e.reactions.Top()
 	prevDef, ok := gameplay.CardDefinitionByID(prev.Card.CardID)
 	if !ok || prevDef.Type != gameplay.CardTypeCounter {
 		return false
@@ -295,16 +297,16 @@ func (e *Engine) ResolveReactionStack() error {
 	if e.ReactionWindow != nil {
 		rwTrigger = e.ReactionWindow.Trigger
 	}
-	for len(e.reactionStack) > 0 {
-		n := len(e.reactionStack)
-		a := e.reactionStack[n-1]
-		e.reactionStack = e.reactionStack[:n-1]
-		if err := a.Resolver.Apply(e, a.Owner, a.Target); err != nil {
+	for e.reactions.Len() > 0 {
+		a, _ := e.reactions.Pop()
+		negatesActivationOf, err := e.runWithNegationDetection(a.Owner, func() error {
+			return a.Resolver.Apply(e, a.Owner, a.Target)
+		})
+		if err != nil {
 			return err
 		}
 		// Resolvers may later report fail paths; until then successful Apply implies effect succeeded.
-		success := true
-		e.appendActivationFX(a.Owner, a.Card.CardID, success)
+		e.appendActivationFXNegating(a.Owner, a.Card.CardID, true, negatesActivationOf)
 		e.State.SendCardToCooldown(a.Owner, a.Card)
 	}
 	if e.pendingMove != nil {
@@ -314,17 +316,28 @@ func (e *Engine) ResolveReactionStack() error {
 			return err
 		}
 	}
-	// Delayed ignition (TurnsRemaining > 0) must keep burning after the reaction window; only
-	// ignition-0 cards finalize here (see Energy Gain, Continuous powers).
+	// ignite_reaction close: ignition-0 Power/Continuous finalize here. Continuous with TurnsRemaining > 0
+	// also fires its first activation in the same turn (after the window), then stays in the slot.
 	if rwTrigger == "ignite_reaction" && e.ReactionWindow != nil {
 		act := e.ReactionWindow.Actor
 		ig := &e.State.Players[act].Ignition
-		if ig.Occupied && ig.TurnsRemaining == 0 {
-			if err := e.State.ResolveIgnitionFor(act, true); err != nil {
+		if !ig.Occupied {
+			// no-op
+		} else if ig.TurnsRemaining == 0 {
+			success := !ig.EffectNegated
+			if err := e.State.ResolveIgnitionFor(act, success); err != nil {
 				return err
 			}
 			if err := e.processResolvedIgnitions(); err != nil {
 				return err
+			}
+		} else {
+			def, ok := gameplay.CardDefinitionByID(ig.Card.CardID)
+			if ok && def.Type == gameplay.CardTypeContinuous {
+				e.State.PulseContinuousIgnitionMidTurn(act)
+				if err := e.processResolvedIgnitions(); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -349,13 +362,10 @@ func (e *Engine) ReactionWindowSnapshot() (ReactionWindow, int, bool) {
 	}
 	cp := *e.ReactionWindow
 	cp.EligibleTypes = append([]gameplay.CardType(nil), cp.EligibleTypes...)
-	return cp, len(e.reactionStack), true
+	return cp, e.reactions.Len(), true
 }
 
 // ReactionStackTopSnapshot returns the last queued reaction (most recent play), if the stack is non-empty.
 func (e *Engine) ReactionStackTopSnapshot() (ReactionAction, bool) {
-	if len(e.reactionStack) == 0 {
-		return ReactionAction{}, false
-	}
-	return e.reactionStack[len(e.reactionStack)-1], true
+	return e.reactions.Top()
 }
