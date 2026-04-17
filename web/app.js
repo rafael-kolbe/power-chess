@@ -1454,6 +1454,13 @@ import {
         return { color: code[0], type: code[1] };
     }
 
+    /** Maps transport piece codes ("wK", "bP") to seat "A" (white) or "B" (black). */
+    function seatForPieceCode(code) {
+        const p = parseCode(code);
+        if (!p) return "";
+        return p.color === "w" ? "A" : "B";
+    }
+
     function inBounds(row, col) {
         return row >= 0 && row < 8 && col >= 0 && col < 8;
     }
@@ -3091,7 +3098,7 @@ import {
 
     /**
      * Rim color for effect activation (ignite counter hit 0): type × success/fail.
-     * Power→green, Continuous→blue, Retribution→red, Counter→gold (muted on fail).
+     * Power→green, Continuous→blue, Retribution→red, Counter→pink, Disruption→orange (muted on fail).
      * @param {string} typeLower
      * @param {boolean} success
      * @returns {string}
@@ -3107,6 +3114,8 @@ import {
                 return `rgba(220, 85, 105, ${a})`;
             case "counter":
                 return `rgba(255, 115, 190, ${a})`;
+            case "disruption":
+                return `rgba(255, 140, 50, ${a})`;
             default:
                 return `rgba(200, 210, 230, ${success ? 0.8 : 0.55})`;
         }
@@ -4223,6 +4232,9 @@ import {
             }
             if (droppedOnIgnition && isGameplayInputOpen()) {
                 const idx = pending.idx;
+                const droppedEntry = pending.entry;
+                const droppedId = String(droppedEntry?.cardId || "");
+                const droppedType = String(getCardDef(droppedId)?.type || "").toLowerCase();
                 sendHandCardAction(lastSnapshot, idx);
                 if (pending.cardEl && pending.wrapEl) {
                     const card = pending.cardEl;
@@ -4234,7 +4246,10 @@ import {
                         card.remove();
                     }
                 }
-                if (lastSnapshot) {
+                // Replaying lastSnapshot before state_snapshot arrives puts the dropped card back in the hand.
+                // Disruption now uses the ignition slot server-side; skip stale full playmat until snapshot.
+                const skipStalePlaymat = droppedType === "disruption";
+                if (lastSnapshot && !skipStalePlaymat) {
                     renderPlaymat(lastSnapshot);
                 }
             } else {
@@ -4285,8 +4300,12 @@ import {
             const idx = draggingHandIndex;
             draggingHandIndex = null;
                 if (idx === null) return;
+            const dropId = String(
+                hudForSeat(lastSnapshot, playerEl.value)?.hand?.[idx]?.cardId || "",
+            );
+            const dropType = String(getCardDef(dropId)?.type || "").toLowerCase();
             sendHandCardAction(lastSnapshot, idx);
-            if (lastSnapshot) {
+            if (lastSnapshot && dropType !== "disruption") {
                 renderPlaymat(lastSnapshot);
             }
         });
@@ -4696,12 +4715,17 @@ import {
                 if (moveSet.has(posKey(r, c))) sq.classList.add("move");
                 if (targetKeySet.has(posKey(r, c))) sq.classList.add("target-selected");
                 const auraFxArr = code ? pieceActivePowerAuras(lastSnapshot, r, c) : [];
-                // Double Turn grants an extra move to all own pieces — highlight them globally.
-                const isDoubleTurnPiece =
-                    !!(code && isOwnPiece(code) && lastSnapshot?.doubleTurnActiveFor === playerEl.value);
+                // Double Turn grants an extra move to all pieces of the affected player.
+                // The highlight is visible to both players: check piece color vs seat, not isOwnPiece.
+                const dtSeat = lastSnapshot?.doubleTurnActiveFor; // "A" | "B" | undefined
+                const isDoubleTurnPiece = !!(code && dtSeat && seatForPieceCode(code) === dtSeat);
                 const hasAura = auraFxArr.length > 0 || isDoubleTurnPiece;
                 if (hasAura) {
                     sq.classList.add("piece-effect-aura-power");
+                }
+                // Opponent can hover buffed enemy pieces too (same preview as owner); cursor: help via CSS.
+                if (hasAura && code && !isOwnPiece(code)) {
+                    sq.classList.add("sq--foreign-buff");
                 }
                 if (pendingCap?.active && capToR === r && capToC === c) {
                     sq.classList.add("capture-threat-target");
@@ -4718,16 +4742,25 @@ import {
                     img.draggable = false;
                     sq.appendChild(img);
                 }
-                // Badge shows minimum turnsRemaining from per-piece effects (not Double Turn).
-                if (auraFxArr.length > 0) {
-                    const minTurns = auraFxArr.reduce(
-                        (min, e) => Math.min(min, Math.max(Number(e.turnsRemaining || 0), 0)),
-                        Infinity,
-                    );
-                    const turnBadge = document.createElement("span");
-                    turnBadge.className = "sq-effect-turn-badge";
-                    turnBadge.textContent = `${minTurns}t`;
-                    sq.appendChild(turnBadge);
+                // Badge shows the minimum turnsRemaining across all active effects on this piece.
+                // Double Turn is included alongside per-piece effects (uses doubleTurnTurnsRemaining).
+                if (hasAura) {
+                    const dtTurns = isDoubleTurnPiece
+                        ? (lastSnapshot?.doubleTurnTurnsRemaining ?? 1)
+                        : Infinity;
+                    const perPieceTurns = auraFxArr.length > 0
+                        ? auraFxArr.reduce(
+                            (min, e) => Math.min(min, Math.max(Number(e.turnsRemaining || 0), 0)),
+                            Infinity,
+                          )
+                        : Infinity;
+                    const minTurns = Math.min(dtTurns, perPieceTurns);
+                    if (isFinite(minTurns) && minTurns > 0) {
+                        const turnBadge = document.createElement("span");
+                        turnBadge.className = "sq-effect-turn-badge";
+                        turnBadge.textContent = `${minTurns}t`;
+                        sq.appendChild(turnBadge);
+                    }
                 }
                 sq.title = code ? `${code} ${logicalToAlgebraic(r, c)}` : logicalToAlgebraic(r, c);
                 sq.dataset.row = String(r);
@@ -4738,6 +4771,8 @@ import {
                 if (hasAura && code) {
                     sq.addEventListener("mouseenter", () => {
                         if (boardEnchantHoverSuppressed) return;
+                        // Buff preview is shown for both seats: local player and opponent see the same
+                        // card stack (activePieceEffects + double-turn when applicable).
                         // Build list of effects to display: per-piece effects first, then Double Turn.
                         const effectsList = auraFxArr
                             .map((e) => ({
@@ -4747,7 +4782,10 @@ import {
                             .filter((e) => e.cardData != null);
                         if (isDoubleTurnPiece) {
                             const dtData = cardDataFromCatalogRow(getCardDef("double-turn"));
-                            if (dtData) effectsList.push({ cardData: dtData, turnsRemaining: null });
+                            if (dtData) {
+                                const dtTurns = lastSnapshot?.doubleTurnTurnsRemaining ?? 1;
+                                effectsList.push({ cardData: dtData, turnsRemaining: dtTurns });
+                            }
                         }
                         if (effectsList.length > 0) showPieceEffectsPreview(effectsList, sq);
                     });

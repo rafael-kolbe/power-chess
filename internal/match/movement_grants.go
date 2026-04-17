@@ -3,18 +3,18 @@ package match
 import (
 	"power-chess/internal/chess"
 	"power-chess/internal/gameplay"
+	matchresolvers "power-chess/internal/match/resolvers"
 )
 
-// MovementGrantKind describes a movement pattern extension granted by a resolved effect.
-type MovementGrantKind string
+// MovementGrantKind is an alias for the canonical type defined in the resolvers package,
+// kept here so existing code in internal/match does not need to change its references.
+type MovementGrantKind = matchresolvers.MovementGrantKind
 
+// Movement grant kind constants (re-exported aliases from the resolvers package).
 const (
-	// MovementGrantKnightPattern grants additional knight movement while preserving native moves.
-	MovementGrantKnightPattern MovementGrantKind = "knight_pattern"
-	// MovementGrantBishopPattern grants additional bishop-line movement (one diagonal step for pawns).
-	MovementGrantBishopPattern MovementGrantKind = "bishop_pattern"
-	// MovementGrantRookPattern grants additional rook-line movement (one orthogonal step for pawns).
-	MovementGrantRookPattern MovementGrantKind = "rook_pattern"
+	MovementGrantKnightPattern = matchresolvers.MovementGrantKnightPattern
+	MovementGrantBishopPattern = matchresolvers.MovementGrantBishopPattern
+	MovementGrantRookPattern   = matchresolvers.MovementGrantRookPattern
 )
 
 // MovementGrant stores one active piece movement modifier owned by a player.
@@ -146,6 +146,8 @@ func (e *Engine) advanceMovementGrantPosition(pid gameplay.PlayerID, from, to ch
 }
 
 // expireMovementGrantsAfterOwnerTurn decrements durations for grants owned by pid.
+// It also ticks the Double Turn visual highlight counter so the highlight persists
+// for the full turn and disappears at the correct turn boundary.
 func (e *Engine) expireMovementGrantsAfterOwnerTurn(pid gameplay.PlayerID) {
 	next := make([]MovementGrant, 0, len(e.movementGrants))
 	for _, grant := range e.movementGrants {
@@ -157,6 +159,10 @@ func (e *Engine) expireMovementGrantsAfterOwnerTurn(pid gameplay.PlayerID) {
 		}
 	}
 	e.movementGrants = next
+	// Tick the Double Turn visual effect: decrement and clear when it reaches 0.
+	if n := e.doubleTurnEffectTurnsLeft[pid]; n > 0 {
+		e.doubleTurnEffectTurnsLeft[pid] = n - 1
+	}
 }
 
 // pruneStaleMovementGrants removes grants whose target square no longer holds an owner piece.

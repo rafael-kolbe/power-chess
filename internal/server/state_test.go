@@ -794,7 +794,8 @@ func TestGameplayStateServiceOpenClose(t *testing.T) {
 }
 
 // TestSnapshotDoubleTurnActiveForPopulated verifies that SnapshotForPlayer includes
-// doubleTurnActiveFor when the Double Turn effect is active for that player.
+// doubleTurnActiveFor when the Double Turn effect is active for that player, and that
+// the highlight persists for the full turn (including after the extra move is used).
 func TestSnapshotDoubleTurnActiveForPopulated(t *testing.T) {
 	room, err := NewRoomSession("room-dt-snap")
 	if err != nil {
@@ -804,6 +805,7 @@ func TestSnapshotDoubleTurnActiveForPopulated(t *testing.T) {
 	board := chess.NewEmptyGame(chess.White)
 	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
 	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 0}, chess.Piece{Type: chess.Pawn, Color: chess.White})
 	room.Engine.Chess = board
 	room.Engine.State.MulliganPhaseActive = false
 	room.Engine.State.Started = true
@@ -818,16 +820,33 @@ func TestSnapshotDoubleTurnActiveForPopulated(t *testing.T) {
 	if snap.DoubleTurnActiveFor != string(gameplay.PlayerA) {
 		t.Fatalf("expected doubleTurnActiveFor=%q, got %q", gameplay.PlayerA, snap.DoubleTurnActiveFor)
 	}
+	if snap.DoubleTurnTurnsRemaining != 1 {
+		t.Fatalf("expected doubleTurnTurnsRemaining=1, got %d", snap.DoubleTurnTurnsRemaining)
+	}
 
-	// After consuming the extra move via a chess move the field should clear.
+	// After consuming the extra move (first move), the highlight must STILL be active.
+	// The extra move counter becomes 0 (extra move used), but the visual effect persists.
+	if err := room.Engine.SubmitMove(gameplay.PlayerA, chess.Move{
+		From: chess.Pos{Row: 6, Col: 0},
+		To:   chess.Pos{Row: 5, Col: 0},
+	}); err != nil {
+		t.Fatalf("SubmitMove (extra move): %v", err)
+	}
+	snap = room.SnapshotSafe()
+	if snap.DoubleTurnActiveFor != string(gameplay.PlayerA) {
+		t.Fatalf("expected doubleTurnActiveFor still %q after extra move (highlight persists until end of turn), got %q",
+			gameplay.PlayerA, snap.DoubleTurnActiveFor)
+	}
+
+	// After the second move (end of turn), the highlight must clear.
 	if err := room.Engine.SubmitMove(gameplay.PlayerA, chess.Move{
 		From: chess.Pos{Row: 7, Col: 4},
 		To:   chess.Pos{Row: 7, Col: 3},
 	}); err != nil {
-		t.Fatalf("SubmitMove: %v", err)
+		t.Fatalf("SubmitMove (regular move, ends turn): %v", err)
 	}
 	snap = room.SnapshotSafe()
 	if snap.DoubleTurnActiveFor != "" {
-		t.Fatalf("expected doubleTurnActiveFor empty after extra move consumed, got %q", snap.DoubleTurnActiveFor)
+		t.Fatalf("expected doubleTurnActiveFor empty after turn ends, got %q", snap.DoubleTurnActiveFor)
 	}
 }

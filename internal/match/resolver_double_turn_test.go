@@ -184,10 +184,10 @@ func TestDoubleTurnKingCaptureIsIllegal(t *testing.T) {
 	}
 }
 
-// TestDoubleTurnDoubleTurnActiveForClearsAfterSecondMove ensures DoubleTurnActiveFor returns ""
-// once the extra moves have been fully consumed.
+// TestDoubleTurnDoubleTurnActiveForClearsAfterTurnEnd ensures the DoubleTurnActiveFor highlight
+// persists until the owner's turn ends (not when the extra move is consumed mid-turn).
 // After the burn phase, burn pawn is at (4,0); second pawn at (5,2).
-func TestDoubleTurnDoubleTurnActiveForClearsAfterSecondMove(t *testing.T) {
+func TestDoubleTurnDoubleTurnActiveForClearsAfterTurnEnd(t *testing.T) {
 	e, _, _ := activateDoubleTurnAndResolve(t)
 
 	if e.DoubleTurnActiveFor() == "" {
@@ -196,19 +196,20 @@ func TestDoubleTurnDoubleTurnActiveForClearsAfterSecondMove(t *testing.T) {
 
 	// First move (extra) — burn pawn at row 4.
 	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 4, Col: 0}, To: chess.Pos{Row: 3, Col: 0}}); err != nil {
-		t.Fatalf("first move: %v", err)
+		t.Fatalf("first move (extra): %v", err)
 	}
-	// Still PlayerA's turn but no extra moves remain.
-	if e.DoubleTurnActiveFor() != "" {
-		t.Fatalf("DoubleTurnActiveFor should be empty after extra move consumed, got %q", e.DoubleTurnActiveFor())
+	// The extra move was consumed but the visual highlight must persist until the full turn ends.
+	if e.DoubleTurnActiveFor() != gameplay.PlayerA {
+		t.Fatalf("DoubleTurnActiveFor should remain %q after extra move (highlight persists until end of turn), got %q",
+			gameplay.PlayerA, e.DoubleTurnActiveFor())
 	}
 
 	// Second move ends the turn — second pawn at (5,2).
 	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 5, Col: 2}, To: chess.Pos{Row: 4, Col: 2}}); err != nil {
-		t.Fatalf("second move: %v", err)
+		t.Fatalf("second move (regular): %v", err)
 	}
 	if e.DoubleTurnActiveFor() != "" {
-		t.Fatalf("DoubleTurnActiveFor should remain empty after full turn, got %q", e.DoubleTurnActiveFor())
+		t.Fatalf("DoubleTurnActiveFor should be empty after the turn ends, got %q", e.DoubleTurnActiveFor())
 	}
 }
 

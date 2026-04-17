@@ -750,6 +750,11 @@ button:disabled {
   cursor: grab;
 }
 
+/* Buffed opponent pieces: show that hover reveals card info (not draggable). */
+.sq.piece.sq--foreign-buff {
+  cursor: help;
+}
+
 .sq.sq--piece-dragging {
   cursor: grabbing;
 }

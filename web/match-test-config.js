@@ -60,7 +60,7 @@ export const DEFAULT_DECK_20 = Object.freeze([
   "rook-touch",
   "sacrifice-of-the-masses",
   "backstab",
-  "backstab",
+  "double-turn",
   "extinguish",
   "extinguish",
   "clairvoyance",
@@ -82,7 +82,7 @@ export function buildMatchDebugFixturePayload() {
     test_environment: true,
     white: {
       deck: [...DEFAULT_DECK_20],
-      hand: ["energy-gain", "bishop-touch", "rook-touch"],
+      hand: ["energy-gain", "double-turn", "extinguish"],
       mana: 8,
       maxMana: 10,
       energizedMana: 0,
@@ -90,7 +90,7 @@ export function buildMatchDebugFixturePayload() {
     },
     black: {
       deck: [...DEFAULT_DECK_20],
-      hand: ["knight-touch", "counterattack", "retaliate"],
+      hand: ["knight-touch", "clairvoyance", "retaliate"],
       mana: 8,
       maxMana: 10,
       energizedMana: 0,

@@ -348,9 +348,12 @@ type StateSnapshotPayload struct {
 	IgnitionTargeting IgnitionTargetingSnapshot `json:"ignitionTargeting,omitempty"`
 	// ActivePieceEffects lists resolved on-board effects still ticking (e.g. knight-pattern grant).
 	ActivePieceEffects []ActivePieceEffectSnapshot `json:"activePieceEffects,omitempty"`
-	// DoubleTurnActiveFor is the player seat ("A" or "B") for whom an extra move is available
-	// this turn (empty when no Double Turn effect is active).
-	DoubleTurnActiveFor string              `json:"doubleTurnActiveFor,omitempty"`
+	// DoubleTurnActiveFor is the player seat ("A" or "B") for whom the Double Turn visual
+	// effect is active this turn (empty when no Double Turn effect is active).
+	DoubleTurnActiveFor string `json:"doubleTurnActiveFor,omitempty"`
+	// DoubleTurnTurnsRemaining is the number of owner turns the Double Turn effect has left
+	// for the player in DoubleTurnActiveFor. Used for the duration badge on highlighted pieces.
+	DoubleTurnTurnsRemaining int `json:"doubleTurnTurnsRemaining,omitempty"`
 	PendingCapture      PendingCaptureState `json:"pendingCapture"`
 	MatchEnded         bool                        `json:"matchEnded"`
 	Winner             string                      `json:"winner,omitempty"`

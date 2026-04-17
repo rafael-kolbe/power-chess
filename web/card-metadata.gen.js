@@ -243,7 +243,7 @@ globalThis.__POWER_CHESS_CARD_METADATA__ = [
   },
   {
     "id": "extinguish",
-    "type": "power",
+    "type": "disruption",
     "mana": 2,
     "ignition": 0,
     "cooldown": 2,

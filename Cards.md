@@ -337,7 +337,7 @@ Randomly choose 10 squares on the board, for each piece you control that is on o
 ```
 
 # Extinguish
-## Type: Power
+## Type: Disruption
 ## Description
 Target a card on your opponent's ignition slot and negate its effect.
 ## Cost: 2
@@ -368,3 +368,24 @@ This card can only be activated if you have a card in your ignition slot. Target
 3. You activate "Save It For Later" as retribution.
 4. The "Double Turn" card is moved back to your hand and you gain 6 mana.
 ```
+
+---
+
+# Card Type Reference
+
+## Disruption Cards
+
+**Color:** Orange
+
+**Activation condition:** The opponent must have a card in their ignition slot.
+
+**When can they be played?**
+
+- On your own turn (normal activation, like a Power card), as long as the opponent has a card in their ignition slot.
+- As a reaction during any open ignite_reaction window, as long as the opponent has a card in their ignition slot.
+
+**Restrictions:**
+
+- Cannot be used as a response to a Counter card in a reaction chain.
+- Cannot be played if the opponent's ignition slot is empty.
+

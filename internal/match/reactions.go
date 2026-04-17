@@ -89,8 +89,17 @@ func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, target 
 		if pid == e.ReactionWindow.Actor {
 			return errors.New("ignite reaction must be started by the opponent")
 		}
-		if def.Type != gameplay.CardTypeRetribution && def.Type != gameplay.CardTypeCounter {
-			return errors.New("ignite reaction must start with a Retribution or Counter card")
+		if def.Type != gameplay.CardTypeRetribution &&
+			def.Type != gameplay.CardTypeCounter &&
+			def.Type != gameplay.CardTypeDisruption {
+			return errors.New("ignite reaction must start with a Retribution, Counter, or Disruption card")
+		}
+		if def.Type == gameplay.CardTypeDisruption {
+			// The actor opened the window precisely because they put a card in ignition,
+			// so this should always be true — checked explicitly as a safety guard.
+			if !e.State.Players[e.ReactionWindow.Actor].Ignition.Occupied {
+				return errors.New("disruption cards require the opponent to have a card in ignition")
+			}
 		}
 	}
 	if e.reactions.Len() > 0 {

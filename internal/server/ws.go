@@ -642,6 +642,16 @@ func (c *Client) handleIgniteCard(env Envelope) error {
 		return err
 	}
 	_ = c.sendAck(env, "ok", "", "")
+	// Disruption (ignition 0): first snapshot shows the card in ignition; then resolve so
+	// activate_card + final snapshot match client glow-then-cooldown sequencing.
+	if c.room.Engine.HasPendingDisruptionSameTurnResolve() {
+		c.room.BroadcastSnapshot()
+		if err := c.room.Execute(func() error {
+			return c.room.Engine.FinishDisruptionSameTurnResolveIfPending()
+		}); err != nil {
+			return err
+		}
+	}
 	c.room.EvaluateMatchOutcome()
 	_ = c.server.persistRoom(context.Background(), c.room)
 	c.room.TouchActivity()

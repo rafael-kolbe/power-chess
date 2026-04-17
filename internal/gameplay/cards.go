@@ -9,6 +9,10 @@ const (
 	CardTypeRetribution CardType = "Retribution"
 	CardTypeCounter     CardType = "Counter"
 	CardTypeContinuous  CardType = "Continuous"
+	// CardTypeDisruption marks cards that can be activated on the owner's turn OR as a reaction
+	// in any ignite_reaction window (except in response to a Counter card), provided the opponent
+	// has a card in their ignition slot.
+	CardTypeDisruption CardType = "Disruption"
 )
 
 type CardDefinition struct {
@@ -57,7 +61,7 @@ func InitialCardCatalog() []CardDefinition {
 		{ID: "life-drain", Name: "Life Drain", Type: CardTypeContinuous, Description: "While on the ignition slot, every capture you make drains 1 mana from your opponent. When this card's ignition ends, banish this card.", Cost: 3, Ignition: 5, Cooldown: 0, Example: "1. You activate \"Life Drain\".\n2. You capture any piece this turn.\n3. You gain 1 mana from the capture + 1 mana from your opponent's mana pool.", Limit: DefaultCardLimit},
 		{ID: "clairvoyance", Name: "Clairvoyance", Type: CardTypeContinuous, Description: "While on the ignition slot, reveal your opponent's hand. When this card's ignition ends, banish this card.", Cost: 7, Ignition: 3, Cooldown: 0, Example: "1. You activate \"Clairvoyance\".\n2. Your opponent's hand is revealed to you and stays revealed until this card's ignition ends.", Limit: DefaultCardLimit},
 		{ID: "thunderstorm", Name: "Thunderstorm", Type: CardTypePower, Description: "Randomly choose 10 squares on the board, for each piece you control that is on one of the chosen squares, gain 2 mana, but they cannot move this turn, for each piece your opponent controls that is on one of the chosen squares, burn 2 mana from your opponent, and they cannot move until the end of the next turn.", Cost: 10, Ignition: 1, Cooldown: 10, Example: "1. You activate \"Thunderstorm\".\n2. Ignition succeeds the next turn.\n3. You randomly choose 10 squares on the board.\n4. 3 pieces you control are hit, you gain 6 mana and they cannot move this turn.\n5. 4 pieces your opponent controls are hit, you burn 8 mana from your opponent and those pieces cannot move until the end of the next turn.", Limit: DefaultCardLimit},
-		{ID: "extinguish", Name: "Extinguish", Type: CardTypePower, Description: "Target a card on your opponent's ignition slot and negate its effect.", Cost: 2, Ignition: 0, Cooldown: 2, Example: "1. Opponent has a \"Double Turn\" in their ignition slot.\n2. You activate \"Extinguish\".\n3. The effect of \"Double Turn\" is negated and sent to their cooldown slot.", Limit: DefaultCardLimit},
+		{ID: "extinguish", Name: "Extinguish", Type: CardTypeDisruption, Description: "Target a card on your opponent's ignition slot and negate its effect.", Cost: 2, Ignition: 0, Cooldown: 2, Example: "1. Opponent has a \"Double Turn\" in their ignition slot.\n2. You activate \"Extinguish\".\n3. The effect of \"Double Turn\" is negated and sent to their cooldown slot.", Limit: DefaultCardLimit},
 		{ID: "save-it-for-later", Name: "Save It For Later", Type: CardTypeRetribution, Description: "This card can only be activated if you have a card in your ignition slot. Target that card and move it back to your hand, gaining the mana cost of the card as mana.", Cost: 0, Ignition: 0, Cooldown: 10, Example: "1. You have \"Double Turn\" in your ignition slot.\n2. Your opponent activates \"Extinguish\" on your \"Double Turn\".\n3. You activate \"Save It For Later\" as retribution.\n4. The \"Double Turn\" card is moved back to your hand and you gain 6 mana.", Limit: DefaultCardLimit},
 	}
 }

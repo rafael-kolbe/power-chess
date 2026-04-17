@@ -6,6 +6,7 @@ import (
 
 	"power-chess/internal/chess"
 	"power-chess/internal/gameplay"
+	matchresolvers "power-chess/internal/match/resolvers"
 )
 
 var errMatchNotStarted = errors.New("match not started")
@@ -53,6 +54,14 @@ type Engine struct {
 	ignitionTargetCard map[gameplay.PlayerID]gameplay.CardID
 	// extraMovesRemaining tracks bonus moves granted by Double Turn (per seat).
 	extraMovesRemaining map[gameplay.PlayerID]int
+	// doubleTurnEffectTurnsLeft tracks the visual highlight duration for Double Turn (per seat),
+	// independent of extraMovesRemaining. Decremented at end of the owner's turn so the
+	// highlight persists for the full turn even after both moves have been made.
+	doubleTurnEffectTurnsLeft map[gameplay.PlayerID]int
+	// disruptionSameTurnGlowPID is set after a Disruption card is placed in ignition on the owner's
+	// turn; the room broadcasts that state, then calls FinishDisruptionSameTurnResolveIfPending so
+	// clients can run activation glow on the ignition slot before the card moves to cooldown.
+	disruptionSameTurnGlowPID gameplay.PlayerID
 }
 
 // ActivationFXEvent is one ignition resolution for client animations (glow + fly to cooldown).
@@ -96,8 +105,9 @@ func NewEngine(state *gameplay.MatchState, board *chess.Game) *Engine {
 			gameplay.PlayerA: {},
 			gameplay.PlayerB: {},
 		},
-		ignitionTargetCard:  map[gameplay.PlayerID]gameplay.CardID{},
-		extraMovesRemaining: map[gameplay.PlayerID]int{},
+		ignitionTargetCard:        map[gameplay.PlayerID]gameplay.CardID{},
+		extraMovesRemaining:       map[gameplay.PlayerID]int{},
+		doubleTurnEffectTurnsLeft: map[gameplay.PlayerID]int{},
 	}
 }
 
@@ -152,6 +162,9 @@ func (e *Engine) ActivateCardWithTargets(pid gameplay.PlayerID, handIndex int, t
 	// MatchState requires CurrentTurn == pid, which is false for the responder.
 	if e.ReactionWindow != nil && e.ReactionWindow.Open {
 		return e.QueueReactionCard(pid, handIndex, EffectTarget{})
+	}
+	if def.Type == gameplay.CardTypeDisruption {
+		return e.applyDisruptionOnOwnTurn(pid, handIndex)
 	}
 	if def.Type != gameplay.CardTypePower && def.Type != gameplay.CardTypeContinuous {
 		return errors.New("only Power and Continuous cards can be activated in normal turn flow")
@@ -316,7 +329,7 @@ func (e *Engine) maybeOpenIgniteReactionWindow(activator gameplay.PlayerID) {
 			return
 		}
 	}
-	eligible := []gameplay.CardType{gameplay.CardTypeRetribution}
+	eligible := []gameplay.CardType{gameplay.CardTypeRetribution, gameplay.CardTypeDisruption}
 	if gameplay.MaybeCaptureAttemptOnIgnition(card.CardID) {
 		eligible = append(eligible, gameplay.CardTypeCounter)
 	}
@@ -376,6 +389,47 @@ func (e *Engine) reconcileTurnState() {
 	}
 }
 
+// applyDisruptionOnOwnTurn handles a Disruption card played on the owner's turn.
+// The card enters the ignition slot like other activations (hand → ignition). Disruption does not
+// open ignite_reaction (maybeOpenIgniteReactionWindow only applies to Power/Continuous). Catalog
+// Ignition 0 means the effect resolves on the same turn after a room-driven snapshot so clients
+// can show the card in the ignition zone during activate_card glow, then cooldown.
+func (e *Engine) applyDisruptionOnOwnTurn(pid gameplay.PlayerID, handIndex int) error {
+	if e.State.CurrentTurn != pid {
+		return errors.New("not your turn")
+	}
+	opp := gameplay.OppositePlayer(pid)
+	if !e.State.Players[opp].Ignition.Occupied {
+		return errors.New("disruption cards require the opponent to have a card in ignition")
+	}
+	if err := e.State.ActivateCard(pid, handIndex); err != nil {
+		return err
+	}
+	e.disruptionSameTurnGlowPID = pid
+	return nil
+}
+
+// HasPendingDisruptionSameTurnResolve reports whether the room should broadcast an intermediate
+// snapshot (card visible in ignition) before FinishDisruptionSameTurnResolveIfPending.
+func (e *Engine) HasPendingDisruptionSameTurnResolve() bool {
+	return e.disruptionSameTurnGlowPID != ""
+}
+
+// FinishDisruptionSameTurnResolveIfPending runs ignition resolution for a Disruption placed on the
+// current turn (success=true when no failure path exists). Clears pending state; safe to call when
+// no pending disruption (no-op).
+func (e *Engine) FinishDisruptionSameTurnResolveIfPending() error {
+	if e.disruptionSameTurnGlowPID == "" {
+		return nil
+	}
+	pid := e.disruptionSameTurnGlowPID
+	e.disruptionSameTurnGlowPID = ""
+	if err := e.State.ResolveIgnitionFor(pid, true); err != nil {
+		return err
+	}
+	return e.processResolvedIgnitions()
+}
+
 func (e *Engine) handleResolvedEffect(ev *gameplay.ResolvedIgnitionEvent) error {
 	if !ev.Success {
 		return nil
@@ -423,6 +477,7 @@ func (e *Engine) ActivatePlayerSkill(pid gameplay.PlayerID) error {
 	}
 	e.expireMovementGrantsAfterOwnerTurn(pid)
 	delete(e.extraMovesRemaining, pid)
+	delete(e.doubleTurnEffectTurnsLeft, pid)
 	e.Chess.Turn = color.Opponent()
 	return e.StartTurn(e.State.CurrentTurn)
 }
@@ -577,10 +632,12 @@ func (e *Engine) PendingMove() (PendingMoveAction, bool) {
 	return *e.pendingMove, true
 }
 
-// DoubleTurnActiveFor returns the PlayerID for whom an extra move is currently available,
-// or an empty string if no Double Turn effect is active.
+// DoubleTurnActiveFor returns the PlayerID for whom the Double Turn visual effect is still
+// active (i.e. the owner still has turns remaining on the effect). The highlight persists for
+// the full owner turn even after the extra move has been used.
+// Returns an empty string when no Double Turn effect is active.
 func (e *Engine) DoubleTurnActiveFor() gameplay.PlayerID {
-	for pid, n := range e.extraMovesRemaining {
+	for pid, n := range e.doubleTurnEffectTurnsLeft {
 		if n > 0 {
 			return pid
 		}
@@ -588,10 +645,21 @@ func (e *Engine) DoubleTurnActiveFor() gameplay.PlayerID {
 	return ""
 }
 
-// SetExtraMovesRemainingForTest directly sets the extra-move counter for a player.
+// DoubleTurnTurnsRemainingFor returns how many owner turns the Double Turn effect has left,
+// or 0 if no Double Turn effect is active for pid.
+func (e *Engine) DoubleTurnTurnsRemainingFor(pid gameplay.PlayerID) int {
+	return e.doubleTurnEffectTurnsLeft[pid]
+}
+
+// SetExtraMovesRemainingForTest directly sets the extra-move counter and the visual
+// effect duration for a player. The effect duration is set to the same value as n
+// (simulating that the resolver just fired and granted n extra moves).
 // This is intended for tests only; do not call from production code.
 func (e *Engine) SetExtraMovesRemainingForTest(pid gameplay.PlayerID, n int) {
 	e.extraMovesRemaining[pid] = n
+	if n > 0 {
+		e.doubleTurnEffectTurnsLeft[pid] = n
+	}
 }
 
 func toColor(pid gameplay.PlayerID) chess.Color {
@@ -608,14 +676,12 @@ func playerFromColor(c chess.Color) gameplay.PlayerID {
 	return gameplay.PlayerB
 }
 
-type EffectTarget struct {
-	PiecePos    *chess.Pos
-	TargetPos   *chess.Pos
-	TargetCard  *gameplay.CardID
-	TargetRow   *int
-	TargetCol   *int
-	TargetIndex *int
-}
+// EffectTarget is an alias for the type defined in the resolvers package, kept here so
+// existing code in internal/match (and its tests) does not need to change its references.
+type EffectTarget = matchresolvers.EffectTarget
+
+// EffectResolver is an alias for the interface defined in the resolvers package.
+type EffectResolver = matchresolvers.EffectResolver
 
 // PendingEffect represents a resolved ignition effect waiting for player target input.
 type PendingEffect struct {
@@ -624,8 +690,55 @@ type PendingEffect struct {
 	Resolver EffectResolver
 }
 
-// EffectResolver is the execution contract for card effects.
-type EffectResolver interface {
-	RequiresTarget() bool
-	Apply(e *Engine, owner gameplay.PlayerID, target EffectTarget) error
+// --- matchresolvers.ResolverEngine implementation ---
+
+// ConsumeIgnitionTargets implements matchresolvers.ResolverEngine.
+func (e *Engine) ConsumeIgnitionTargets(owner gameplay.PlayerID, cardID gameplay.CardID) []chess.Pos {
+	return e.consumeIgnitionTargets(owner, cardID)
+}
+
+// PieceAt implements matchresolvers.ResolverEngine.
+func (e *Engine) PieceAt(pos chess.Pos) chess.Piece {
+	return e.Chess.PieceAt(pos)
+}
+
+// OwnerColor implements matchresolvers.ResolverEngine.
+func (e *Engine) OwnerColor(owner gameplay.PlayerID) chess.Color {
+	return toColor(owner)
+}
+
+// AddMovementGrant implements matchresolvers.ResolverEngine.
+func (e *Engine) AddMovementGrant(owner gameplay.PlayerID, cardID gameplay.CardID, target chess.Pos, kind matchresolvers.MovementGrantKind, durationTurns int) {
+	e.addMovementGrant(MovementGrant{
+		Owner:               owner,
+		SourceCardID:        cardID,
+		Target:              target,
+		Kind:                kind,
+		RemainingOwnerTurns: durationTurns,
+	})
+}
+
+// GrantManaFromCardEffect implements matchresolvers.ResolverEngine.
+func (e *Engine) GrantManaFromCardEffect(pid gameplay.PlayerID, amount int) {
+	e.State.GrantManaFromCardEffect(pid, amount)
+}
+
+// IncrementExtraMoves implements matchresolvers.ResolverEngine.
+// It increments the extra-move counter AND records the effect duration for the visual highlight.
+func (e *Engine) IncrementExtraMoves(pid gameplay.PlayerID) {
+	e.extraMovesRemaining[pid]++
+	// The visual effect highlight lasts for EffectDuration turns; Double Turn has EffectDuration=1.
+	def, ok := gameplay.CardDefinitionByID(CardDoubleTurn)
+	effectTurns := 1
+	if ok && def.EffectDuration > 0 {
+		effectTurns = def.EffectDuration
+	}
+	if e.doubleTurnEffectTurnsLeft[pid] < effectTurns {
+		e.doubleTurnEffectTurnsLeft[pid] = effectTurns
+	}
+}
+
+// NegateOpponentIgnition implements matchresolvers.ResolverEngine.
+func (e *Engine) NegateOpponentIgnition(opponentPID gameplay.PlayerID) error {
+	return e.State.ResolveIgnitionFor(opponentPID, false)
 }
