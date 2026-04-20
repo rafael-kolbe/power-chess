@@ -34,8 +34,8 @@ globalThis.__POWER_CHESS_CARD_METADATA__ = [
     "targets": 0,
     "effectDuration": 0,
     "name": "Mana Burn",
-    "description": "Target an ignited card from your opponent, burn x mana from your opponent, x being the mana cost of the target card.",
-    "example": "1. Opponent activates \"Knight Touch\"\n2. You activate Mana Burn as retribution.\n3. You burn 3 mana from your opponent."
+    "description": "Burn x mana from your opponent. x is the mana cost of the card in your opponent's ignition slot. If your opponent doesn't have enough mana, the excess is burned from their energized mana pool.",
+    "example": "1. Opponent activates \"Knight Touch\" (cost: 3).\n2. You activate Mana Burn as retribution.\n3. Opponent has 2 mana: 2 mana is burned from their mana pool, 1 from their energized mana pool."
   },
   {
     "id": "energy-gain",

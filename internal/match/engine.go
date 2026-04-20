@@ -33,6 +33,7 @@ const (
 	CardExtinguish     gameplay.CardID = "extinguish"
 	CardCounterattack  gameplay.CardID = "counterattack"
 	CardBlockade       gameplay.CardID = "blockade"
+	CardManaBurn       gameplay.CardID = "mana-burn"
 )
 
 type Engine struct {
@@ -778,6 +779,22 @@ func (e *Engine) AddMovementGrant(owner gameplay.PlayerID, cardID gameplay.CardI
 // GrantManaFromCardEffect implements matchresolvers.ResolverEngine.
 func (e *Engine) GrantManaFromCardEffect(pid gameplay.PlayerID, amount int) {
 	e.State.GrantManaFromCardEffect(pid, amount)
+}
+
+// BurnManaFromOpponent implements matchresolvers.ResolverEngine.
+// Drains amount mana from opponentPID's regular mana pool, then from the energized pool.
+func (e *Engine) BurnManaFromOpponent(opponentPID gameplay.PlayerID, amount int) {
+	e.State.BurnMana(opponentPID, amount)
+}
+
+// IgnitionCardCost implements matchresolvers.ResolverEngine.
+// Returns the ManaCost of the card in pid's ignition slot, or 0 if the slot is unoccupied.
+func (e *Engine) IgnitionCardCost(pid gameplay.PlayerID) int {
+	p := e.State.Players[pid]
+	if p == nil || !p.Ignition.Occupied {
+		return 0
+	}
+	return p.Ignition.Card.ManaCost
 }
 
 // IncrementExtraMoves implements matchresolvers.ResolverEngine.

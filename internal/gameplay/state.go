@@ -493,6 +493,27 @@ func (s *MatchState) GrantManaFromCardEffect(pid PlayerID, amount int) {
 	s.addMana(pid, amount)
 }
 
+// BurnMana drains amount mana from pid's pools. Regular mana is drained first; any remainder
+// drains from the energized mana pool. Both pools are floored at zero.
+func (s *MatchState) BurnMana(pid PlayerID, amount int) {
+	p := s.Players[pid]
+	if p == nil || amount <= 0 {
+		return
+	}
+	fromMana := amount
+	if fromMana > p.Mana {
+		fromMana = p.Mana
+	}
+	p.Mana -= fromMana
+	remainder := amount - fromMana
+	if remainder > 0 {
+		if remainder > p.EnergizedMana {
+			remainder = p.EnergizedMana
+		}
+		p.EnergizedMana -= remainder
+	}
+}
+
 func (s *MatchState) addEnergizedMana(pid PlayerID, amount int) {
 	p := s.Players[pid]
 	p.EnergizedMana += amount

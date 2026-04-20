@@ -3215,6 +3215,13 @@ import {
         return null;
     }
 
+    /** @param {string} pid "A" | "B" */
+    function energizedBarElForPlayerId(pid) {
+        if (pid === "A") return document.getElementById("energizedBarA");
+        if (pid === "B") return document.getElementById("energizedBarB");
+        return null;
+    }
+
     /**
      * Short blue pulse on the mana bar when Energy Gain's effect activation succeeds (+4 mana).
      * Runs after activate_card (post-ignition burn), not when the card enters the ignition slot.
@@ -3234,6 +3241,32 @@ import {
             manaBarEl.addEventListener("animationend", done, { once: true });
             window.setTimeout(done, 900);
         });
+    }
+
+    /**
+     * Red pulse on both mana bars (regular + energized) of the affected player when Mana Burn resolves.
+     * Both animations run in parallel; the promise resolves when both finish.
+     * @param {string} affectedPid "A" | "B" — the player whose mana is being burned
+     * @returns {Promise<void>}
+     */
+    async function playManaBarManaBurnGlow(affectedPid) {
+        const flash = (el) => {
+            if (!el) return Promise.resolve();
+            el.classList.add("pm-mana-burn-flash");
+            return new Promise((resolve) => {
+                const done = () => {
+                    el.removeEventListener("animationend", done);
+                    el.classList.remove("pm-mana-burn-flash");
+                    resolve(undefined);
+                };
+                el.addEventListener("animationend", done, { once: true });
+                window.setTimeout(done, 900);
+            });
+        };
+        await Promise.all([
+            flash(manaBarElForPlayerId(affectedPid)),
+            flash(energizedBarElForPlayerId(affectedPid)),
+        ]);
     }
 
     /**
@@ -3347,10 +3380,13 @@ import {
             const failExtraMs = !success ? 3200 : 0;
             blockGameplayInputForEffects(2000 + failExtraMs);
             const glowPromise = playEffectActivationGlow(wrap, typeLower, success);
+            const oppPid = pid === "A" ? "B" : "A";
             const manaBarPromise =
                 success && cid === "energy-gain"
                     ? playManaBarEnergyGainGlow(manaBarElForPlayerId(pid))
-                    : Promise.resolve();
+                    : success && cid === "mana-burn"
+                      ? playManaBarManaBurnGlow(oppPid)
+                      : Promise.resolve();
             await Promise.all([glowPromise, manaBarPromise]);
             // If this activation negated another player's card activation, place the negate overlay
             // now — before the next activate_card event (the negated card's fail animation) runs.

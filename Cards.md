@@ -37,7 +37,7 @@ Give yourself 1 extra move for one turn.
 # Mana Burn
 ## Type: Retribution
 ## Description
-Target an ignited card from your opponent, burn x mana from your opponent, x being the mana cost of the target card.
+Burn x mana from your opponent. x being the mana cost of the card in your opponent's ignition slot. Excess mana is burned from your opponent's energized mana pool.
 ## Cost: 1
 ## Ignition: 0
 ## Cooldown: 3
