@@ -31,8 +31,10 @@ func EligibleForOpeningRetributionAUTO(s *MatchState, pid PlayerID) bool {
 }
 
 // EligibleForDisruptionReactionAUTO reports whether pid could queue at least one Disruption card
-// as a response in an ignite_reaction window: the opponent must have a card in their ignition slot,
-// and pid must have a Disruption card in hand with sufficient mana (cooldown duplicate rule applies).
+// as a response in an ignite_reaction window. All of the following must hold:
+//   - The opponent has a card in their ignition slot.
+//   - pid has a Disruption card in hand with sufficient mana (cooldown duplicate rule applies).
+//   - pid has at least one Power card in hand to pay the mandatory banish cost (Disruption type rule).
 func EligibleForDisruptionReactionAUTO(s *MatchState, pid PlayerID) bool {
 	if s == nil {
 		return false
@@ -44,6 +46,18 @@ func EligibleForDisruptionReactionAUTO(s *MatchState, pid PlayerID) bool {
 	opp := OppositePlayer(pid)
 	oppSlot := s.Players[opp].Ignition
 	if !oppSlot.Occupied {
+		return false
+	}
+	// Disruption reaction cost: player must have a Power card to banish.
+	hasPowerCard := false
+	for _, c := range p.Hand {
+		def, ok := CardDefinitionByID(c.CardID)
+		if ok && def.Type == CardTypePower {
+			hasPowerCard = true
+			break
+		}
+	}
+	if !hasPowerCard {
 		return false
 	}
 	onCooldown := make(map[string]struct{}, len(p.Cooldowns))

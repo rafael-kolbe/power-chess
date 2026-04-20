@@ -441,7 +441,7 @@ func TestAutoFinalizeIgniteWhenNextCannotExtend(t *testing.T) {
 	}
 
 	if err := room.Execute(func() error {
-		if err := room.Engine.QueueReactionCard(gameplay.PlayerB, 0, match.EffectTarget{}); err != nil {
+		if err := room.Engine.QueueReactionCard(gameplay.PlayerB, 0, -1, match.EffectTarget{}); err != nil {
 			return err
 		}
 		if err := room.maybeAutoFinalizeIgniteChainIfStuckUnsafe(); err != nil {
@@ -492,7 +492,7 @@ func TestIgniteChainFinalizesOnZeroReactionDeadline(t *testing.T) {
 	}
 
 	if err := room.Execute(func() error {
-		if err := room.Engine.QueueReactionCard(gameplay.PlayerA, 0, match.EffectTarget{}); err != nil {
+		if err := room.Engine.QueueReactionCard(gameplay.PlayerA, 0, -1, match.EffectTarget{}); err != nil {
 			return err
 		}
 		room.noteReactionChainStartedUnsafe()
@@ -555,7 +555,7 @@ func TestSnapshotOpenReactionWindowAfterChainStartClearsDeadline(t *testing.T) {
 		t.Fatalf("activate: %v", err)
 	}
 	if err := room.Execute(func() error {
-		if err := room.Engine.QueueReactionCard(gameplay.PlayerA, 0, match.EffectTarget{}); err != nil {
+		if err := room.Engine.QueueReactionCard(gameplay.PlayerA, 0, -1, match.EffectTarget{}); err != nil {
 			return err
 		}
 		// Same as NoteReactionChainExtendedUnsafe after a queue: responder has an absolute deadline;

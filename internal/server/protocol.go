@@ -192,10 +192,14 @@ type ResolvePendingPayload struct {
 }
 
 // QueueReactionPayload queues a reaction card with optional target data.
+// BanishHandIndex must be provided (>= 0) when the card at HandIndex is a Disruption type played
+// during an ignite_reaction window. It identifies the hand index of a Power card the player pays
+// as the mandatory banish cost for the Disruption type. Omit (null) for all other reaction types.
 type QueueReactionPayload struct {
-	HandIndex int  `json:"handIndex"`
-	PieceRow  *int `json:"pieceRow,omitempty"`
-	PieceCol  *int `json:"pieceCol,omitempty"`
+	HandIndex       int  `json:"handIndex"`
+	BanishHandIndex *int `json:"banishHandIndex,omitempty"`
+	PieceRow        *int `json:"pieceRow,omitempty"`
+	PieceCol        *int `json:"pieceCol,omitempty"`
 }
 
 // AckPayload confirms processing status for a received request.

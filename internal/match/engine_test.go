@@ -108,7 +108,7 @@ func TestReactionWindowRestrictsCardTypeActivation(t *testing.T) {
 	if err := e.ActivateCard(gameplay.PlayerA, 0); err == nil {
 		t.Fatalf("power card should be blocked by counter-only reaction window")
 	}
-	if err := e.QueueReactionCard(gameplay.PlayerA, 1, EffectTarget{}); err != nil {
+	if err := e.QueueReactionCard(gameplay.PlayerA, 1, -1, EffectTarget{}); err != nil {
 		t.Fatalf("counter card should be queueable in counter-only reaction window: %v", err)
 	}
 }
@@ -144,7 +144,7 @@ func TestIgniteReactionResolveClearsIgnitionAfterOpponentRetributionResponse(t *
 		t.Fatalf("expected ignite_reaction window open, got ok=%v rw=%+v", ok, rw)
 	}
 
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err != nil {
 		t.Fatalf("queue opponent Retribution response failed: %v", err)
 	}
 	if err := e.ResolveReactionStack(); err != nil {
@@ -240,7 +240,7 @@ func TestIgniteReactionRejectsActorStartingChain(t *testing.T) {
 	e := NewEngine(state, chess.NewEmptyGame(chess.White))
 	markInPlayForTest(state)
 	e.OpenReactionWindow("ignite_reaction", gameplay.PlayerA, []gameplay.CardType{gameplay.CardTypeRetribution})
-	if err := e.QueueReactionCard(gameplay.PlayerA, 0, EffectTarget{}); err == nil {
+	if err := e.QueueReactionCard(gameplay.PlayerA, 0, -1, EffectTarget{}); err == nil {
 		t.Fatal("expected actor cannot open ignite_reaction chain")
 	}
 }
@@ -318,7 +318,7 @@ func TestCanPlayerExtendIgniteChain(t *testing.T) {
 	e := NewEngine(state, chess.NewEmptyGame(chess.White))
 	markInPlayForTest(state)
 	e.OpenReactionWindow("ignite_reaction", gameplay.PlayerA, []gameplay.CardType{gameplay.CardTypeRetribution})
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err != nil {
 		t.Fatalf("queue opening retribution: %v", err)
 	}
 	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{retaliate}
@@ -377,10 +377,10 @@ func TestReactionStackEntriesBottomFirstOrder(t *testing.T) {
 	e := NewEngine(state, chess.NewEmptyGame(chess.White))
 	markInPlayForTest(state)
 	e.OpenReactionWindow("ignite_reaction", gameplay.PlayerA, []gameplay.CardType{gameplay.CardTypeRetribution})
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err != nil {
 		t.Fatalf("queue B: %v", err)
 	}
-	if err := e.QueueReactionCard(gameplay.PlayerA, 0, EffectTarget{}); err != nil {
+	if err := e.QueueReactionCard(gameplay.PlayerA, 0, -1, EffectTarget{}); err != nil {
 		t.Fatalf("queue A: %v", err)
 	}
 	ents := e.ReactionStackEntries()
@@ -497,7 +497,7 @@ func TestCaptureAttemptRejectsRetributionOpening(t *testing.T) {
 	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 4}, To: chess.Pos{Row: 5, Col: 5}}); err != nil {
 		t.Fatalf("capture attempt: %v", err)
 	}
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err == nil {
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err == nil {
 		t.Fatal("expected Retribution rejected as first response on capture_attempt")
 	}
 }
@@ -539,7 +539,7 @@ func TestIgniteReactionEligibleRetributionOnlyUntilMaybeCaptureAttempt(t *testin
 	if !hasRet || hasCt {
 		t.Fatalf("ignite_reaction should list Retribution only until catalog sets MaybeCaptureAttemptOnIgnition, got %v", rw.EligibleTypes)
 	}
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err != nil {
 		t.Fatalf("queue Retribution opening on ignite: %v", err)
 	}
 }
@@ -561,7 +561,7 @@ func TestCounterChainNoOpThenCaptureStillApplies(t *testing.T) {
 	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 4}, To: chess.Pos{Row: 5, Col: 5}}); err != nil {
 		t.Fatalf("capture attempt: %v", err)
 	}
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err != nil {
 		t.Fatalf("counter should queue on any capture attempt: %v", err)
 	}
 	if err := e.ResolveReactionStack(); err != nil {
@@ -591,10 +591,10 @@ func TestCounterChainTwoCountersThenCaptureCompletes(t *testing.T) {
 	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 4}, To: chess.Pos{Row: 5, Col: 5}}); err != nil {
 		t.Fatalf("capture attempt: %v", err)
 	}
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err != nil {
 		t.Fatalf("defender counter: %v", err)
 	}
-	if err := e.QueueReactionCard(gameplay.PlayerA, 0, EffectTarget{}); err != nil {
+	if err := e.QueueReactionCard(gameplay.PlayerA, 0, -1, EffectTarget{}); err != nil {
 		t.Fatalf("attacker second counter: %v", err)
 	}
 	if err := e.ResolveReactionStack(); err != nil {
@@ -626,10 +626,10 @@ func TestResolveReactionStackSequentialActivationFX(t *testing.T) {
 	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 4}, To: chess.Pos{Row: 5, Col: 5}}); err != nil {
 		t.Fatalf("capture attempt: %v", err)
 	}
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err != nil {
 		t.Fatalf("defender counter: %v", err)
 	}
-	if err := e.QueueReactionCard(gameplay.PlayerA, 0, EffectTarget{}); err != nil {
+	if err := e.QueueReactionCard(gameplay.PlayerA, 0, -1, EffectTarget{}); err != nil {
 		t.Fatalf("attacker second counter: %v", err)
 	}
 	if err := e.ResolveReactionStack(); err != nil {

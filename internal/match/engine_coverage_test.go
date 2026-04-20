@@ -207,7 +207,7 @@ func TestQueueReactionCardRequiresOpenWindow(t *testing.T) {
 	e := NewEngine(state, chess.NewGame())
 	markInPlayForTest(state)
 
-	if err := e.QueueReactionCard(gameplay.PlayerA, 0, EffectTarget{}); err == nil {
+	if err := e.QueueReactionCard(gameplay.PlayerA, 0, -1, EffectTarget{}); err == nil {
 		t.Fatal("expected error queuing reaction without open window")
 	}
 }
@@ -222,7 +222,7 @@ func TestQueueReactionCardRejectsCaptureChainStartByActor(t *testing.T) {
 
 	// A is the actor, B is the opponent.
 	e.OpenReactionWindow("capture_attempt", gameplay.PlayerA, []gameplay.CardType{gameplay.CardTypeCounter})
-	if err := e.QueueReactionCard(gameplay.PlayerA, 0, EffectTarget{}); err == nil {
+	if err := e.QueueReactionCard(gameplay.PlayerA, 0, -1, EffectTarget{}); err == nil {
 		t.Fatal("expected error: capture chain must be started by the opponent")
 	}
 }

@@ -56,6 +56,24 @@ func TestEligibleForDisruptionReactionAUTO_falseWhenInsufficientMana(t *testing.
 	}
 }
 
+func TestEligibleForDisruptionReactionAUTO_falseWhenNoPowerCardInHand(t *testing.T) {
+	s, err := NewMatchState(StarterDeck(), StarterDeck())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Players[PlayerA].Ignition = IgnitionSlot{
+		Occupied:        true,
+		ActivationOwner: PlayerA,
+		Card:            CardInstance{InstanceID: "ig", CardID: "knight-touch", ManaCost: 3, Ignition: 0, Cooldown: 2},
+	}
+	// Only a Disruption card in hand — no Power card available to pay the banish cost.
+	s.Players[PlayerB].Hand = []CardInstance{{CardID: "extinguish", ManaCost: 2, Ignition: 0, Cooldown: 2}}
+	s.Players[PlayerB].Mana = 5
+	if EligibleForDisruptionReactionAUTO(s, PlayerB) {
+		t.Fatal("expected false when no Power card is available in hand to pay the disruption banish cost")
+	}
+}
+
 func TestEligibleForDisruptionReactionAUTO_trueWhenConditionsMet(t *testing.T) {
 	s, err := NewMatchState(StarterDeck(), StarterDeck())
 	if err != nil {
@@ -66,9 +84,13 @@ func TestEligibleForDisruptionReactionAUTO_trueWhenConditionsMet(t *testing.T) {
 		ActivationOwner: PlayerA,
 		Card:            CardInstance{InstanceID: "ig", CardID: "double-turn", ManaCost: 6, Ignition: 2, Cooldown: 9},
 	}
-	s.Players[PlayerB].Hand = []CardInstance{{CardID: "extinguish", ManaCost: 2, Ignition: 0, Cooldown: 2}}
+	s.Players[PlayerB].Hand = []CardInstance{
+		{CardID: "extinguish", ManaCost: 2, Ignition: 0, Cooldown: 2},
+		// Power card required to pay the disruption reaction banish cost.
+		{CardID: "knight-touch", ManaCost: 3, Ignition: 0, Cooldown: 2},
+	}
 	s.Players[PlayerB].Mana = 5
 	if !EligibleForDisruptionReactionAUTO(s, PlayerB) {
-		t.Fatal("expected true when opponent has ignition card and player has enough mana")
+		t.Fatal("expected true when opponent has ignition card, player has enough mana, and a Power card is available to banish")
 	}
 }

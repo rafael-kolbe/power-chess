@@ -8,13 +8,16 @@ import (
 )
 
 // newDisruptionTestEngine builds a minimal engine for Disruption/Extinguish tests.
-// PlayerA holds a Power card (energy-gain) in hand to activate into ignition.
-// PlayerB holds an Extinguish card in hand.
+// PlayerA holds a Power card (energy-gain) to activate into ignition.
+// PlayerB holds an Extinguish card (index 0) and an extra Power card (index 1) so
+// it can pay the mandatory banish cost when responding during ignite_reaction.
 func newDisruptionTestEngine(t *testing.T) (*Engine, *gameplay.MatchState) {
 	t.Helper()
 
 	egCard := gameplay.CardInstance{InstanceID: "eg1", CardID: CardEnergyGain, ManaCost: 0, Ignition: 1, Cooldown: 2}
 	exCard := gameplay.CardInstance{InstanceID: "ex1", CardID: CardExtinguish, ManaCost: 2, Ignition: 0, Cooldown: 2}
+	// Extra Power card for PlayerB to banish as Disruption reaction cost.
+	ktCard := gameplay.CardInstance{InstanceID: "kt1", CardID: CardKnightTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
 
 	state, err := gameplay.NewMatchState(testDeckWith(egCard), testDeckWith(exCard))
 	if err != nil {
@@ -28,7 +31,8 @@ func newDisruptionTestEngine(t *testing.T) (*Engine, *gameplay.MatchState) {
 	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{egCard}
 	state.Players[gameplay.PlayerA].Mana = 10
 
-	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{exCard}
+	// PlayerB: [Extinguish(0), KnightTouch(1)]
+	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{exCard, ktCard}
 	state.Players[gameplay.PlayerB].Mana = 10
 
 	markInPlayForTest(state)
@@ -36,7 +40,7 @@ func newDisruptionTestEngine(t *testing.T) (*Engine, *gameplay.MatchState) {
 }
 
 // TestDisruptionOwnTurnActivationSucceeds verifies that Extinguish can be activated on PlayerB's
-// own turn when PlayerA has a card in their ignition slot.
+// own turn when PlayerA has a card in their ignition slot. No banish cost applies on own turn.
 func TestDisruptionOwnTurnActivationSucceeds(t *testing.T) {
 	e, state := newDisruptionTestEngine(t)
 
@@ -70,13 +74,13 @@ func TestDisruptionOwnTurnActivationSucceeds(t *testing.T) {
 		t.Fatal("expected PlayerA ignition to still be occupied")
 	}
 
-	// PlayerB activates Extinguish — card enters ignition; same-turn finish resolves to cooldown.
+	// PlayerB activates Extinguish on own turn — no banish cost required.
 	prevMana := state.Players[gameplay.PlayerB].Mana
 	if err := e.ActivateCard(gameplay.PlayerB, 0); err != nil {
 		t.Fatalf("PlayerB activate extinguish: %v", err)
 	}
 
-	// Mana must have been deducted (Extinguish costs 2).
+	// Mana must have been deducted (Extinguish costs 2); no extra banish cost on own turn.
 	exDef, _ := gameplay.CardDefinitionByID(CardExtinguish)
 	if state.Players[gameplay.PlayerB].Mana != prevMana-exDef.Cost {
 		t.Fatalf("expected mana to drop by %d, was %d, now %d", exDef.Cost, prevMana, state.Players[gameplay.PlayerB].Mana)
@@ -176,9 +180,10 @@ func TestMarkOpponentCardEffectNegatedKeepsSlot(t *testing.T) {
 }
 
 // TestDisruptionQueuedInIgniteReactionSucceeds verifies that Extinguish can be queued as
-// the first response in an ignite_reaction window.
+// the first response in an ignite_reaction window when the mandatory banish cost is paid.
+// PlayerB has [Extinguish(0), KnightTouch(1)]; banishHandIndex=1 banishes KnightTouch.
 func TestDisruptionQueuedInIgniteReactionSucceeds(t *testing.T) {
-	e, _ := newDisruptionTestEngine(t)
+	e, state := newDisruptionTestEngine(t)
 
 	// PlayerA activates energy-gain, which opens an ignite_reaction window.
 	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
@@ -189,13 +194,110 @@ func TestDisruptionQueuedInIgniteReactionSucceeds(t *testing.T) {
 		t.Fatal("expected ignite_reaction window to be open")
 	}
 
-	// PlayerB queues Extinguish (Disruption) as the first reaction.
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
-		t.Fatalf("PlayerB queue Extinguish: %v", err)
+	handBefore := len(state.Players[gameplay.PlayerB].Hand)
+	banishedBefore := len(state.Players[gameplay.PlayerB].Banished)
+
+	// PlayerB queues Extinguish (Disruption, index 0) and banishes KnightTouch (Power, index 1).
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, 1, EffectTarget{}); err != nil {
+		t.Fatalf("PlayerB queue Extinguish with banish: %v", err)
 	}
 
 	if len(e.ReactionStackEntries()) != 1 {
 		t.Fatalf("expected 1 card on reaction stack, got %d", len(e.ReactionStackEntries()))
+	}
+
+	// The Power card (KnightTouch) must be in the Banished zone.
+	banishedAfter := state.Players[gameplay.PlayerB].Banished
+	if len(banishedAfter) != banishedBefore+1 {
+		t.Fatalf("expected banished count to increase by 1, was %d now %d", banishedBefore, len(banishedAfter))
+	}
+	if banishedAfter[len(banishedAfter)-1].CardID != CardKnightTouch {
+		t.Fatalf("expected KnightTouch banished, got %s", banishedAfter[len(banishedAfter)-1].CardID)
+	}
+
+	// PlayerB's hand must have shrunk by 2 (Extinguish consumed + KnightTouch banished).
+	if len(state.Players[gameplay.PlayerB].Hand) != handBefore-2 {
+		t.Fatalf("expected hand size %d, got %d", handBefore-2, len(state.Players[gameplay.PlayerB].Hand))
+	}
+}
+
+// TestDisruptionReactionRejectedWithoutBanishIndex verifies that a Disruption card queued as the
+// first response in ignite_reaction is rejected when no banish index is provided (banishHandIndex=-1).
+func TestDisruptionReactionRejectedWithoutBanishIndex(t *testing.T) {
+	e, _ := newDisruptionTestEngine(t)
+
+	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
+		t.Fatalf("PlayerA activate: %v", err)
+	}
+
+	// Attempt to queue Extinguish without providing a banish index.
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err == nil {
+		t.Fatal("expected error: disruption reaction requires banish index")
+	}
+}
+
+// TestDisruptionReactionRejectedWithNonPowerBanishCard verifies that the banish cost for a
+// Disruption reaction must be a Power card; non-Power cards are rejected.
+func TestDisruptionReactionRejectedWithNonPowerBanishCard(t *testing.T) {
+	e, state := newDisruptionTestEngine(t)
+
+	// Replace PlayerB's Power card with a Retribution card so the banish target is non-Power.
+	stopThere := gameplay.CardInstance{InstanceID: "st1", CardID: CardStopRightThere, ManaCost: 3, Ignition: 0, Cooldown: 5}
+	exCard := gameplay.CardInstance{InstanceID: "ex1", CardID: CardExtinguish, ManaCost: 2, Ignition: 0, Cooldown: 2}
+	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{exCard, stopThere}
+
+	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
+		t.Fatalf("PlayerA activate: %v", err)
+	}
+
+	// Attempt to banish a Retribution card as the disruption cost.
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, 1, EffectTarget{}); err == nil {
+		t.Fatal("expected error: banish cost must be a Power card")
+	}
+}
+
+// TestDisruptionReactionRejectedBanishSameCard verifies that a player cannot specify the Disruption
+// card itself as the banish target.
+func TestDisruptionReactionRejectedBanishSameCard(t *testing.T) {
+	e, _ := newDisruptionTestEngine(t)
+
+	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
+		t.Fatalf("PlayerA activate: %v", err)
+	}
+
+	// banishHandIndex == handIndex (both 0) — must be rejected.
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, 0, EffectTarget{}); err == nil {
+		t.Fatal("expected error: the banished card must differ from the disruption card")
+	}
+}
+
+// TestDisruptionReactionBanishIndexAdjustsWhenBanishBeforeDisruption verifies that when the Power
+// card to banish sits at a lower index than the Disruption card, the engine correctly adjusts the
+// Disruption card's hand index after the banish.
+func TestDisruptionReactionBanishIndexAdjustsWhenBanishBeforeDisruption(t *testing.T) {
+	e, state := newDisruptionTestEngine(t)
+
+	// Rearrange PlayerB's hand so Power card (KnightTouch) is at index 0 and Extinguish at index 1.
+	ktCard := gameplay.CardInstance{InstanceID: "kt1", CardID: CardKnightTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
+	exCard := gameplay.CardInstance{InstanceID: "ex1", CardID: CardExtinguish, ManaCost: 2, Ignition: 0, Cooldown: 2}
+	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{ktCard, exCard}
+
+	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
+		t.Fatalf("PlayerA activate: %v", err)
+	}
+
+	// Queue Extinguish at index 1 and banish KnightTouch at index 0 (banishHandIndex < handIndex).
+	if err := e.QueueReactionCard(gameplay.PlayerB, 1, 0, EffectTarget{}); err != nil {
+		t.Fatalf("queue disruption with banish before disruption: %v", err)
+	}
+
+	if len(e.ReactionStackEntries()) != 1 {
+		t.Fatalf("expected 1 card on reaction stack, got %d", len(e.ReactionStackEntries()))
+	}
+
+	// KnightTouch must be in the Banished zone.
+	if len(state.Players[gameplay.PlayerB].Banished) != 1 || state.Players[gameplay.PlayerB].Banished[0].CardID != CardKnightTouch {
+		t.Fatal("expected KnightTouch in Banished zone")
 	}
 }
 
@@ -209,7 +311,7 @@ func TestDisruptionRejectedInCaptureAttemptWindow(t *testing.T) {
 
 	// PlayerB tries to queue Extinguish in a capture_attempt window.
 	state.Players[gameplay.PlayerB].Mana = 10
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err == nil {
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err == nil {
 		t.Fatal("expected error when queuing Disruption in capture_attempt window")
 	}
 }
@@ -241,14 +343,14 @@ func TestDisruptionCannotFollowCounter(t *testing.T) {
 	// Add Counter to eligible types so PlayerB can queue it (capture flag not set, but we force it).
 	e.ReactionWindow.EligibleTypes = append(e.ReactionWindow.EligibleTypes, gameplay.CardTypeCounter)
 
-	// PlayerB queues Counterattack (Counter) as the first reaction.
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, EffectTarget{}); err != nil {
+	// PlayerB queues Counterattack (Counter) as the first reaction — no banish needed for Counter.
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err != nil {
 		t.Fatalf("PlayerB queue Counterattack: %v", err)
 	}
 
 	// PlayerA now tries to queue Extinguish (Disruption) — must be rejected because the top of
 	// the stack is a Counter and only Counter cards can follow Counter.
-	if err := e.QueueReactionCard(gameplay.PlayerA, 0, EffectTarget{}); err == nil {
+	if err := e.QueueReactionCard(gameplay.PlayerA, 0, -1, EffectTarget{}); err == nil {
 		t.Fatal("expected error: Disruption cannot respond to Counter cards")
 	}
 }

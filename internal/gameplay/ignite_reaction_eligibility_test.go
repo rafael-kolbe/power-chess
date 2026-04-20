@@ -67,10 +67,14 @@ func TestEligibleForIgniteReactionAUTO_trueWithDisruptionWhenOpponentHasIgnition
 		ActivationOwner: PlayerA,
 		Card:            CardInstance{InstanceID: "ig", CardID: "knight-touch", ManaCost: 3, Ignition: 0, Cooldown: 2},
 	}
-	s.Players[PlayerB].Hand = []CardInstance{{CardID: "extinguish", ManaCost: 2, Ignition: 0, Cooldown: 2}}
+	s.Players[PlayerB].Hand = []CardInstance{
+		{CardID: "extinguish", ManaCost: 2, Ignition: 0, Cooldown: 2},
+		// Power card required to pay the disruption reaction banish cost.
+		{CardID: "knight-touch", ManaCost: 3, Ignition: 0, Cooldown: 2},
+	}
 	s.Players[PlayerB].Mana = 5
 	if !EligibleForIgniteReactionAUTO(s, PlayerB) {
-		t.Fatal("expected true when hand has Extinguish (Disruption) and opponent ignition is occupied")
+		t.Fatal("expected true when hand has Extinguish (Disruption), opponent ignition is occupied, and a Power card is available to banish")
 	}
 }
 

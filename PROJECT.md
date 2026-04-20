@@ -84,7 +84,7 @@
 
 ## Sistema de cartas (poderes)
 
-Cada carta tem: **custo**, **ignição** (turnos até resolver), **recarga** (cooldown), **tipo** (Power, Retribution, Counter, Continuous).
+Cada carta tem: **custo**, **ignição** (turnos até resolver), **recarga** (cooldown), **tipo** (Power, Retribution, Counter, Continuous, Disruption).
 
 Fluxo típico de ativação:
 
@@ -98,8 +98,17 @@ Fluxo típico de ativação:
 ### Janelas de reação (tipos e papéis)
 
 - **Abrem janela:** ignição de **Power** e de **Continuous** (sempre, quando o fluxo do servidor abre `ignite_reaction`); tentativa de **captura** no xadrez abre `capture_attempt`. **Retribution não abre janela.**
-- **Respondem:** **Retribution** quando listada em `reactionWindow.eligibleTypes` (tipicamente `ignite_reaction`). **Counter** em **`capture_attempt`** (primeira resposta só Counter) e em **`ignite_reaction`** quando `MaybeCaptureAttemptOnIgnition` for **true** na carta ignitada.
-- Na cadeia em `ignite_reaction`: após **Retribution**, só **Retribution**; após **Counter**, só **Counter** quando permitido. Em `capture_attempt`, a cadeia é **só Counter** (ex.: **Counterattack** / **Blockade**). Resolução **LIFO**.
+- **Respondem:** **Retribution** quando listada em `reactionWindow.eligibleTypes` (tipicamente `ignite_reaction`). **Counter** em **`capture_attempt`** (primeira resposta só Counter) e em **`ignite_reaction`** quando `MaybeCaptureAttemptOnIgnition` for **true** na carta ignitada. **Disruption** em `ignite_reaction` (ver regra de custo abaixo).
+- Na cadeia em `ignite_reaction`: após **Retribution**, só **Retribution**; após **Counter**, só **Counter** quando permitido. **Disruption** só como **primeira resposta** da cadeia (não pode seguir Counter nem Retribution). Em `capture_attempt`, a cadeia é **só Counter** (ex.: **Counterattack** / **Blockade**). Resolução **LIFO**.
+
+### Tipo Disruption — custo de ignição como resposta
+
+Cartas do tipo **Disruption** (laranja) podem ser jogadas de duas formas:
+
+1. **No próprio turno** (o oponente tem uma carta no slot de ignição de um turno anterior): a carta entra no slot de ignição normalmente, o efeito resolve no mesmo turno sem custo adicional.
+2. **Como resposta durante uma janela `ignite_reaction`** (enquanto o oponente acabou de ignitar uma carta neste turno): **custo adicional obrigatório — banir 1 carta Power da mão**. O jogador deve especificar qual carta Power banir ao jogar a Disruption como reação (`banishHandIndex` no protocolo). Sem esse custo, a reação é rejeitada pelo servidor.
+
+Esta é uma **regra de tipo** centralizada: aplica-se a **todas** as cartas Disruption existentes e futuras, sem necessidade de mencionar o custo no texto individual de cada carta.
 - **Continuous**: oponente só tem janela **no turno em que a carta entra** no slot, não a cada turno seguinte enquanto ela permanecer lá.
 - **Ignition 0**: resolve no mesmo snapshot/turno conforme servidor; múltiplas ignições possíveis se houver mana e slot livre.
 - A zona de ignição **desse jogador** ocupada bloqueia novas ignições **dele**, exceto comportamentos especiais (ex.: **Save It For Later**).

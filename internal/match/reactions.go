@@ -51,7 +51,10 @@ func (e *Engine) CloseReactionWindow() {
 }
 
 // QueueReactionCard consumes a card from hand and pushes it to the reaction stack.
-func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, target EffectTarget) error {
+// banishHandIndex must be >= 0 when the card being queued is a Disruption type in an
+// ignite_reaction window: it identifies a Power card in hand to banish as the mandatory
+// ignition cost for that card type. Pass -1 for all non-Disruption reactions.
+func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, banishHandIndex int, target EffectTarget) error {
 	if err := e.errIfOpeningBlocksGameplay(); err != nil {
 		return err
 	}
@@ -99,6 +102,30 @@ func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, target 
 			// so this should always be true — checked explicitly as a safety guard.
 			if !e.State.Players[e.ReactionWindow.Actor].Ignition.Occupied {
 				return errors.New("disruption cards require the opponent to have a card in ignition")
+			}
+			// Disruption type ignition cost: banish 1 Power card from hand when responding
+			// during the opponent's ignite_reaction window.
+			if banishHandIndex < 0 {
+				return errors.New("disruption reaction requires banishing 1 Power card from hand")
+			}
+			if banishHandIndex == handIndex {
+				return errors.New("the banished card must be different from the disruption card")
+			}
+			if banishHandIndex < 0 || banishHandIndex >= len(p.Hand) {
+				return errors.New("invalid banish hand index")
+			}
+			banishCard := p.Hand[banishHandIndex]
+			banishDef, banishOK := gameplay.CardDefinitionByID(banishCard.CardID)
+			if !banishOK || banishDef.Type != gameplay.CardTypePower {
+				return errors.New("disruption reaction cost requires a Power card to be banished")
+			}
+			// Banish the Power card before consuming the Disruption card. If the banished
+			// card sits before the Disruption card in hand, the Disruption card shifts down.
+			if _, err := e.State.BanishCardFromHand(pid, banishHandIndex); err != nil {
+				return err
+			}
+			if banishHandIndex < handIndex {
+				handIndex--
 			}
 		}
 	}

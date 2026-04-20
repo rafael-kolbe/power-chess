@@ -813,7 +813,11 @@ func (c *Client) handleQueueReaction(env Envelope) error {
 			return errDuplicateRequest
 		}
 		_, prevStack, _ := c.room.Engine.ReactionWindowSnapshot()
-		if err := c.room.Engine.QueueReactionCard(c.playerID, p.HandIndex, target); err != nil {
+		banishIdx := -1
+		if p.BanishHandIndex != nil {
+			banishIdx = *p.BanishHandIndex
+		}
+		if err := c.room.Engine.QueueReactionCard(c.playerID, p.HandIndex, banishIdx, target); err != nil {
 			return err
 		}
 		now := time.Now()
