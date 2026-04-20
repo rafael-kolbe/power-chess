@@ -182,8 +182,10 @@ func (e *Engine) ActivateCardWithTargets(pid gameplay.PlayerID, handIndex int, t
 	// While a reaction window is open, plays resolve through the reaction stack (including the
 	// actor's opponent on ignite_reaction), never through ignition activation — ActivateCard on
 	// MatchState requires CurrentTurn == pid, which is false for the responder.
+	// Disruption reactions require banishHandIndex >= 0 via QueueReactionCard directly; this
+	// path passes -1 (no banish) and is only reached for non-Disruption types in practice.
 	if e.ReactionWindow != nil && e.ReactionWindow.Open {
-		return e.QueueReactionCard(pid, handIndex, EffectTarget{})
+		return e.QueueReactionCard(pid, handIndex, -1, EffectTarget{})
 	}
 	if def.Type == gameplay.CardTypeDisruption {
 		return e.applyDisruptionOnOwnTurn(pid, handIndex)

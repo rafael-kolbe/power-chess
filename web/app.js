@@ -17,6 +17,14 @@ import {
      */
     let igniteTargetFlow = null;
     /**
+     * Two-step flow for Disruption cards played during an ignite_reaction window.
+     * Step 1: user selects the Disruption card → stored here, banish selection mode activates.
+     * Step 2: user selects a Power card from hand → queue_reaction sent with both handIndex and banishHandIndex.
+     * Null when not in banish selection mode.
+     * @type {{ handIndex: number } | null}
+     */
+    let disruptionBanishFlow = null;
+    /**
      * Keeps blue dotted targets until the matching `activate_card` is processed (success or fail).
      * @type {{ owner: string, cardId: string, pieces: { row: number, col: number }[] } | null}
      */
@@ -289,6 +297,7 @@ import {
             drawFromDeck: "DRAW",
             connectErrorPrefix: "Could not connect:",
             mulliganHint: "Tap cards to mark them red (they return to the deck). Confirm when ready.",
+            disruptionBanishHint: "Select a Power card from your hand to banish as the reaction cost. Press Esc to cancel.",
             mulliganConfirm: "Confirm mulligan",
             mulliganWaitingYou: "Waiting for you to confirm…",
             mulliganWaitingOpp: "Waiting for opponent…",
@@ -425,6 +434,7 @@ import {
             drawFromDeck: "Comprar",
             connectErrorPrefix: "Não foi possível conectar:",
             mulliganHint: "Toque nas cartas para marcar em vermelho (voltam ao deck). Confirme quando terminar.",
+            disruptionBanishHint: "Selecione uma carta Power da mão para banir como custo de reação. Pressione Esc para cancelar.",
             mulliganConfirm: "Confirmar mulligan",
             mulliganWaitingYou: "Aguardando sua confirmação…",
             mulliganWaitingOpp: "Aguardando o oponente…",
@@ -1235,6 +1245,13 @@ import {
                 pendingJoinAttempt = null;
                 const nextSnap = msg.payload;
                 lastSnapshot = nextSnap;
+                // Clear disruption banish flow if reaction window closed or changed.
+                if (disruptionBanishFlow !== null) {
+                    const rw = nextSnap?.reactionWindow;
+                    if (!rw?.open || rw?.trigger !== "ignite_reaction") {
+                        disruptionBanishFlow = null;
+                    }
+                }
                 maybeAdvanceIgniteTargetFlow(nextSnap);
                 maybeClearIgniteTargetFlow(nextSnap);
                 syncIgnitionBlueHoldFromSnapshot(nextSnap);
@@ -2055,6 +2072,8 @@ import {
         ignitionOpp: document.getElementById("ignitionOpp"),
         mulliganBar: document.getElementById("mulliganBar"),
         mulliganHint: document.getElementById("mulliganHint"),
+        disruptionBanishBar: document.getElementById("disruptionBanishBar"),
+        disruptionBanishHintEl: document.getElementById("disruptionBanishHint"),
         mulliganTimer: document.getElementById("mulliganTimer"),
         mulliganCounts: document.getElementById("mulliganCounts"),
         mulliganConfirmBtn: document.getElementById("mulliganConfirmBtn"),
@@ -3782,6 +3801,22 @@ import {
     function renderHandZone(self, opp) {
         renderOwnHand(pmEl.handSelf, self);
         renderOppHand(pmEl.handOpp, opp);
+        updateDisruptionBanishBar();
+    }
+
+    /**
+     * Shows or hides the disruption banish hint bar depending on whether banish selection mode is active.
+     */
+    function updateDisruptionBanishBar() {
+        const bar = pmEl.disruptionBanishBar;
+        const hint = pmEl.disruptionBanishHintEl;
+        if (!bar) return;
+        if (disruptionBanishFlow !== null) {
+            if (hint) hint.textContent = t("disruptionBanishHint");
+            bar.classList.remove("hidden");
+        } else {
+            bar.classList.add("hidden");
+        }
     }
 
     /**
@@ -3859,6 +3894,10 @@ import {
             const canActivate = !mulliganChoose && canActivateHandCard(snap, myPid, entry);
             wrap.classList.toggle("pm-hand-card-wrap--inactive", !canActivate);
             wrap.classList.toggle("pm-hand-card-wrap--mulligan-return", mulliganChoose && mulliganPick.has(i));
+            // Banish selection mode visual: highlight Power cards as targets, mark the pending Disruption card.
+            const inBanishMode = disruptionBanishFlow !== null && !mulliganChoose;
+            wrap.classList.toggle("pm-hand-card-wrap--banish-target", inBanishMode && canActivate);
+            wrap.classList.toggle("pm-hand-card-wrap--disruption-pending", inBanishMode && i === disruptionBanishFlow?.handIndex);
             if (mulliganChoose) {
                 wrap.addEventListener("click", (ev) => {
                     if (ev.target instanceof Element && ev.target.closest(".power-card__toggle")) return;
@@ -3866,6 +3905,17 @@ import {
                     ev.stopPropagation();
                     if (mulliganPick.has(i)) mulliganPick.delete(i);
                     else mulliganPick.add(i);
+                    if (lastSnapshot) renderPlaymat(lastSnapshot);
+                });
+            } else if (inBanishMode && canActivate) {
+                // During disruption banish selection, a click on any active (Power) card completes the banish.
+                wrap.addEventListener("click", (ev) => {
+                    if (ev.target instanceof Element && ev.target.closest(".power-card__toggle")) return;
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    const snapAtClick = lastSnapshot;
+                    sendHandCardAction(snapAtClick, i);
+                    // Re-render to clear banish mode visuals while waiting for server snapshot.
                     if (lastSnapshot) renderPlaymat(lastSnapshot);
                 });
             }
@@ -3938,6 +3988,11 @@ import {
 
     function canActivateHandCard(snapshot, pid, handEntry) {
         if (!snapshot || !pid || !handEntry) return false;
+        // During disruption banish selection, only Power cards are valid banish targets.
+        if (disruptionBanishFlow !== null) {
+            const cardType = String(getCardDef(handEntry?.cardId)?.type || "").toLowerCase();
+            return cardType === "power";
+        }
         if (isOwnIgnitionOccupied(snapshot, pid)) {
             return false;
         }
@@ -3958,7 +4013,39 @@ import {
 
     function sendHandCardAction(snapshot, handIndex) {
         if (!isGameplayInputOpen()) return;
+
+        // Step 2 of disruption banish flow: user selected a Power card to banish.
+        if (disruptionBanishFlow !== null) {
+            const self = hudForSeat(snapshot, playerEl.value);
+            const hand = self?.hand || [];
+            const entry = hand[handIndex];
+            const cardType = String(getCardDef(entry?.cardId)?.type || "").toLowerCase();
+            if (cardType === "power") {
+                const disruptionIdx = disruptionBanishFlow.handIndex;
+                disruptionBanishFlow = null;
+                send("queue_reaction", { handIndex: disruptionIdx, banishHandIndex: handIndex });
+            } else {
+                // Clicked non-Power card: cancel banish selection.
+                disruptionBanishFlow = null;
+                if (lastSnapshot) renderPlaymat(lastSnapshot);
+            }
+            return;
+        }
+
         if (isReactionWindowOpen(snapshot)) {
+            const self = hudForSeat(snapshot, playerEl.value);
+            const hand = self?.hand || [];
+            const entry = hand[handIndex];
+            const cardType = String(getCardDef(entry?.cardId)?.type || "").toLowerCase();
+            const rw = snapshot?.reactionWindow || {};
+            const isFirstIgniteSlot = rw.trigger === "ignite_reaction" && Number(rw.stackSize || 0) === 0;
+
+            if (cardType === "disruption" && isFirstIgniteSlot) {
+                // Step 1: enter banish selection mode — do not send yet.
+                disruptionBanishFlow = { handIndex };
+                return; // finishPointer handles DOM restore + re-render
+            }
+
             send("queue_reaction", { handIndex });
             return;
         }
@@ -4323,28 +4410,40 @@ import {
                 const droppedId = String(droppedEntry?.cardId || "");
                 const droppedType = String(getCardDef(droppedId)?.type || "").toLowerCase();
                 sendHandCardAction(lastSnapshot, idx);
-                if (pending.cardEl && pending.wrapEl) {
-                    const card = pending.cardEl;
-                    const wrap = pending.wrapEl;
-                    card.classList.remove("power-card--hand-dragging");
-                    wrap.classList.remove("pm-hand-card-wrap--dragging");
-                    wrap.style.minHeight = "";
-                    if (card.parentNode === document.body) {
-                        card.remove();
+                const enteredBanishMode = disruptionBanishFlow !== null;
+                if (enteredBanishMode) {
+                    // Banish selection mode entered: restore the dragged card to its slot instead of removing it.
+                    // finishPointer will re-render below (after clearDragChrome) to show the banish mode visual.
+                    resetHandDragVisual(pending);
+                } else {
+                    if (pending.cardEl && pending.wrapEl) {
+                        const card = pending.cardEl;
+                        const wrap = pending.wrapEl;
+                        card.classList.remove("power-card--hand-dragging");
+                        wrap.classList.remove("pm-hand-card-wrap--dragging");
+                        wrap.style.minHeight = "";
+                        if (card.parentNode === document.body) {
+                            card.remove();
+                        }
+                    }
+                    // Only skip re-render for own-turn disruption (where the card legitimately moves to ignition).
+                    // In reaction windows, always re-render so the hand state is consistent.
+                    const skipStalePlaymat = droppedType === "disruption" && !lastSnapshot?.reactionWindow?.open;
+                    if (lastSnapshot && !skipStalePlaymat) {
+                        renderPlaymat(lastSnapshot);
                     }
                 }
-                // Replaying lastSnapshot before state_snapshot arrives puts the dropped card back in the hand.
-                // Disruption now uses the ignition slot server-side; skip stale full playmat until snapshot.
-                const skipStalePlaymat = droppedType === "disruption";
-                if (lastSnapshot && !skipStalePlaymat) {
+                clearDragChrome();
+                pending = null;
+                if (enteredBanishMode && lastSnapshot) {
                     renderPlaymat(lastSnapshot);
                 }
             } else {
                 // Restore the hand card DOM when not committing to ignition (clear position:fixed).
                 resetHandDragVisual(pending);
+                clearDragChrome();
+                pending = null;
             }
-            clearDragChrome();
-            pending = null;
         }
 
         stack.addEventListener("pointerup", finishPointer);
@@ -4399,6 +4498,14 @@ import {
     }
 
     setupIgnitionDropTarget();
+
+    // Cancel disruption banish selection mode on Escape.
+    document.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape" && disruptionBanishFlow !== null) {
+            disruptionBanishFlow = null;
+            if (lastSnapshot) renderPlaymat(lastSnapshot);
+        }
+    });
 
     // Prevent cards from being dropped anywhere outside the game shell.
     document.addEventListener("dragover", (ev) => {

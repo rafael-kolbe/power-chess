@@ -1,3 +1,5 @@
+> **Disruption type rule (applies to all orange cards):** When played as a response during the opponent's ignition window (`ignite_reaction`), the player must banish 1 Power card from their hand as an additional cost. When played on the player's own turn (targeting a card already in the opponent's ignition slot from a previous turn), no extra cost is required.
+
 # Knight Touch
 ## Type: Power
 ## Description
@@ -368,24 +370,3 @@ This card can only be activated if you have a card in your ignition slot. Target
 3. You activate "Save It For Later" as retribution.
 4. The "Double Turn" card is moved back to your hand and you gain 6 mana.
 ```
-
----
-
-# Card Type Reference
-
-## Disruption Cards
-
-**Color:** Orange
-
-**Activation condition:** The opponent must have a card in their ignition slot.
-
-**When can they be played?**
-
-- On your own turn (normal activation, like a Power card), as long as the opponent has a card in their ignition slot.
-- As a reaction during any open ignite_reaction window, as long as the opponent has a card in their ignition slot.
-
-**Restrictions:**
-
-- Cannot be used as a response to a Counter card in a reaction chain.
-- Cannot be played if the opponent's ignition slot is empty.
-

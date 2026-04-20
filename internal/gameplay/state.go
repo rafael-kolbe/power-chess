@@ -316,6 +316,31 @@ func (s *MatchState) ConsumeCardFromHand(pid PlayerID, handIndex int) (CardInsta
 	return card, nil
 }
 
+// BanishCardFromHand removes a Power card at handIndex from the player's hand and adds it to their
+// Banished zone. It is used exclusively as the additional ignition cost for playing a Disruption
+// card during a reaction window (see disruption type rules in PROJECT.md). Only Power cards are
+// accepted as the banish target.
+func (s *MatchState) BanishCardFromHand(pid PlayerID, handIndex int) (CardInstance, error) {
+	p := s.Players[pid]
+	if p == nil {
+		return CardInstance{}, errors.New("unknown player")
+	}
+	if handIndex < 0 || handIndex >= len(p.Hand) {
+		return CardInstance{}, errors.New("invalid hand index for disruption banish cost")
+	}
+	card := p.Hand[handIndex]
+	def, ok := CardDefinitionByID(card.CardID)
+	if !ok {
+		return CardInstance{}, errors.New("unknown card definition")
+	}
+	if def.Type != CardTypePower {
+		return CardInstance{}, errors.New("disruption banish cost requires a Power card")
+	}
+	p.Hand = append(p.Hand[:handIndex], p.Hand[handIndex+1:]...)
+	p.Banished = append(p.Banished, card)
+	return card, nil
+}
+
 // SendCardToCooldown pushes a card into cooldown tracking, or routes it immediately when
 // Cooldown is zero: Continuous cards are banished; other types return to the deck (see PROJECT.md).
 func (s *MatchState) SendCardToCooldown(pid PlayerID, card CardInstance) {
