@@ -72,7 +72,7 @@ Gain 4 mana.
 ## Description
 Swap positions of one piece you control with one piece your opponent controls up to 2 squares apart, except the king.
 ## Cost: 6
-## Ignition: 1
+## Ignition: 0
 ## Cooldown: 6
 ## Targets: 0
 ## Effect duration: 0
