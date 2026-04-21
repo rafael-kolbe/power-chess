@@ -25,8 +25,13 @@
 - Swap positions of one piece you control with one piece your opponent controls up to 2 squares apart, except the king.
 
 ### Mind Control
-- **Custo:** 7 | **Ignição:** 2 | **Recarga:** 10 | **Alvos:** 0 | **Duração:** 0
-- Target a piece your opponent controls, except the king or a queen, and take control of it for three turns. If the piece is captured, it goes to your opponent's captures.
+- **Custo:** 7 | **Ignição:** 2 | **Recarga:** 10 | **Alvos:** 1 | **Duração:** 3
+- Target a piece your opponent controls, except the king or a queen, and take control of it for three turns.
+- Notas operacionais:
+  - Enquanto o efeito durar, a peça controlada muda para a cor do controlador e pode ser movida normalmente por esse jogador.
+  - O contador de duração decrementa no fim do turno; ao expirar, a peça volta para a cor original.
+  - Se o alvo for peão e promover durante o efeito, continua promovido ao retornar para o dono original.
+  - Se o alvo for removido antes da ativação (ignição ainda > 0) ou a ativação for negada, a ativação conclui em falha.
 
 ### Zip Line
 - **Custo:** 4 | **Ignição:** 0 | **Recarga:** 4 | **Alvos:** 0 | **Duração:** 0

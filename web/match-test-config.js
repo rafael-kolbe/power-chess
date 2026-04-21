@@ -66,7 +66,7 @@ export const DEFAULT_DECK_20 = Object.freeze([
   "clairvoyance",
   "save-it-for-later",
   "retaliate",
-  "retaliate",
+  "mind-control",
   "mana-burn",
   "counterattack",
 ]);
@@ -82,7 +82,7 @@ export function buildMatchDebugFixturePayload() {
     test_environment: true,
     white: {
       deck: [...DEFAULT_DECK_20],
-      hand: ["piece-swap", "double-turn", "extinguish"],
+      hand: ["piece-swap", "mind-control", "extinguish"],
       mana: 8,
       maxMana: 10,
       energizedMana: 0,

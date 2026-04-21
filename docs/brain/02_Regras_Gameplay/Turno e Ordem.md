@@ -7,8 +7,8 @@
 1. **Início do turno** — +1 mana ao pool do jogador ativo (respeitando máximo).
 2. **Tick de ignição** — contador da carta no slot de ignição −1; se chegar a 0, ativação do efeito.
 3. **Tick de recarga** — contador de cada carta na pilha de recarga −1; ao chegar a 0, volta ao deck.
-4. **Janela de ação** — jogador ativo pode: comprar cartas, ignitar Power/Continuous.
-5. **Reação a ignição** — oponente pode Retribution (sempre) ou Counter (só se `MaybeCaptureAttemptOnIgnition` = true).
+4. **Janela de ação** — jogador ativo pode: comprar cartas, ignitar Power/Continuous e jogar Disruption no próprio turno (somente com alvo válido na ignição do oponente).
+5. **Reação a ignição** — oponente pode Retribution (sempre), Disruption (com custo adicional de banir 1 Power da mão) e Counter (só se `MaybeCaptureAttemptOnIgnition` = true).
 6. **Movimento de peça** no xadrez.
 7. **Tentativa de captura** — abre `capture_attempt`; oponente pode reagir com Counter.
 8. **Peça capturada** (ou não, após efeitos) → zona Captura.
@@ -34,6 +34,7 @@
 - Ignição 0: resolve no mesmo snapshot/turno após fechar a janela de reação.
 - Múltiplas ignições possíveis se houver mana e slot livre (exceto comportamentos especiais).
 - A zona de ignição **ocupada** bloqueia novas ignições do mesmo jogador (salvo Save It For Later).
+- `effect_duration` de buffs/debuffs decrementa somente no **fim do turno do dono do efeito**.
 
 ## Links
 

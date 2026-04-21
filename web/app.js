@@ -5133,6 +5133,7 @@ import {
           }
         }
         const auraFxArr = code ? pieceActivePowerAuras(lastSnapshot, r, c) : [];
+        const hasMindControlDebuff = auraFxArr.some((e) => String(e.cardId || "") === "mind-control");
         // Double Turn grants an extra move to all pieces of the affected player.
         // The highlight is visible to both players: check piece color vs seat, not isOwnPiece.
         const dtSeat = lastSnapshot?.doubleTurnActiveFor; // "A" | "B" | undefined
@@ -5140,6 +5141,9 @@ import {
         const hasAura = auraFxArr.length > 0 || isDoubleTurnPiece;
         if (hasAura) {
           sq.classList.add("piece-effect-aura-power");
+        }
+        if (hasMindControlDebuff) {
+          sq.classList.add("piece-effect-outline-mind-control");
         }
         // Opponent can hover buffed enemy pieces too (same preview as owner); cursor: help via CSS.
         if (hasAura && code && !isOwnPiece(code)) {
@@ -5250,7 +5254,18 @@ import {
               igniteTargetFlow = null;
               return;
             }
-            // Default single-target handling (Knight Touch, Bishop Touch, Rook Touch).
+            if (igniteTargetFlow.cardId === "mind-control") {
+              const targetCode = sq.dataset.code || "";
+              if (!targetCode || isOwnPiece(targetCode)) return;
+              const p = parseCode(targetCode);
+              if (!p || p.type === "K" || p.type === "Q") return;
+              send("submit_ignition_targets", {
+                target_pieces: [{ row: r, col: c }],
+              });
+              igniteTargetFlow = null;
+              return;
+            }
+            // Default single-target handling (Knight/Bishop/Rook Touch).
             const clickedCodeForTarget = sq.dataset.code || "";
             if (!clickedCodeForTarget || !isOwnPiece(clickedCodeForTarget)) return;
             send("submit_ignition_targets", {

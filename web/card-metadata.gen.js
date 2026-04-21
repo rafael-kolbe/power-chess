@@ -67,10 +67,10 @@ globalThis.__POWER_CHESS_CARD_METADATA__ = [
     "mana": 7,
     "ignition": 2,
     "cooldown": 10,
-    "targets": 0,
-    "effectDuration": 0,
+    "targets": 1,
+    "effectDuration": 3,
     "name": "Mind Control",
-    "description": "Target a piece your opponent controls, except the king or a queen, and take control of it for three turns. If the piece is captured, it goes to your opponent's captures.",
+    "description": "Target a piece your opponent controls, except the king or a queen, and take control of it for three turns.",
     "example": "1. You activate \"Mind Control\".\n2. Ignition succeeds 2 turns later.\n3. Opponent controls a rook on a1.\n4. You take control of the rook on a1 for 3 turns."
   },
   {

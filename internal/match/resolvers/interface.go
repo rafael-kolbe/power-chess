@@ -4,9 +4,14 @@
 package resolvers
 
 import (
+	"errors"
 	"power-chess/internal/chess"
 	"power-chess/internal/gameplay"
 )
+
+// ErrEffectFailed reports a non-crashing card activation failure at resolve time.
+// The engine records `activate_card.success=false` and continues the match flow.
+var ErrEffectFailed = errors.New("card effect failed")
 
 // MovementGrantKind describes a movement-pattern extension granted by a resolved card effect.
 type MovementGrantKind string
@@ -42,6 +47,8 @@ type ResolverEngine interface {
 	OwnerColor(owner gameplay.PlayerID) chess.Color
 	// AddMovementGrant registers a movement-pattern grant for a piece.
 	AddMovementGrant(owner gameplay.PlayerID, cardID gameplay.CardID, target chess.Pos, kind MovementGrantKind, durationTurns int)
+	// AddMindControlEffect flips target control to owner and restores original color when duration ends.
+	AddMindControlEffect(owner gameplay.PlayerID, cardID gameplay.CardID, target chess.Pos, durationTurns int) error
 	// GrantManaFromCardEffect awards bonus mana to pid on successful effect resolution.
 	GrantManaFromCardEffect(pid gameplay.PlayerID, amount int)
 	// IncrementExtraMoves grants one additional chess move this turn to pid.

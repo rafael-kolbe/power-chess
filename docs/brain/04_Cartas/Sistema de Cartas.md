@@ -14,6 +14,8 @@
 | **Alvos** | Quantas peças precisam ser selecionadas |
 | **Duração do efeito** | Turnos que o efeito persiste (0 = instantâneo) |
 
+> Regra de contagem: `effect_duration` de buffs/debuffs decrementa apenas no **fim do turno do jogador dono do efeito**.
+
 ## Fluxo de vida da carta
 
 ```
