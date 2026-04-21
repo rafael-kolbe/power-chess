@@ -6,6 +6,9 @@ node_modules/
 # Match debug file logs (ADMIN_DEBUG_MATCH)
 logs/
 
+# Cursor agent debug session logs
+.cursor/debug-*.log
+
 # Local secrets (compose / env)
 .env
 .env.local

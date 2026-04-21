@@ -5,6 +5,7 @@ import (
 	matchresolvers "power-chess/internal/match/resolvers"
 	"power-chess/internal/match/resolvers/disruption"
 	"power-chess/internal/match/resolvers/power"
+	"power-chess/internal/match/resolvers/retribution"
 )
 
 // noopResolver applies no board or resource effects. Card **types** still drive reaction windows
@@ -33,5 +34,6 @@ func DefaultResolvers() map[gameplay.CardID]EffectResolver {
 	m[CardEnergyGain] = power.EnergyGainResolver{}
 	m[CardDoubleTurn] = power.DoubleTurnResolver{}
 	m[CardExtinguish] = disruption.ExtinguishResolver{}
+	m[CardManaBurn] = retribution.ManaBurnResolver{}
 	return m
 }

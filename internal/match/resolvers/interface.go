@@ -53,6 +53,12 @@ type ResolverEngine interface {
 	// Works regardless of whether the card was just ignited (reaction) or was already burning
 	// (initiator turn) — any resolver can call this to apply a negate effect.
 	MarkOpponentCardEffectNegated(opponentPID gameplay.PlayerID) error
+	// BurnManaFromOpponent drains amount mana from opponentPID's mana pools; regular mana is
+	// drained first, then the energized mana pool absorbs any remainder.
+	BurnManaFromOpponent(opponentPID gameplay.PlayerID, amount int)
+	// IgnitionCardCost returns the ManaCost of the card currently in pid's ignition slot,
+	// or 0 if the slot is unoccupied.
+	IgnitionCardCost(pid gameplay.PlayerID) int
 }
 
 // EffectResolver is the execution contract for card effects.

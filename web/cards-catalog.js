@@ -52,9 +52,9 @@ const PT = {
   "mana-burn": {
     name: "Queimadura de Mana",
     description:
-      "Alvo: uma carta ignitada do oponente. Queime x de mana do oponente, sendo x o custo de mana da carta alvo.",
+      "Queime x de mana do oponente. x é o custo de mana da carta no slot de ignição do oponente. Se o oponente não tiver mana suficiente, o excesso é queimado da pool de mana energizada.",
     example:
-      "1. O oponente ativa \"Toque do Cavalo\"\n2. Você ativa Queimadura de Mana como retribuição.\n3. Você queima 3 de mana do oponente."
+      "1. O oponente ativa \"Toque do Cavalo\" (custo: 3).\n2. Você ativa Queimadura de Mana como retribuição.\n3. O oponente tem 2 de mana: 2 de mana é queimado da pool de mana, 1 da pool de mana energizada."
   },
   "energy-gain": {
     name: "Ganho de Energia",
