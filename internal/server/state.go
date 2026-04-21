@@ -386,6 +386,9 @@ func (r *RoomSession) shiftDeadlinesAfterClientFxHoldUnsafe(elapsed time.Duratio
 func (r *RoomSession) resetClientFxHoldUnsafe() {
 	r.clientFxHoldCount = 0
 	r.clientFxHoldStarted = time.Time{}
+	// If holds are torn down (disconnect/leave), apply any deferred mana burns so match state
+	// cannot strand burns waiting for a release that will never arrive.
+	r.Engine.FlushPendingManaBurns()
 }
 
 // flushClientFxHoldWallTimeUnsafe applies wall elapsed since the outermost hold began and clears

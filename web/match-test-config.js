@@ -49,7 +49,7 @@ export function matchTestAutoConfirmMulliganEnabled() {
  * @type {readonly string[]}
  */
 export const DEFAULT_DECK_20 = Object.freeze([
-  "energy-gain",
+  "piece-swap",
   "energy-gain",
   "energy-gain",
   "knight-touch",
@@ -82,7 +82,7 @@ export function buildMatchDebugFixturePayload() {
     test_environment: true,
     white: {
       deck: [...DEFAULT_DECK_20],
-      hand: ["energy-gain", "double-turn", "extinguish"],
+      hand: ["piece-swap", "double-turn", "extinguish"],
       mana: 8,
       maxMana: 10,
       energizedMana: 0,

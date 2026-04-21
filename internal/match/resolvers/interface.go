@@ -53,9 +53,10 @@ type ResolverEngine interface {
 	// Works regardless of whether the card was just ignited (reaction) or was already burning
 	// (initiator turn) — any resolver can call this to apply a negate effect.
 	MarkOpponentCardEffectNegated(opponentPID gameplay.PlayerID) error
-	// BurnManaFromOpponent drains amount mana from opponentPID's mana pools; regular mana is
-	// drained first, then the energized mana pool absorbs any remainder.
-	BurnManaFromOpponent(opponentPID gameplay.PlayerID, amount int)
+	// DeferManaBurn registers a mana-burn effect to be applied after the activation glow broadcast.
+	// The engine flushes all deferred burns on client_fx_release so the state snapshot with burned
+	// mana is delivered to clients only after the card-glow animation has completed.
+	DeferManaBurn(opponentPID gameplay.PlayerID, amount int)
 	// IgnitionCardCost returns the ManaCost of the card currently in pid's ignition slot,
 	// or 0 if the slot is unoccupied.
 	IgnitionCardCost(pid gameplay.PlayerID) int

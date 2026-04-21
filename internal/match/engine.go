@@ -64,6 +64,16 @@ type Engine struct {
 	// turn; the room broadcasts that state, then calls FinishDisruptionSameTurnResolveIfPending so
 	// clients can run activation glow on the ignition slot before the card moves to cooldown.
 	disruptionSameTurnGlowPID gameplay.PlayerID
+	// pendingManaBurns holds mana-burn effects deferred until after the activation glow is sent to
+	// clients. The room flushes these on client_fx_release so the mana state update reaches the
+	// client only after the card-glow animation completes, keeping visual and state in sync.
+	pendingManaBurns []pendingManaBurn
+}
+
+// pendingManaBurn is a deferred mana-burn effect (applied after the activation glow broadcast).
+type pendingManaBurn struct {
+	pid    gameplay.PlayerID
+	amount int
 }
 
 // ActivationFXEvent is one ignition resolution for client animations (glow + fly to cooldown).
@@ -200,6 +210,11 @@ func (e *Engine) ActivateCardWithTargets(pid gameplay.PlayerID, handIndex int, t
 	}
 	// Cards that require piece targets: first ignite_card may move hand→ignition only; targets follow via SubmitIgnitionTargets.
 	if def.Targets > 0 && len(targetPieces) == 0 {
+		// Pre-ignition check: refuse if the card cannot possibly resolve (no valid targets exist).
+		// This prevents the player from getting stuck in the target-selection UI with nothing to pick.
+		if def.ID == CardPieceSwap && !e.hasAnyPieceSwapTarget(pid) {
+			return errors.New("no valid piece swap targets: no opponent piece within range of any of your pieces")
+		}
 		if err := e.State.ActivateCard(pid, handIndex); err != nil {
 			return err
 		}
@@ -365,6 +380,46 @@ func (e *Engine) validatePieceSwapTargets(pid gameplay.PlayerID, targetPieces []
 		return errors.New("this swap would put your king in check")
 	}
 	return nil
+}
+
+// hasAnyPieceSwapTarget returns true if at least one valid Piece Swap pair exists for pid:
+// an own non-king piece and an opponent non-king piece within Chebyshev distance 2 such that
+// the swap would not put the activating player's own king in check.
+// Used as a pre-ignition guard to prevent players from being stuck with no selectable piece.
+func (e *Engine) hasAnyPieceSwapTarget(pid gameplay.PlayerID) bool {
+	playerColor := toColor(pid)
+	opponentColor := playerColor.Opponent()
+	for row := 0; row < 8; row++ {
+		for col := 0; col < 8; col++ {
+			pos1 := chess.Pos{Row: row, Col: col}
+			p1 := e.Chess.PieceAt(pos1)
+			if p1.IsEmpty() || p1.Color != playerColor || p1.Type == chess.King {
+				continue
+			}
+			for dr := -2; dr <= 2; dr++ {
+				for dc := -2; dc <= 2; dc++ {
+					if dr == 0 && dc == 0 {
+						continue
+					}
+					pos2 := chess.Pos{Row: row + dr, Col: col + dc}
+					if !pos2.InBounds() {
+						continue
+					}
+					p2 := e.Chess.PieceAt(pos2)
+					if p2.IsEmpty() || p2.Color != opponentColor || p2.Type == chess.King {
+						continue
+					}
+					g := e.Chess.Clone()
+					g.SetPiece(pos1, p2)
+					g.SetPiece(pos2, p1)
+					if !g.IsCheck(playerColor) {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 // IgnitionTargetSnapshot returns locked target metadata for reaction-window/snapshot rendering.
@@ -856,8 +911,32 @@ func (e *Engine) GrantManaFromCardEffect(pid gameplay.PlayerID, amount int) {
 
 // BurnManaFromOpponent implements matchresolvers.ResolverEngine.
 // Drains amount mana from opponentPID's regular mana pool, then from the energized pool.
+// Deprecated for card resolvers: use DeferManaBurn so the state change is broadcast after the
+// activation glow (see client_fx_release flow). Kept for direct engine use only.
 func (e *Engine) BurnManaFromOpponent(opponentPID gameplay.PlayerID, amount int) {
 	e.State.BurnMana(opponentPID, amount)
+}
+
+// DeferManaBurn implements matchresolvers.ResolverEngine.
+// Registers a mana burn to be applied after the activation glow broadcast reaches the client.
+// The engine flushes all pending burns on client_fx_release, ensuring the state snapshot with
+// the burned mana is delivered only after the card-glow animation completes.
+func (e *Engine) DeferManaBurn(opponentPID gameplay.PlayerID, amount int) {
+	e.pendingManaBurns = append(e.pendingManaBurns, pendingManaBurn{pid: opponentPID, amount: amount})
+}
+
+// HasPendingManaBurns reports whether there are deferred mana burns waiting to be applied.
+func (e *Engine) HasPendingManaBurns() bool {
+	return len(e.pendingManaBurns) > 0
+}
+
+// FlushPendingManaBurns applies all deferred mana burns and clears the queue. Called by the room
+// on client_fx_release so the effect resolves after the activation glow animation.
+func (e *Engine) FlushPendingManaBurns() {
+	for _, b := range e.pendingManaBurns {
+		e.State.BurnMana(b.pid, b.amount)
+	}
+	e.pendingManaBurns = nil
 }
 
 // SwapPieces implements matchresolvers.ResolverEngine.

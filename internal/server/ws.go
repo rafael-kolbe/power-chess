@@ -351,6 +351,12 @@ func (c *Client) handleClientFxRelease(env Envelope) error {
 	now := time.Now().UTC()
 	if err := c.room.Execute(func() error {
 		c.room.endClientFxHoldUnsafe(now)
+		// Flush deferred mana burns only when no client still holds FX (room-wide depth==0).
+		// Each connected client sends hold for the same activation; flushing on the first
+		// release would broadcast post-burn mana while the other seat is still animating.
+		if c.room.clientFxHoldCount == 0 {
+			c.room.Engine.FlushPendingManaBurns()
+		}
 		return nil
 	}); err != nil {
 		return err

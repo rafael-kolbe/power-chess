@@ -326,15 +326,26 @@ func (e *Engine) ResolveReactionStack() error {
 	}
 	for e.reactions.Len() > 0 {
 		a, _ := e.reactions.Pop()
+		// Snapshot the deferred-effect queue depth before Apply so any effects registered by a
+		// failed activation can be discarded (see below).
+		prevBurnCount := len(e.pendingManaBurns)
 		negatesActivationOf, err := e.runWithNegationDetection(a.Owner, func() error {
 			return a.Resolver.Apply(e, a.Owner, a.Target)
 		})
 		if err != nil {
 			return err
 		}
-		// Resolvers may later report fail paths; until then successful Apply implies effect succeeded.
-		e.appendActivationFXNegating(a.Owner, a.Card.CardID, true, negatesActivationOf)
+		// success is always true for current reaction-stack card types (Retribution, Counter,
+		// Disruption). When a negation mechanic for reaction cards is added, update this flag
+		// and the deferred-effect rollback below will automatically apply.
+		success := true
+		e.appendActivationFXNegating(a.Owner, a.Card.CardID, success, negatesActivationOf)
 		e.State.SendCardToCooldown(a.Owner, a.Card)
+		if !success {
+			// Discard any deferred effects (e.g. mana burns) registered by this failed
+			// activation so they are not applied on client_fx_release.
+			e.pendingManaBurns = e.pendingManaBurns[:prevBurnCount]
+		}
 	}
 	if e.pendingMove != nil {
 		pm := *e.pendingMove
