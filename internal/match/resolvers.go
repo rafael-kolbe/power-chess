@@ -34,6 +34,7 @@ func DefaultResolvers() map[gameplay.CardID]EffectResolver {
 	m[CardEnergyGain] = power.EnergyGainResolver{}
 	m[CardDoubleTurn] = power.DoubleTurnResolver{}
 	m[CardPieceSwap] = power.PieceSwapResolver{}
+	m[CardMindControl] = power.MindControlResolver{}
 	m[CardExtinguish] = disruption.ExtinguishResolver{}
 	m[CardManaBurn] = retribution.ManaBurnResolver{}
 	return m

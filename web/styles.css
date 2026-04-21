@@ -866,6 +866,16 @@ button:disabled {
     0 0 10px 2px rgb(86 214 132 / 40%);
 }
 
+.sq.piece-effect-outline-mind-control::before {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border: 2px solid rgb(173 96 255 / 95%);
+  border-radius: 6px;
+  box-shadow: 0 0 8px 1px rgb(173 96 255 / 40%);
+  pointer-events: none;
+}
+
 /* Turns remaining for on-board card effects (effect_duration); bottom-right of square. */
 .sq .sq-effect-turn-badge {
   position: absolute;

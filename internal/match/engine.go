@@ -27,6 +27,7 @@ const (
 	CardKnightTouch    gameplay.CardID = "knight-touch"
 	CardRookTouch      gameplay.CardID = "rook-touch"
 	CardBishopTouch    gameplay.CardID = "bishop-touch"
+	CardMindControl    gameplay.CardID = "mind-control"
 	CardEnergyGain     gameplay.CardID = "energy-gain"
 	CardDoubleTurn     gameplay.CardID = "double-turn"
 	CardStopRightThere gameplay.CardID = "stop-right-there"
@@ -50,6 +51,8 @@ type Engine struct {
 	pendingActivationFX []ActivationFXEvent
 	// movementGrants stores active movement modifiers granted by resolved card effects.
 	movementGrants []MovementGrant
+	// mindControlEffects stores temporary enemy-piece control effects.
+	mindControlEffects []MindControlEffect
 	// ignitionTargets stores locked piece targets for the currently ignited card owner.
 	ignitionTargets map[gameplay.PlayerID][]chess.Pos
 	// ignitionTargetCard stores which card owns ignitionTargets for each seat.
@@ -211,6 +214,9 @@ func (e *Engine) ActivateCardWithTargets(pid gameplay.PlayerID, handIndex int, t
 		if def.ID == CardPieceSwap && !e.hasAnyPieceSwapTarget(pid) {
 			return errors.New("no valid piece swap targets: no opponent piece within range of any of your pieces")
 		}
+		if def.ID == CardMindControl && !e.hasAnyMindControlTarget(pid) {
+			return errors.New("no valid mind control targets: opponent has no non-king/non-queen piece")
+		}
 		if err := e.State.ActivateCard(pid, handIndex); err != nil {
 			return err
 		}
@@ -302,6 +308,9 @@ func (e *Engine) validateIgnitionTargetPieces(pid gameplay.PlayerID, cardID game
 	if cardID == CardPieceSwap {
 		return e.validatePieceSwapTargets(pid, targetPieces)
 	}
+	if cardID == CardMindControl {
+		return e.validateMindControlTarget(pid, targetPieces[0])
+	}
 	playerColor := toColor(pid)
 	for _, pos := range targetPieces {
 		if pos.Row < 0 || pos.Row > 7 || pos.Col < 0 || pos.Col > 7 {
@@ -316,6 +325,43 @@ func (e *Engine) validateIgnitionTargetPieces(pid gameplay.PlayerID, cardID game
 		}
 	}
 	return nil
+}
+
+// validateMindControlTarget validates one opponent piece target for Mind Control.
+func (e *Engine) validateMindControlTarget(pid gameplay.PlayerID, target chess.Pos) error {
+	if !target.InBounds() {
+		return errors.New("target piece out of board bounds")
+	}
+	playerColor := toColor(pid)
+	piece := e.Chess.PieceAt(target)
+	if piece.IsEmpty() {
+		return errors.New("target piece square is empty")
+	}
+	if piece.Color == playerColor {
+		return errors.New("target piece must belong to the opponent")
+	}
+	if piece.Type == chess.King || piece.Type == chess.Queen {
+		return errors.New("mind control cannot target king or queen")
+	}
+	return nil
+}
+
+// hasAnyMindControlTarget returns true if the opponent has any non-king/non-queen piece.
+func (e *Engine) hasAnyMindControlTarget(pid gameplay.PlayerID) bool {
+	playerColor := toColor(pid)
+	for row := 0; row < 8; row++ {
+		for col := 0; col < 8; col++ {
+			p := e.Chess.PieceAt(chess.Pos{Row: row, Col: col})
+			if p.IsEmpty() || p.Color == playerColor {
+				continue
+			}
+			if p.Type == chess.King || p.Type == chess.Queen {
+				continue
+			}
+			return true
+		}
+	}
+	return false
 }
 
 // validatePieceSwapTargets validates the two board positions required by Piece Swap:
@@ -574,7 +620,14 @@ func (e *Engine) handleResolvedEffect(ev *gameplay.ResolvedIgnitionEvent) error 
 		})
 		return nil
 	}
-	return resolver.Apply(e, ev.Owner, EffectTarget{})
+	if err := resolver.Apply(e, ev.Owner, EffectTarget{}); err != nil {
+		if errors.Is(err, matchresolvers.ErrEffectFailed) {
+			ev.Success = false
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (e *Engine) processResolvedIgnitions() error {
@@ -637,6 +690,7 @@ func (e *Engine) ActivatePlayerSkill(pid gameplay.PlayerID) error {
 		return err
 	}
 	e.expireMovementGrantsAfterOwnerTurn(pid)
+	e.expireMindControlEffectsAfterOwnerTurn(pid)
 	delete(e.extraMovesRemaining, pid)
 	delete(e.doubleTurnEffectTurnsLeft, pid)
 	e.Chess.Turn = color.Opponent()
@@ -677,6 +731,7 @@ func pieceRefFromChessPiece(p chess.Piece) (gameplay.PieceRef, bool) {
 // It is used by normal non-capture flow and pending-move finalization.
 func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 	e.pruneStaleMovementGrants()
+	e.pruneStaleMindControlEffects()
 	captureForMana := e.isCaptureAttempt(pid, m)
 	var captured gameplay.PieceRef
 	haveCaptured := false
@@ -701,7 +756,11 @@ func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 	if err := e.applyAuthorizedMove(pid, m); err != nil {
 		return err
 	}
+	e.syncMindControlIgnitionLocksAfterMove(m)
 	e.advanceMovementGrantPosition(pid, m.From, m.To)
+	e.advanceMindControlPosition(pid, m.From, m.To)
+	e.pruneStaleMovementGrants()
+	e.pruneStaleMindControlEffects()
 	if haveCaptured {
 		e.State.AddToGraveyard(pid, captured)
 	}
@@ -717,6 +776,7 @@ func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 		return nil
 	}
 	e.expireMovementGrantsAfterOwnerTurn(pid)
+	e.expireMindControlEffectsAfterOwnerTurn(pid)
 	if err := e.State.EndTurn(pid); err != nil {
 		return err
 	}
@@ -724,6 +784,29 @@ func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 		return err
 	}
 	return nil
+}
+
+// syncMindControlIgnitionLocksAfterMove keeps locked target coordinates aligned while Mind Control
+// is still burning. If the locked piece is captured, the lock is dropped so activation fails.
+func (e *Engine) syncMindControlIgnitionLocksAfterMove(m chess.Move) {
+	for owner, cardID := range e.ignitionTargetCard {
+		if cardID != CardMindControl {
+			continue
+		}
+		targets := e.ignitionTargets[owner]
+		if len(targets) != 1 {
+			continue
+		}
+		target := targets[0]
+		if target == m.From {
+			e.ignitionTargets[owner][0] = m.To
+			continue
+		}
+		if target == m.To {
+			e.ignitionTargets[owner] = nil
+			delete(e.ignitionTargetCard, owner)
+		}
+	}
 }
 
 // applyAuthorizedMove executes a move through normal chess legality, or through pseudo-legal
@@ -876,6 +959,21 @@ func (e *Engine) AddMovementGrant(owner gameplay.PlayerID, cardID gameplay.CardI
 		Target:              target,
 		Kind:                kind,
 		RemainingOwnerTurns: durationTurns,
+	})
+}
+
+// AddMindControlEffect implements matchresolvers.ResolverEngine.
+func (e *Engine) AddMindControlEffect(owner gameplay.PlayerID, cardID gameplay.CardID, target chess.Pos, durationTurns int) error {
+	p := e.Chess.PieceAt(target)
+	if p.IsEmpty() {
+		return matchresolvers.ErrEffectFailed
+	}
+	return e.addMindControlEffect(MindControlEffect{
+		Owner:             owner,
+		SourceCardID:      cardID,
+		Target:            target,
+		OriginalColor:     p.Color,
+		RemainingTurnEnds: durationTurns,
 	})
 }
 

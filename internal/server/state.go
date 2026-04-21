@@ -560,6 +560,18 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 			TurnsRemaining: g.RemainingOwnerTurns,
 		})
 	}
+	for _, mc := range r.Engine.CloneMindControlEffects() {
+		if mc.RemainingTurnEnds <= 0 {
+			continue
+		}
+		payload.ActivePieceEffects = append(payload.ActivePieceEffects, ActivePieceEffectSnapshot{
+			Owner:          string(mc.Owner),
+			CardID:         string(mc.SourceCardID),
+			Row:            mc.Target.Row,
+			Col:            mc.Target.Col,
+			TurnsRemaining: mc.RemainingTurnEnds,
+		})
+	}
 	if dtPID := r.Engine.DoubleTurnActiveFor(); dtPID != "" {
 		payload.DoubleTurnActiveFor = string(dtPID)
 		payload.DoubleTurnTurnsRemaining = r.Engine.DoubleTurnTurnsRemainingFor(dtPID)

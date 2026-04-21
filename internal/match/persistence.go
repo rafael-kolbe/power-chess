@@ -16,6 +16,7 @@ type PersistedEngineState struct {
 	ReactionStack       []PersistedReactionAction     `json:"reactionStack"`
 	PendingMove         *PendingMoveAction            `json:"pendingMove,omitempty"`
 	MovementGrants      []MovementGrant               `json:"movementGrants,omitempty"`
+	MindControlEffects  []MindControlEffect           `json:"mindControlEffects,omitempty"`
 	IgnitionTargetLocks []PersistedIgnitionTargetLock `json:"ignitionTargetLocks,omitempty"`
 }
 
@@ -73,6 +74,7 @@ func (e *Engine) ExportState() PersistedEngineState {
 		out.PendingMove = &pm
 	}
 	out.MovementGrants = append(out.MovementGrants, e.movementGrants...)
+	out.MindControlEffects = append(out.MindControlEffects, e.mindControlEffects...)
 	for _, pid := range []gameplay.PlayerID{gameplay.PlayerA, gameplay.PlayerB} {
 		cardID, ok := e.ignitionTargetCard[pid]
 		if !ok {
@@ -107,6 +109,7 @@ func NewEngineFromState(snapshot PersistedEngineState) (*Engine, error) {
 		e.pendingMove = &pm
 	}
 	e.movementGrants = append([]MovementGrant(nil), snapshot.MovementGrants...)
+	e.mindControlEffects = append([]MindControlEffect(nil), snapshot.MindControlEffects...)
 	for _, pe := range snapshot.PendingEffects {
 		resolver, ok := e.resolvers[pe.CardID]
 		if !ok {
