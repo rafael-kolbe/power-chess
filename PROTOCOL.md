@@ -356,7 +356,7 @@ Atualiza a preferência do jogador para **reações em captura** (e futuras jane
 - `mode`: `off`, `on` ou `auto` (case-insensitive; valores desconhecidos tratados como `on`).
 - **`off`**: o servidor **não mantém** janela `capture_attempt` aberta só para pass — aplica a captura de seguida.
 - **`on`**: mantém a janela como hoje (oponente pode reagir mesmo sem carta jogável).
-- **`auto`**: o servidor só mantém a janela se o oponente tiver resposta identificável conforme o gatilho: em **`capture_attempt`**, pelo menos uma **Counter** na mão (regras económicas); em **`ignite_reaction`**, Retribution e/ou Counter conforme `eligibleTypes` (condições textuais das Counter em AUTO podem ser fase posterior).
+- **`auto`**: o servidor só mantém a janela se o oponente tiver resposta identificável conforme o gatilho: em **`capture_attempt`**, pelo menos uma **Counter** na mão (regras económicas); em **`ignite_reaction`**, Retribution e/ou Disruption conforme `eligibleTypes`, além de Counter quando aplicável (condições textuais das Counter em AUTO podem ser fase posterior).
 
 O estado atual vem em cada entrada de `players[].reactionMode` no `state_snapshot`.
 
@@ -389,6 +389,8 @@ Envia texto JSON (por exemplo um lote de eventos do navegador) para o **log do p
 ```json
 { "id": "req-7", "type": "resolve_reactions", "payload": {} }
 ```
+
+Confirma a resolução da cadeia atual. Só o **responder atual** da janela pode enviar com sucesso.
 
 ### `leave_match`
 
@@ -460,8 +462,8 @@ Payload: `white` e `black` são obrigatórios. Cada lado tem:
 
 ### Quem abre e quem responde (regra de produto)
 
-- **Abrem janela:** ignição de cartas **Power** e **Continuous** (o servidor abre `ignite_reaction` para o oponente quando aplicável); tentativa de **captura** no xadrez (inclui en passant) abre `capture_attempt` com movimento **pendente**. **Retribution não abre janela** (só entra como carta de resposta).
-- **Podem responder:** em **`capture_attempt`**, só **Counter** (consta em `eligibleTypes`). Em **`ignite_reaction`**, **Retribution** e/ou **Counter** conforme `eligibleTypes`; **Counter** na primeira resposta só quando o catálogo define `MaybeCaptureAttemptOnIgnition` na carta em ignição (hoje **false** para todas até efeitos de captura por ignição existirem).
+- **Abrem janela:** ignição de cartas **Power**, **Continuous** e **Disruption** (o servidor abre `ignite_reaction` para o oponente quando aplicável; para Disruption no turno próprio, requer alvo válido na ignição do oponente); **Retribution** não inicia jogada e só entra como resposta dentro de `ignite_reaction`; tentativa de **captura** no xadrez (inclui en passant) abre `capture_attempt` com movimento **pendente**.
+- **Podem responder:** em **`capture_attempt`**, só **Counter** (consta em `eligibleTypes`). Em **`ignite_reaction`**, **Retribution**, **Disruption** e/ou **Counter** conforme `eligibleTypes`; **Counter** na primeira resposta só quando o catálogo define `MaybeCaptureAttemptOnIgnition` na carta em ignição (hoje **false** para todas até efeitos de captura por ignição existirem).
 
 ### `capture_attempt`
 
@@ -469,15 +471,17 @@ Payload: `white` e `black` são obrigatórios. Cada lado tem:
 - A **primeira** resposta é do **oponente** ao atacante: **Counter** (somente).
 - Na cadeia: só **Counter** após **Counter**. Reações resolvem em **LIFO**.
 - Sem reações enfileiradas, `resolve_reactions` aplica a captura pendente.  
-- Timeout da janela de reação no servidor: **30 s** (por omissão na sala).  
+- Com reações enfileiradas, a resolução só começa após `resolve_reactions` do responder atual (ordem explícita da cadeia).  
+- Sem timeout automático de janela de reação no servidor; a resolução depende de ação explícita (reagir/confirmar).  
 - **Counterattack** e **Blockade**: validação e efeitos conforme regras do servidor (ver [Cards.md](Cards.md)).
 
 ### `ignite_reaction`
 
-- Ignição de **Power** ou **Continuous** quando o motor abre a janela: `reactionWindow.actor` = quem ignitou. A **primeira** resposta é do **oponente**: **Retribution** sempre que constar em `eligibleTypes`; **Counter** só quando `MaybeCaptureAttemptOnIgnition` for **true** no catálogo para a carta em ignição (efeitos ainda não aplicam capturas por carta; o campo existe para o futuro, ex. *Backstab*).
+- Ignição de **Power**, **Continuous** ou **Disruption** quando o motor abre a janela: `reactionWindow.actor` = quem ignitou. A **primeira** resposta é do **oponente**: **Retribution** e/ou **Disruption** sempre que constarem em `eligibleTypes`; **Counter** só quando `MaybeCaptureAttemptOnIgnition` for **true** no catálogo para a carta em ignição (efeitos ainda não aplicam capturas por carta; o campo existe para o futuro, ex. *Backstab*).
 - O modo `reactionMode` do oponente (`off`, ou `auto` sem carta elegível na mão) pode fazer o servidor resolver de imediato com pilha vazia.
 - Enquanto `ignite_reaction` estiver aberta, `submit_move` é rejeitado.
-- Cadeia: só **Retribution** após **Retribution**; só **Counter** após **Counter** (quando Counter for permitido na janela).
+- Cadeia: após **Retribution/Disruption**, só **Retribution** ou **Disruption**; após **Counter**, só **Counter** (quando Counter for permitido na janela).
+- Com pilha não vazia, a resolução só começa após `resolve_reactions` do responder atual.
 
 ---
 

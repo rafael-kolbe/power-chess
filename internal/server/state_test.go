@@ -453,13 +453,13 @@ func TestAutoFinalizeIgniteWhenNextCannotExtend(t *testing.T) {
 	}
 
 	rw, _, ok := room.Engine.ReactionWindowSnapshot()
-	if ok && rw.Open {
-		t.Fatalf("expected ignite chain auto-finalized when A cannot play Retribution, window still open %+v", rw)
+	if !ok || !rw.Open {
+		t.Fatalf("expected ignite chain to stay open until explicit resolve_reactions confirmation")
 	}
 }
 
-// TestIgniteChainFinalizesOnZeroReactionDeadline ensures the timeout loop re-runs finalize when the
-// first queued reaction cleared the deadline but finalize had not run yet (regression: full reactionTimeout wait and missing client resolve animation).
+// TestIgniteChainDoesNotAutoFinalizeOnZeroReactionDeadline ensures reaction timeout ticks no longer
+// close active chains automatically; explicit resolve_reactions confirmation is required.
 func TestIgniteChainFinalizesOnZeroReactionDeadline(t *testing.T) {
 	room, err := NewRoomSession("room-ignite-zero-deadline-finalize")
 	if err != nil {
@@ -506,18 +506,12 @@ func TestIgniteChainFinalizesOnZeroReactionDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveReactionTimeoutIfExpired: %v", err)
 	}
-	if !resolved {
-		t.Fatal("expected ignite chain finalized on zero reaction deadline without waiting wall clock")
+	if resolved {
+		t.Fatal("expected no auto-finalization from reaction timeout path")
 	}
 	rw, _, ok := room.Engine.ReactionWindowSnapshot()
-	if ok && rw.Open {
-		t.Fatalf("expected reaction window closed, got %+v", rw)
-	}
-	if !s.Players[gameplay.PlayerB].Ignition.Occupied {
-		t.Fatal("delayed ignition card should remain in slot after reaction resolve")
-	}
-	if s.Players[gameplay.PlayerB].Ignition.TurnsRemaining != 1 {
-		t.Fatalf("expected 1 burn turn remaining on energy-gain, got %d", s.Players[gameplay.PlayerB].Ignition.TurnsRemaining)
+	if !ok || !rw.Open {
+		t.Fatalf("expected reaction window to remain open, got %+v", rw)
 	}
 }
 

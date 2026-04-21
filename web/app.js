@@ -3321,6 +3321,41 @@ import {
     return null;
   }
 
+  function parseBarLabelValue(labelEl) {
+    const txt = String(labelEl?.textContent || "");
+    const m = txt.match(/^\s*(\d+)\s*\/\s*(\d+)\s*$/);
+    if (!m) return null;
+    return { cur: Number(m[1]), max: Number(m[2]) };
+  }
+
+  function manaBarPartsForPlayer(pid) {
+    if (pid === "A") return { manaFill: manaFillA, manaLabel: manaLabelA, enFill: energizedFillA, enLabel: energizedLabelA };
+    if (pid === "B") return { manaFill: manaFillB, manaLabel: manaLabelB, enFill: energizedFillB, enLabel: energizedLabelB };
+    return null;
+  }
+
+  /**
+   * Applies the mana burn delta to HUD bars immediately in the activation step so values
+   * update alongside the card glow (instead of waiting for the chain-end snapshot paint).
+   * @param {string} affectedPid
+   * @param {number} amount
+   */
+  function applyImmediateManaBurnHudDelta(affectedPid, amount) {
+    const burn = Math.max(0, Number(amount) || 0);
+    if (!burn) return;
+    const parts = manaBarPartsForPlayer(affectedPid);
+    if (!parts) return;
+    const manaNow = parseBarLabelValue(parts.manaLabel);
+    const enNow = parseBarLabelValue(parts.enLabel);
+    if (!manaNow || !enNow) return;
+    let rem = burn;
+    const manaAfter = Math.max(0, manaNow.cur - rem);
+    rem -= Math.max(0, manaNow.cur - manaAfter);
+    const enAfter = Math.max(0, enNow.cur - rem);
+    setBar(parts.manaFill, parts.manaLabel, manaAfter, manaNow.max);
+    setBar(parts.enFill, parts.enLabel, enAfter, enNow.max);
+  }
+
   /**
    * Short blue pulse on the mana bar when Energy Gain's effect activation succeeds (+4 mana).
    * Runs after activate_card (post-ignition burn), not when the card enters the ignition slot.
@@ -3479,6 +3514,11 @@ import {
           : success && cid === "mana-burn"
             ? playManaBarManaBurnGlow(oppPid)
             : Promise.resolve();
+      if (success && cid === "mana-burn") {
+        const oppHud = hudForSeat(layoutSnap, oppPid) || hudForSeat(lastSnapshot, oppPid);
+        const burnAmount = Number(getCardDef(String(oppHud?.ignitionCard || ""))?.mana || 0);
+        applyImmediateManaBurnHudDelta(oppPid, burnAmount);
+      }
       await Promise.all([glowPromise, manaBarPromise]);
       // If this activation negated another player's card activation, place the negate overlay
       // now — before the next activate_card event (the negated card's fail animation) runs.
@@ -4070,6 +4110,23 @@ import {
     return Number.isFinite(stackSize) && stackSize === 0;
   }
 
+  function currentReactionResponder(snapshot) {
+    const rw = snapshot?.reactionWindow || {};
+    if (!rw.open || !rw.actor) return "";
+    const stackSize = Number(rw.stackSize || 0);
+    if (!Number.isFinite(stackSize) || stackSize <= 0) return oppositeSeat(rw.actor);
+    if (Array.isArray(rw.stackCards) && rw.stackCards.length > 0) {
+      const top = rw.stackCards[rw.stackCards.length - 1];
+      if (top?.owner) return oppositeSeat(top.owner);
+    }
+    if (rw.stagedOwner) return oppositeSeat(rw.stagedOwner);
+    return oppositeSeat(rw.actor);
+  }
+
+  function oppositeSeat(pid) {
+    return pid === "A" ? "B" : pid === "B" ? "A" : "";
+  }
+
   function isReactionWindowOpen(snapshot) {
     return !!snapshot?.reactionWindow?.open;
   }
@@ -4089,7 +4146,10 @@ import {
   }
 
   function canPassReactionPriority(snapshot, pid) {
-    return isReactionFirstResponseTurn(snapshot, pid) || canAttackerPassAfterCounterQueued(snapshot, pid);
+    if (!snapshot || !pid) return false;
+    const responder = currentReactionResponder(snapshot);
+    if (!responder) return false;
+    return responder === pid;
   }
 
   /**
@@ -4127,6 +4187,7 @@ import {
       return false;
     }
     if (isReactionWindowOpen(snapshot)) {
+      if (!canPassReactionPriority(snapshot, pid)) return false;
       return cardMatchesReactionEligibleTypes(snapshot, handEntry);
     }
     if (isReactionFirstResponseTurn(snapshot, pid)) {

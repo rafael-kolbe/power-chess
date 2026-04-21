@@ -1,0 +1,51 @@
+# Power Chess — Obsidian Brain (Knowledge Vault)
+
+## Localização do vault
+
+O vault Obsidian do projeto está em **`docs/brain/`**. Trate-o como extensão viva da documentação e como base de contexto para qualquer tarefa.
+
+## Quando consultar o vault
+
+Antes de qualquer tarefa que envolva:
+- Regras de gameplay, cartas ou habilidades
+- Protocolo WebSocket
+- Arquitetura de backend / design de novos resolvers
+- Terminologia usada em código, UI ou testes
+- Decisões de produto ou priorização
+
+## Hierarquia de notas (do mais geral ao mais específico)
+
+1. **`docs/brain/00_Hub/AI_CONTEXT.md`** — ponto de entrada; leia primeiro em tarefas novas ou ambíguas
+2. **`docs/brain/99_Refs/Canon.md`** — regras imutáveis; consulte antes de qualquer decisão que possa contraditá-las
+3. **`docs/brain/99_Refs/Glossário.md`** — terminologia canônica; use estes termos no código e nos docs
+4. Notas de domínio específico (ver tabela abaixo)
+
+## Mapa rápido: tarefa → nota
+
+| Tarefa | Notas relevantes |
+|--------|-----------------|
+| Implementar nova carta | `04_Cartas/Catálogo de Cartas.md`, `06_Backend/Padrão de Resolvers.md`, `06_Backend/TDD e Testes.md` |
+| Regras de turno / mana | `02_Regras_Gameplay/Turno e Ordem.md`, `02_Regras_Gameplay/Mana e Energizada.md` |
+| Sistema de reações / janelas | `02_Regras_Gameplay/Janelas de Reação.md`, `02_Regras_Gameplay/Ignição, Ativação e Negação.md` |
+| Protocolo WS / eventos | `03_Protocolo_WS/Transporte e Envelope.md`, `03_Protocolo_WS/Eventos Servidor → Cliente.md`, `03_Protocolo_WS/Comandos Cliente → Servidor.md` |
+| Nova feature de UI | `01_Arquitetura/Visão Geral.md`, `03_Protocolo_WS/Transporte e Envelope.md` |
+| Habilidade de jogador | `05_Habilidades/Player Skills.md`, `02_Regras_Gameplay/Mana e Energizada.md` |
+| Testes | `06_Backend/TDD e Testes.md`, `06_Backend/Padrão de Resolvers.md` |
+| Desconexão / fim de partida | `02_Regras_Gameplay/Desconexão e Fim de Partida.md` |
+
+## Protocolo de atualização do vault
+
+Ao completar uma tarefa que mude comportamento de jogo, protocolo ou arquitetura:
+
+1. Atualize a nota relevante em `docs/brain/`.
+2. Atualize o documento fonte (`PROJECT.md`, `PROTOCOL.md`, `Cards.md`, `PlayerSkills.md`) conforme aplicável.
+3. Se a regra é imutável/decisão de produto: reflita também em `Canon.md`.
+4. Inclua a atualização das notas no mesmo commit que o código.
+
+## Invariantes que nunca devem ser violados (ver Canon.md para lista completa)
+
+- O rei nunca é capturado diretamente.
+- Servidor é a fonte de verdade para todo estado de partida.
+- TDD obrigatório no backend (red → green → refactor).
+- Texto canônico de cartas/habilidades: preserve exatamente.
+- Push em `main` ou `dev` só com autorização explícita por escrito.

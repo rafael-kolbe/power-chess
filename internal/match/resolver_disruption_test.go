@@ -86,21 +86,18 @@ func TestDisruptionOwnTurnActivationSucceeds(t *testing.T) {
 		t.Fatalf("expected mana to drop by %d, was %d, now %d", exDef.Cost, prevMana, state.Players[gameplay.PlayerB].Mana)
 	}
 
-	if !e.HasPendingDisruptionSameTurnResolve() {
-		t.Fatal("expected pending same-turn disruption resolve after placing in ignition")
-	}
 	if !state.Players[gameplay.PlayerB].Ignition.Occupied {
-		t.Fatal("expected PlayerB's ignition to hold Extinguish before finish")
+		t.Fatal("expected PlayerB's ignition to hold Extinguish before resolve")
 	}
 	if state.Players[gameplay.PlayerB].Ignition.Card.CardID != CardExtinguish {
 		t.Fatalf("expected ignition card %s, got %s", CardExtinguish, state.Players[gameplay.PlayerB].Ignition.Card.CardID)
 	}
-
-	if err := e.FinishDisruptionSameTurnResolveIfPending(); err != nil {
-		t.Fatalf("FinishDisruptionSameTurnResolveIfPending: %v", err)
+	if e.ReactionWindow == nil || !e.ReactionWindow.Open {
+		t.Fatal("expected ignite_reaction window to open for own-turn Disruption ignition")
 	}
-	if e.HasPendingDisruptionSameTurnResolve() {
-		t.Fatal("expected pending flag cleared after finish")
+
+	if err := e.ResolveReactionStack(); err != nil {
+		t.Fatalf("ResolveReactionStack: %v", err)
 	}
 	if state.Players[gameplay.PlayerB].Ignition.Occupied {
 		t.Fatal("expected PlayerB ignition cleared after resolution")

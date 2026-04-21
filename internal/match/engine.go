@@ -60,20 +60,9 @@ type Engine struct {
 	// independent of extraMovesRemaining. Decremented at end of the owner's turn so the
 	// highlight persists for the full turn even after both moves have been made.
 	doubleTurnEffectTurnsLeft map[gameplay.PlayerID]int
-	// disruptionSameTurnGlowPID is set after a Disruption card is placed in ignition on the owner's
-	// turn; the room broadcasts that state, then calls FinishDisruptionSameTurnResolveIfPending so
-	// clients can run activation glow on the ignition slot before the card moves to cooldown.
-	disruptionSameTurnGlowPID gameplay.PlayerID
-	// pendingManaBurns holds mana-burn effects deferred until after the activation glow is sent to
-	// clients. The room flushes these on client_fx_release so the mana state update reaches the
-	// client only after the card-glow animation completes, keeping visual and state in sync.
+	// pendingManaBurns is kept only for backward-compatibility with persisted/runtime paths that
+	// still call FlushPendingManaBurns; burns are now applied immediately on successful resolution.
 	pendingManaBurns []pendingManaBurn
-}
-
-// pendingManaBurn is a deferred mana-burn effect (applied after the activation glow broadcast).
-type pendingManaBurn struct {
-	pid    gameplay.PlayerID
-	amount int
 }
 
 // ActivationFXEvent is one ignition resolution for client animations (glow + fly to cooldown).
@@ -87,6 +76,13 @@ type ActivationFXEvent struct {
 	// but all future activation attempts for that card will resolve as failure.
 	// The client shows the negate overlay immediately after the glow, before subsequent events.
 	NegatesActivationOf gameplay.PlayerID
+}
+
+// pendingManaBurn is retained for backward compatibility with older persisted/runtime paths.
+// Mana burn effects are currently applied immediately and this queue remains unused.
+type pendingManaBurn struct {
+	pid    gameplay.PlayerID
+	amount int
 }
 
 // PullActivationFXEvents returns and clears pending activation broadcast events.
@@ -449,8 +445,8 @@ func (e *Engine) IgnitionTargetsForPlayer(pid gameplay.PlayerID) (gameplay.CardI
 	return cardID, copied, true
 }
 
-// maybeOpenIgniteReactionWindow opens ignite_reaction for the opponent when a Power or Continuous
-// card enters ignition (including ignition=0 cards, which now wait for response before resolving).
+// maybeOpenIgniteReactionWindow opens ignite_reaction for the opponent when a Power, Continuous,
+// Retribution, or Disruption card enters ignition (including ignition=0 cards).
 func (e *Engine) maybeOpenIgniteReactionWindow(activator gameplay.PlayerID) {
 	if e.ReactionWindow != nil && e.ReactionWindow.Open {
 		return
@@ -464,7 +460,10 @@ func (e *Engine) maybeOpenIgniteReactionWindow(activator gameplay.PlayerID) {
 	if !ok {
 		return
 	}
-	if cardDef.Type != gameplay.CardTypePower && cardDef.Type != gameplay.CardTypeContinuous {
+	if cardDef.Type != gameplay.CardTypePower &&
+		cardDef.Type != gameplay.CardTypeContinuous &&
+		cardDef.Type != gameplay.CardTypeRetribution &&
+		cardDef.Type != gameplay.CardTypeDisruption {
 		return
 	}
 	if cardDef.Targets > 0 {
@@ -543,10 +542,7 @@ func (e *Engine) reconcileTurnState() {
 }
 
 // applyDisruptionOnOwnTurn handles a Disruption card played on the owner's turn.
-// The card enters the ignition slot like other activations (hand → ignition). Disruption does not
-// open ignite_reaction (maybeOpenIgniteReactionWindow only applies to Power/Continuous). Catalog
-// Ignition 0 means the effect resolves on the same turn after a room-driven snapshot so clients
-// can show the card in the ignition zone during activate_card glow, then cooldown.
+// The card enters ignition like other card types and then opens ignite_reaction for the opponent.
 func (e *Engine) applyDisruptionOnOwnTurn(pid gameplay.PlayerID, handIndex int) error {
 	if e.State.CurrentTurn != pid {
 		return errors.New("not your turn")
@@ -558,29 +554,8 @@ func (e *Engine) applyDisruptionOnOwnTurn(pid gameplay.PlayerID, handIndex int) 
 	if err := e.State.ActivateCard(pid, handIndex); err != nil {
 		return err
 	}
-	e.disruptionSameTurnGlowPID = pid
+	e.maybeOpenIgniteReactionWindow(pid)
 	return nil
-}
-
-// HasPendingDisruptionSameTurnResolve reports whether the room should broadcast an intermediate
-// snapshot (card visible in ignition) before FinishDisruptionSameTurnResolveIfPending.
-func (e *Engine) HasPendingDisruptionSameTurnResolve() bool {
-	return e.disruptionSameTurnGlowPID != ""
-}
-
-// FinishDisruptionSameTurnResolveIfPending runs ignition resolution for a Disruption placed on the
-// current turn (success=true when no failure path exists). Clears pending state; safe to call when
-// no pending disruption (no-op).
-func (e *Engine) FinishDisruptionSameTurnResolveIfPending() error {
-	if e.disruptionSameTurnGlowPID == "" {
-		return nil
-	}
-	pid := e.disruptionSameTurnGlowPID
-	e.disruptionSameTurnGlowPID = ""
-	if err := e.State.ResolveIgnitionFor(pid, true); err != nil {
-		return err
-	}
-	return e.processResolvedIgnitions()
 }
 
 func (e *Engine) handleResolvedEffect(ev *gameplay.ResolvedIgnitionEvent) error {
@@ -911,31 +886,26 @@ func (e *Engine) GrantManaFromCardEffect(pid gameplay.PlayerID, amount int) {
 
 // BurnManaFromOpponent implements matchresolvers.ResolverEngine.
 // Drains amount mana from opponentPID's regular mana pool, then from the energized pool.
-// Deprecated for card resolvers: use DeferManaBurn so the state change is broadcast after the
-// activation glow (see client_fx_release flow). Kept for direct engine use only.
+// Kept for direct engine use and legacy resolver compatibility.
 func (e *Engine) BurnManaFromOpponent(opponentPID gameplay.PlayerID, amount int) {
 	e.State.BurnMana(opponentPID, amount)
 }
 
 // DeferManaBurn implements matchresolvers.ResolverEngine.
-// Registers a mana burn to be applied after the activation glow broadcast reaches the client.
-// The engine flushes all pending burns on client_fx_release, ensuring the state snapshot with
-// the burned mana is delivered only after the card-glow animation completes.
+// Applies mana burn immediately as part of the current successful resolution step.
+// The method name is preserved for compatibility with existing resolver code.
 func (e *Engine) DeferManaBurn(opponentPID gameplay.PlayerID, amount int) {
-	e.pendingManaBurns = append(e.pendingManaBurns, pendingManaBurn{pid: opponentPID, amount: amount})
+	e.State.BurnMana(opponentPID, amount)
 }
 
-// HasPendingManaBurns reports whether there are deferred mana burns waiting to be applied.
+// HasPendingManaBurns reports whether there are queued burns waiting to be applied.
+// Burns are currently applied immediately, so this always returns false.
 func (e *Engine) HasPendingManaBurns() bool {
-	return len(e.pendingManaBurns) > 0
+	return false
 }
 
-// FlushPendingManaBurns applies all deferred mana burns and clears the queue. Called by the room
-// on client_fx_release so the effect resolves after the activation glow animation.
+// FlushPendingManaBurns clears any legacy queued entries kept for compatibility.
 func (e *Engine) FlushPendingManaBurns() {
-	for _, b := range e.pendingManaBurns {
-		e.State.BurnMana(b.pid, b.amount)
-	}
 	e.pendingManaBurns = nil
 }
 

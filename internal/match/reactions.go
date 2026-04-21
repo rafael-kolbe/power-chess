@@ -133,11 +133,10 @@ func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, banishH
 		prev, _ := e.reactions.Top()
 		prevDef, ok := gameplay.CardDefinitionByID(prev.Card.CardID)
 		if e.ReactionWindow.Trigger == "ignite_reaction" {
-			if ok && prevDef.Type == gameplay.CardTypeRetribution && def.Type != gameplay.CardTypeRetribution {
-				return errors.New("only Retribution cards can respond to Retribution cards")
-			}
-			if ok && prevDef.Type == gameplay.CardTypePower && def.Type != gameplay.CardTypeRetribution {
-				return errors.New("only Retribution cards can respond after a Power reaction")
+			if ok && (prevDef.Type == gameplay.CardTypeRetribution || prevDef.Type == gameplay.CardTypeDisruption) {
+				if def.Type != gameplay.CardTypeRetribution && def.Type != gameplay.CardTypeDisruption {
+					return errors.New("only Retribution or Disruption cards can respond in this ignite chain")
+				}
 			}
 		}
 		if e.ReactionWindow.Trigger == "capture_attempt" {
@@ -326,9 +325,6 @@ func (e *Engine) ResolveReactionStack() error {
 	}
 	for e.reactions.Len() > 0 {
 		a, _ := e.reactions.Pop()
-		// Snapshot the deferred-effect queue depth before Apply so any effects registered by a
-		// failed activation can be discarded (see below).
-		prevBurnCount := len(e.pendingManaBurns)
 		negatesActivationOf, err := e.runWithNegationDetection(a.Owner, func() error {
 			return a.Resolver.Apply(e, a.Owner, a.Target)
 		})
@@ -341,11 +337,6 @@ func (e *Engine) ResolveReactionStack() error {
 		success := true
 		e.appendActivationFXNegating(a.Owner, a.Card.CardID, success, negatesActivationOf)
 		e.State.SendCardToCooldown(a.Owner, a.Card)
-		if !success {
-			// Discard any deferred effects (e.g. mana burns) registered by this failed
-			// activation so they are not applied on client_fx_release.
-			e.pendingManaBurns = e.pendingManaBurns[:prevBurnCount]
-		}
 	}
 	if e.pendingMove != nil {
 		pm := *e.pendingMove
