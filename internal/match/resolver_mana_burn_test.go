@@ -57,7 +57,7 @@ func TestManaBurnBurnsFromRegularManaOnly(t *testing.T) {
 	if err := e.ResolveReactionStack(); err != nil {
 		t.Fatalf("resolve reactions: %v", err)
 	}
-	// Simulate client_fx_release: flush deferred mana burns registered by ManaBurnResolver.
+	// Compatibility no-op (burns are applied immediately now).
 	e.FlushPendingManaBurns()
 
 	// Mana Burn burns 3 (ignition card ManaCost). All from regular pool: 5 → 2.
@@ -88,7 +88,7 @@ func TestManaBurnBurnsFromBothPools(t *testing.T) {
 	if err := e.ResolveReactionStack(); err != nil {
 		t.Fatalf("resolve reactions: %v", err)
 	}
-	// Simulate client_fx_release: flush deferred mana burns registered by ManaBurnResolver.
+	// Compatibility no-op (burns are applied immediately now).
 	e.FlushPendingManaBurns()
 
 	// Mana Burn burns 3. Regular pool is 0 → all 3 come from energized (3 → 0).
@@ -118,7 +118,7 @@ func TestManaBurnOverflowPartial(t *testing.T) {
 	if err := e.ResolveReactionStack(); err != nil {
 		t.Fatalf("resolve reactions: %v", err)
 	}
-	// Simulate client_fx_release: flush deferred mana burns registered by ManaBurnResolver.
+	// Compatibility no-op (burns are applied immediately now).
 	e.FlushPendingManaBurns()
 
 	// Burn 3: 1 from regular (→0), 2 from energized (3→1).
@@ -148,7 +148,7 @@ func TestManaBurnDoesNotAffectOwner(t *testing.T) {
 	if err := e.ResolveReactionStack(); err != nil {
 		t.Fatalf("resolve reactions: %v", err)
 	}
-	// Simulate client_fx_release: flush deferred mana burns registered by ManaBurnResolver.
+	// Compatibility no-op (burns are applied immediately now).
 	e.FlushPendingManaBurns()
 
 	// PlayerB's mana should be 5 (paid 1 activation cost, no further drain).

@@ -28,9 +28,9 @@
 
 - **Ignição**: ação de **mover uma carta para a zona de ignição** com a **intenção de ativar** seu efeito (custo e validações conforme regras do servidor).
 - **Ativação**: ação de **resolver o efeito** de uma carta que está na zona de ignição **após** o tempo indicado na carta (contador de ignição em turnos), quando o servidor aplica o efeito.
-- **Retribution Card**: só pode ser usada **como resposta** dentro de uma janela já aberta por outra regra (ver abaixo). **Retribution nunca abre** janela de resposta: não por ignição de Retribution, nem enquanto uma carta **apenas permanece** na ignição sem novo ato de ignição, nem pela **ativação/resolução da própria Retribution** (isso não concede, por si, nova janela ao oponente).
-- **Quem abre janela de resposta (servidor):** **Power** (sempre, ao ignitar no fluxo permitido), **Continuous** (sempre, nas mesmas condições), e **Counter** somente no contexto em que essa Counter está ligada a uma **tentativa de captura** (ex.: janela `capture_attempt` após movimento de captura no xadrez — o motor atual não ignita Counter pelo slot como Power).
-- **Quem pode responder nessa janela:** em **`capture_attempt`**, só **Counter**. Em **`ignite_reaction`**, **Retribution** e/ou **Counter** conforme `eligibleTypes`; **Counter** na primeira resposta só quando o catálogo marca `MaybeCaptureAttemptOnIgnition` na carta em ignição (hoje **false** para todas até efeitos de captura por ignição existirem).
+- **Retribution Card**: só pode ser usada como **resposta** (não inicia jogada a partir de janela vazia); quando jogada como resposta, participa do fluxo de `ignite_reaction`.
+- **Quem abre janela de resposta (servidor):** ignição de **Power**, **Continuous** e **Disruption** abre `ignite_reaction` (Disruption no turno próprio exige alvo válido na ignição do oponente); **Retribution** não inicia jogada e só entra como resposta; tentativa de captura abre `capture_attempt`; cadeia iniciada por Counter em `capture_attempt` continua restrita a Counter.
+- **Quem pode responder nessa janela:** em **`capture_attempt`**, só **Counter**. Em **`ignite_reaction`**, **Retribution** e **Disruption** conforme `eligibleTypes`; **Counter** na primeira resposta só quando o catálogo marca `MaybeCaptureAttemptOnIgnition` na carta em ignição (hoje **false** para todas até efeitos de captura por ignição existirem).
 - **Carta negada na ignição**: permanece **negada** durante **todos** os turnos em que continuar na zona de ignição; ao resolver, o efeito conclui **em falha** e a carta vai à **recarga**. **Continuous**: como o efeito se aplica ao longo dos turnos, se for **negada no momento da ignição**, permanece **negada durante todo** o período em que estiver no slot (efeito não “reativa” enquanto lá estiver).
 
 ### Toggle “Reactions” no header: OFF / ON / AUTO
@@ -40,14 +40,11 @@
 - **ON**: oponente recebe direito de reação nas ações elegíveis **mesmo** que não tenha resposta viável (mana/cartas/condições).
 - **AUTO**: direito de reação só se for **identificável** que o jogador pode responder: cartas na **mão**, **mana atual**, **regra de cópia na recarga** (não pode **ignitar** uma carta se já existir **cópia** dela na zona de recarga), e **tipo** de carta permitido na janela. As **condições textuais** das Counter cards no AUTO ficam para **implementação futura**; `TODO` em `internal/match/reactions.go`.
 
-### Tempo: sem relógio de turno, com relógio de response
+### Tempo: sem relógio de turno e sem timeout automático de reação
 
 - Não existe timer principal de turno: o jogador da vez não perde turno por tempo.
-- O timer de **response** continua valendo por assento durante janelas de reação.
-- Se o **tempo de reação** do oponente **acabar**: ele não pode mais reagir naquele turno (equivalente a OFF até virar o turno).
-- Ao iniciar novo turno, o budget de response de ambos os assentos volta ao valor base configurado.
-- Durante resolução de chain, timers de response ficam pausados.
-- **Observação (decisão de produto):** o servidor mantém budgets por assento para response (A.response e B.response) e esse saldo não reseta entre janelas do mesmo turno.
+- Não existe timer de reação automático no servidor para encerrar `ignite_reaction`/`capture_attempt`.
+- A janela permanece aberta até ação explícita (reagir ou confirmar resolução), respeitando o toggle de reactions.
 
 ### Ordem de turno (referência — alinhar ao motor)
 
@@ -55,7 +52,7 @@
 2. **Tick de ignição** — contador da carta no slot de ignição −1 (quando aplicável); se chegar a 0, **ativação** do efeito conforme regras.
 3. **Tick de recarga** — contador de cada carta na pilha de recarga −1; ao chegar a 0, a carta volta ao fundo do deck.
 4. **Janela de ação** (turno do jogador ativo): comprar cartas, **ignição** de **Power** / **Continuous** (e demais tipos permitidos), etc., conforme slot e regras.
-5. **Reação a ignição** (se toggle e elegibilidade permitirem): oponente pode **Retribution** (sempre na janela) e **Counter** só quando `MaybeCaptureAttemptOnIgnition` for **true** para a carta em ignição (efeitos ainda não implementados; catálogo mantém **false**). **Continuous**: janela ao oponente **só no turno em que a carta entra** no slot, não a cada tick seguinte enquanto permanecer lá. Cadeia **LIFO** onde aplicável.
+5. **Reação a ignição** (se toggle e elegibilidade permitirem): oponente pode **Retribution** e **Disruption**; **Counter** só quando `MaybeCaptureAttemptOnIgnition` for **true** para a carta em ignição (efeitos ainda não implementados; catálogo mantém **false**). **Continuous**: janela ao oponente **só no turno em que a carta entra** no slot, não a cada tick seguinte enquanto permanecer lá. Cadeia **LIFO** onde aplicável.
 6. **Movimento de peça** no xadrez.
 7. **Tentativa de captura**: ao **soltar** a peça sobre a captura **ou** ao **clicar** na peça alvo com intenção de capturar, abre-se `capture_attempt` ao oponente (**Counter** como primeira resposta; **Retribution** não abre cadeia em `capture_attempt`). O jogador que **ataca** **não** precisa de um segundo “confirmar ataque”; quem **confirma passar ou reagir** é o **oponente**.
 8. **Peça capturada** (ou não, após efeitos) — Captura (`graveyard` no servidor), etc.
@@ -97,9 +94,9 @@ Fluxo típico de ativação:
 
 ### Janelas de reação (tipos e papéis)
 
-- **Abrem janela:** ignição de **Power** e de **Continuous** (sempre, quando o fluxo do servidor abre `ignite_reaction`); tentativa de **captura** no xadrez abre `capture_attempt`. **Retribution não abre janela.**
-- **Respondem:** **Retribution** quando listada em `reactionWindow.eligibleTypes` (tipicamente `ignite_reaction`). **Counter** em **`capture_attempt`** (primeira resposta só Counter) e em **`ignite_reaction`** quando `MaybeCaptureAttemptOnIgnition` for **true** na carta ignitada. **Disruption** em `ignite_reaction` (ver regra de custo abaixo).
-- Na cadeia em `ignite_reaction`: após **Retribution**, só **Retribution**; após **Counter**, só **Counter** quando permitido. **Disruption** só como **primeira resposta** da cadeia (não pode seguir Counter nem Retribution). Em `capture_attempt`, a cadeia é **só Counter** (ex.: **Counterattack** / **Blockade**). Resolução **LIFO**.
+- **Abrem janela:** ignição de **Power**, **Continuous** e **Disruption** (fluxo `ignite_reaction`); **Retribution** só entra como resposta e encadeia esse fluxo; tentativa de **captura** no xadrez abre `capture_attempt`.
+- **Respondem:** **Retribution** e **Disruption** quando listadas em `reactionWindow.eligibleTypes` (tipicamente `ignite_reaction`). **Counter** em **`capture_attempt`** (primeira resposta só Counter) e em **`ignite_reaction`** quando `MaybeCaptureAttemptOnIgnition` for **true** na carta ignitada.
+- Na cadeia em `ignite_reaction`: após **Retribution/Disruption**, só **Retribution** ou **Disruption**; após **Counter**, só **Counter** quando permitido. Em `capture_attempt`, a cadeia é **só Counter** (ex.: **Counterattack** / **Blockade**). Resolução **LIFO** após confirmação explícita (`resolve_reactions`) do responder atual.
 
 ### Tipo Disruption — custo de ignição como resposta
 

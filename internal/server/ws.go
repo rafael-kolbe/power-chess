@@ -131,7 +131,6 @@ func NewServerWithStore(store RoomStore) *Server {
 		userRoom:        map[uint64]string{},
 		adminDebugMatch: adminDebugMatchFromEnv(),
 	}
-	go s.runReactionTimeoutLoop()
 	go s.runMulliganTimeoutLoop()
 	go s.runPostMatchTimeoutLoop()
 	go s.runRoomCleanupLoop()
@@ -351,9 +350,7 @@ func (c *Client) handleClientFxRelease(env Envelope) error {
 	now := time.Now().UTC()
 	if err := c.room.Execute(func() error {
 		c.room.endClientFxHoldUnsafe(now)
-		// Flush deferred mana burns only when no client still holds FX (room-wide depth==0).
-		// Each connected client sends hold for the same activation; flushing on the first
-		// release would broadcast post-burn mana while the other seat is still animating.
+		// Keep compatibility with legacy queued burn paths (currently immediate resolution).
 		if c.room.clientFxHoldCount == 0 {
 			c.room.Engine.FlushPendingManaBurns()
 		}
@@ -648,16 +645,6 @@ func (c *Client) handleIgniteCard(env Envelope) error {
 		return err
 	}
 	_ = c.sendAck(env, "ok", "", "")
-	// Disruption (ignition 0): first snapshot shows the card in ignition; then resolve so
-	// activate_card + final snapshot match client glow-then-cooldown sequencing.
-	if c.room.Engine.HasPendingDisruptionSameTurnResolve() {
-		c.room.BroadcastSnapshot()
-		if err := c.room.Execute(func() error {
-			return c.room.Engine.FinishDisruptionSameTurnResolveIfPending()
-		}); err != nil {
-			return err
-		}
-	}
 	c.room.EvaluateMatchOutcome()
 	_ = c.server.persistRoom(context.Background(), c.room)
 	c.room.TouchActivity()
@@ -839,10 +826,9 @@ func (c *Client) handleQueueReaction(env Envelope) error {
 			if top, topOK := c.room.Engine.ReactionStackTopSnapshot(); topOK {
 				next := oppositePlayer(top.Owner)
 				mode := c.room.reactionModeUnsafe(next)
-				canExtend := (mode == ReactionModeOn || mode == ReactionModeAuto) &&
-					((rw.Trigger == "ignite_reaction" && c.room.Engine.CanPlayerExtendIgniteChain(next)) ||
-						(rw.Trigger == "capture_attempt" && c.room.Engine.CanPlayerExtendCaptureReactionChain(next)))
-				if !canExtend {
+				// Auto-finalization now happens only when the responder explicitly set mode=off.
+				// on/auto require explicit resolve_reactions confirmation to preserve chain order.
+				if mode == ReactionModeOff {
 					staging = &stagingSnap{
 						A:       c.room.SnapshotForPlayer(gameplay.PlayerA),
 						B:       c.room.SnapshotForPlayer(gameplay.PlayerB),
@@ -891,6 +877,12 @@ func (c *Client) handleResolveReactions(env Envelope) error {
 		requestKey := c.requestKey(env)
 		if requestKey != "" && !c.room.MarkRequestOnce(requestKey) {
 			return errDuplicateRequest
+		}
+		if rw, _, ok := c.room.Engine.ReactionWindowSnapshot(); ok && rw.Open {
+			responder := c.room.currentReactionResponder()
+			if responder != "" && responder != c.playerID {
+				return errors.New("only the current responder can confirm reaction resolution")
+			}
 		}
 		now := time.Now()
 		// Save the current responder's remaining budget before resolving.

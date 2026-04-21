@@ -279,8 +279,9 @@ func (r *RoomSession) maybeAutoResolveIgniteReactionUnsafe() error {
 }
 
 // maybeAutoFinalizeIgniteChainIfStuckUnsafe resolves a non-empty ignite_reaction stack when the
-// seat that must respond cannot legally extend the chain, or has reaction mode off, or (auto)
-// has no eligible follow-up. Caller must hold r.stateM.
+// seat that must respond has reaction mode off. For on/auto, chain resolution must be confirmed
+// explicitly via resolve_reactions to preserve documented chain order semantics.
+// Caller must hold r.stateM.
 func (r *RoomSession) maybeAutoFinalizeIgniteChainIfStuckUnsafe() error {
 	rw, stackSize, ok := r.Engine.ReactionWindowSnapshot()
 	if !ok || !rw.Open || rw.Trigger != "ignite_reaction" || stackSize == 0 {
@@ -292,10 +293,8 @@ func (r *RoomSession) maybeAutoFinalizeIgniteChainIfStuckUnsafe() error {
 	}
 	next := oppositePlayer(top.Owner)
 	mode := r.reactionModeUnsafe(next)
-	if mode == ReactionModeOn || mode == ReactionModeAuto {
-		if r.Engine.CanPlayerExtendIgniteChain(next) {
-			return nil
-		}
+	if mode != ReactionModeOff {
+		return nil
 	}
 	if err := r.Engine.ResolveReactionStack(); err != nil {
 		return err
@@ -306,7 +305,8 @@ func (r *RoomSession) maybeAutoFinalizeIgniteChainIfStuckUnsafe() error {
 }
 
 // maybeAutoFinalizeCounterChainIfStuckUnsafe resolves a non-empty capture_attempt stack when the
-// seat that must respond cannot legally extend the chain under ignition/clear-card rules.
+// seat that must respond has reaction mode off. For on/auto, resolution requires explicit
+// resolve_reactions confirmation.
 // Caller must hold r.stateM.
 func (r *RoomSession) maybeAutoFinalizeCounterChainIfStuckUnsafe() error {
 	rw, stackSize, ok := r.Engine.ReactionWindowSnapshot()
@@ -319,10 +319,8 @@ func (r *RoomSession) maybeAutoFinalizeCounterChainIfStuckUnsafe() error {
 	}
 	next := oppositePlayer(top.Owner)
 	mode := r.reactionModeUnsafe(next)
-	if mode == ReactionModeOn || mode == ReactionModeAuto {
-		if r.Engine.CanPlayerExtendCaptureReactionChain(next) {
-			return nil
-		}
+	if mode != ReactionModeOff {
+		return nil
 	}
 	if err := r.Engine.ResolveReactionStack(); err != nil {
 		return err
@@ -386,8 +384,7 @@ func (r *RoomSession) shiftDeadlinesAfterClientFxHoldUnsafe(elapsed time.Duratio
 func (r *RoomSession) resetClientFxHoldUnsafe() {
 	r.clientFxHoldCount = 0
 	r.clientFxHoldStarted = time.Time{}
-	// If holds are torn down (disconnect/leave), apply any deferred mana burns so match state
-	// cannot strand burns waiting for a release that will never arrive.
+	// Compatibility no-op for legacy queued burn paths.
 	r.Engine.FlushPendingManaBurns()
 }
 
