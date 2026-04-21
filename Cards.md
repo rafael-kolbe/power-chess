@@ -37,7 +37,7 @@ Give yourself 1 extra move for one turn.
 # Mana Burn
 ## Type: Retribution
 ## Description
-Burn x mana from your opponent. x being the mana cost of the card in your opponent's ignition slot. Excess mana is burned from your opponent's energized mana pool.
+Burn x mana from your opponent. x is the mana cost of the card in your opponent's ignition slot. If your opponent doesn't have enough mana, the excess is burned from their energized mana pool.
 ## Cost: 1
 ## Ignition: 0
 ## Cooldown: 3
@@ -45,9 +45,9 @@ Burn x mana from your opponent. x being the mana cost of the card in your oppone
 ## Effect duration: 0
 ## Example:
 ```
-1. Opponent activates "Knight Touch"
-2. You activate Mana Burn as retribution.
-3. You burn 3 mana from your opponent.
+1. Opponent activates "Knight Touch" (cost: 3).
+2. You activate "Mana Burn" as retribution.
+3. Opponent has 2 mana: 2 mana is burned from their mana pool, 1 from their energized mana pool.
 ```
 
 # Energy Gain
@@ -74,7 +74,7 @@ Swap positions of one piece you control with one piece your opponent controls up
 ## Cost: 6
 ## Ignition: 0
 ## Cooldown: 6
-## Targets: 0
+## Targets: 2
 ## Effect duration: 0
 ## Example:
 ```
@@ -185,7 +185,7 @@ Give any piece you control, except the king or a bishop, the ability to move as 
 # Retaliate
 ## Type: Retribution
 ## Description
-Target a card on your opponent's cooldown slot, burn x mana from your opponent, x being the mana cost of the targeted card, and if you do, activate that card (in your ignition slot) for yourself.
+Target a card on your opponent's cooldown slot, burn x mana from your opponent, where x is the mana cost of the targeted card, and if you do, activate that card (in your ignition slot) for yourself.
 ## Cost: 2
 ## Ignition: 0
 ## Cooldown: 9
@@ -266,7 +266,7 @@ Target an ignited card from your opponent and negate its effect.
 ## Effect duration: 0
 ## Example:
 ```
-1. Opponent activates "Knight Touch"
+1. Opponent activates "Knight Touch".
 2. You activate "Stop Right There!" as retribution.
 3. The effect of "Knight Touch" is negated.
 ```

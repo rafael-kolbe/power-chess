@@ -35,7 +35,7 @@ globalThis.__POWER_CHESS_CARD_METADATA__ = [
     "effectDuration": 0,
     "name": "Mana Burn",
     "description": "Burn x mana from your opponent. x is the mana cost of the card in your opponent's ignition slot. If your opponent doesn't have enough mana, the excess is burned from their energized mana pool.",
-    "example": "1. Opponent activates \"Knight Touch\" (cost: 3).\n2. You activate Mana Burn as retribution.\n3. Opponent has 2 mana: 2 mana is burned from their mana pool, 1 from their energized mana pool."
+    "example": "1. Opponent activates \"Knight Touch\" (cost: 3).\n2. You activate \"Mana Burn\" as retribution.\n3. Opponent has 2 mana: 2 mana is burned from their mana pool, 1 from their energized mana pool."
   },
   {
     "id": "energy-gain",
@@ -53,13 +53,13 @@ globalThis.__POWER_CHESS_CARD_METADATA__ = [
     "id": "piece-swap",
     "type": "power",
     "mana": 6,
-    "ignition": 1,
+    "ignition": 0,
     "cooldown": 6,
-    "targets": 0,
+    "targets": 2,
     "effectDuration": 0,
     "name": "Piece Swap",
     "description": "Swap positions of one piece you control with one piece your opponent controls up to 2 squares apart, except the king.",
-    "example": "1. You control a pawn on a3.\n2. You activate \"Piece Swap\".\n3. Ignition succeeds the next turn.\n4. Opponent controls a rook on a1.\n5. Next turn you swap the pawn on a3 with the rook on a1.\n6. The pawn on a3 is now on a1 and the rook on a1 is now on a3.\n7. The pawn now on a1 can promote."
+    "example": "1. You control a pawn on a3.\n2. You activate \"Piece Swap\".\n3. Your opponent controls a rook on a1.\n4. You swap the pawn on a3 with the rook on a1.\n5. The pawn on a3 is now on a1 and the rook on a1 is now on a3.\n6. The pawn now on a1 can promote."
   },
   {
     "id": "mind-control",
@@ -142,7 +142,7 @@ globalThis.__POWER_CHESS_CARD_METADATA__ = [
     "targets": 0,
     "effectDuration": 0,
     "name": "Retaliate",
-    "description": "Target a card on your opponent's cooldown slot, burn x mana from your opponent, x being the mana cost of the targeted card, and if you do, activate that card (in your ignition slot) for yourself.",
+    "description": "Target a card on your opponent's cooldown slot, burn x mana from your opponent, where x is the mana cost of the targeted card, and if you do, activate that card (in your ignition slot) for yourself.",
     "example": "1. Opponent has a \"Knight Touch\" on their cooldown slot.\n2. Opponent activates any \"Power\" card.\n3. You activate \"Retaliate\" as retribution.\n4. You target the opponent's \"Knight Touch\", burning 3 mana from your opponent successfully.\n5. You then activate the \"Knight Touch\" for yourself, buffing your rook on a1.\n6. On your next turn you move the rook on a1 to c2."
   },
   {
@@ -191,7 +191,7 @@ globalThis.__POWER_CHESS_CARD_METADATA__ = [
     "effectDuration": 0,
     "name": "Stop Right There!",
     "description": "Target an ignited card from your opponent and negate its effect.",
-    "example": "1. Opponent activates \"Knight Touch\"\n2. You activate \"Stop Right There!\" as retribution.\n3. The effect of \"Knight Touch\" is negated."
+    "example": "1. Opponent activates \"Knight Touch\".\n2. You activate \"Stop Right There!\" as retribution.\n3. The effect of \"Knight Touch\" is negated."
   },
   {
     "id": "renewal",

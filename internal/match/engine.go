@@ -34,6 +34,7 @@ const (
 	CardCounterattack  gameplay.CardID = "counterattack"
 	CardBlockade       gameplay.CardID = "blockade"
 	CardManaBurn       gameplay.CardID = "mana-burn"
+	CardPieceSwap      gameplay.CardID = "piece-swap"
 )
 
 type Engine struct {
@@ -287,6 +288,9 @@ func (e *Engine) validateIgnitionTargetPieces(pid gameplay.PlayerID, cardID game
 	if len(targetPieces) != def.Targets {
 		return errors.New("invalid target_pieces count for card")
 	}
+	if cardID == CardPieceSwap {
+		return e.validatePieceSwapTargets(pid, targetPieces)
+	}
 	playerColor := toColor(pid)
 	for _, pos := range targetPieces {
 		if pos.Row < 0 || pos.Row > 7 || pos.Col < 0 || pos.Col > 7 {
@@ -299,6 +303,66 @@ func (e *Engine) validateIgnitionTargetPieces(pid gameplay.PlayerID, cardID game
 		if piece.Color != playerColor {
 			return errors.New("target piece must belong to the activating player")
 		}
+	}
+	return nil
+}
+
+// validatePieceSwapTargets validates the two board positions required by Piece Swap:
+// targetPieces[0] must be an own non-king piece; targetPieces[1] must be an opponent
+// non-king piece within Chebyshev distance 2; and the resulting swap must not put the
+// activating player's own king in check.
+func (e *Engine) validatePieceSwapTargets(pid gameplay.PlayerID, targetPieces []chess.Pos) error {
+	playerColor := toColor(pid)
+	opponentColor := playerColor.Opponent()
+
+	pos1 := targetPieces[0]
+	if !pos1.InBounds() {
+		return errors.New("first target out of board bounds")
+	}
+	p1 := e.Chess.PieceAt(pos1)
+	if p1.IsEmpty() {
+		return errors.New("first target square is empty")
+	}
+	if p1.Color != playerColor {
+		return errors.New("first target must be your own piece")
+	}
+	if p1.Type == chess.King {
+		return errors.New("cannot swap the king")
+	}
+
+	pos2 := targetPieces[1]
+	if !pos2.InBounds() {
+		return errors.New("second target out of board bounds")
+	}
+	p2 := e.Chess.PieceAt(pos2)
+	if p2.IsEmpty() {
+		return errors.New("second target square is empty")
+	}
+	if p2.Color != opponentColor {
+		return errors.New("second target must be an opponent piece")
+	}
+	if p2.Type == chess.King {
+		return errors.New("cannot swap the king")
+	}
+
+	dr := pos1.Row - pos2.Row
+	dc := pos1.Col - pos2.Col
+	if dr < 0 {
+		dr = -dr
+	}
+	if dc < 0 {
+		dc = -dc
+	}
+	if dr > 2 || dc > 2 {
+		return errors.New("target pieces are more than 2 squares apart")
+	}
+
+	// Simulate the swap and verify the activating player's king is not in check.
+	g := e.Chess.Clone()
+	g.SetPiece(pos1, p2)
+	g.SetPiece(pos2, p1)
+	if g.IsCheck(playerColor) {
+		return errors.New("this swap would put your king in check")
 	}
 	return nil
 }
@@ -357,6 +421,15 @@ func (e *Engine) maybeOpenIgniteReactionWindow(activator gameplay.PlayerID) {
 	eligible := []gameplay.CardType{gameplay.CardTypeRetribution, gameplay.CardTypeDisruption}
 	if gameplay.MaybeCaptureAttemptOnIgnition(card.CardID) {
 		eligible = append(eligible, gameplay.CardTypeCounter)
+	}
+	// Piece Swap: if the opponent already has a card in their ignition slot they cannot
+	// respond with another card (only "Save It For Later" would be the future exception).
+	// Open a confirmation-only window with no eligible card types instead.
+	if card.CardID == CardPieceSwap {
+		opp := gameplay.OppositePlayer(activator)
+		if e.State.Players[opp].Ignition.Occupied {
+			eligible = []gameplay.CardType{}
+		}
 	}
 	e.OpenReactionWindow("ignite_reaction", activator, eligible)
 }
@@ -785,6 +858,15 @@ func (e *Engine) GrantManaFromCardEffect(pid gameplay.PlayerID, amount int) {
 // Drains amount mana from opponentPID's regular mana pool, then from the energized pool.
 func (e *Engine) BurnManaFromOpponent(opponentPID gameplay.PlayerID, amount int) {
 	e.State.BurnMana(opponentPID, amount)
+}
+
+// SwapPieces implements matchresolvers.ResolverEngine.
+// Exchanges the pieces at pos1 and pos2 on the board without altering turn or move state.
+func (e *Engine) SwapPieces(pos1, pos2 chess.Pos) {
+	p1 := e.Chess.PieceAt(pos1)
+	p2 := e.Chess.PieceAt(pos2)
+	e.Chess.SetPiece(pos1, p2)
+	e.Chess.SetPiece(pos2, p1)
 }
 
 // IgnitionCardCost implements matchresolvers.ResolverEngine.

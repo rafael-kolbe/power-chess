@@ -1602,6 +1602,138 @@ import {
         return board?.[row]?.[col] || "";
     }
 
+    /** Returns the Chebyshev distance between two board positions. */
+    function chebyshevDist(a, b) {
+        return Math.max(Math.abs(a.row - b.row), Math.abs(a.col - b.col));
+    }
+
+    /**
+     * Returns true if there is any piece between `from` and `to` along the direction (dr, dc).
+     * Assumes from and to are distinct and that `to` is reachable from `from` by stepping (dr, dc).
+     */
+    function rayBlocked(board, from, dr, dc, to) {
+        let r = from.row + dr;
+        let c = from.col + dc;
+        while (r !== to.row || c !== to.col) {
+            if (!inBounds(r, c)) return true;
+            if (pieceAt(board, r, c)) return true;
+            r += dr;
+            c += dc;
+        }
+        return false;
+    }
+
+    /**
+     * Returns true if the piece of given type/color at `from` can attack `to` on the board.
+     * Does not validate legality beyond attack pattern.
+     */
+    function pieceAttacks(board, type, color, from, to) {
+        const dr = to.row - from.row;
+        const dc = to.col - from.col;
+        if (dr === 0 && dc === 0) return false;
+        switch (type) {
+            case "P": {
+                const dir = color === "b" ? 1 : -1;
+                return dr === dir && (dc === 1 || dc === -1);
+            }
+            case "N":
+                return (Math.abs(dr) === 2 && Math.abs(dc) === 1) || (Math.abs(dr) === 1 && Math.abs(dc) === 2);
+            case "K":
+                return Math.abs(dr) <= 1 && Math.abs(dc) <= 1;
+            case "B":
+                if (Math.abs(dr) !== Math.abs(dc)) return false;
+                return !rayBlocked(board, from, Math.sign(dr), Math.sign(dc), to);
+            case "R":
+                if (dr !== 0 && dc !== 0) return false;
+                return !rayBlocked(board, from, Math.sign(dr), Math.sign(dc), to);
+            case "Q":
+                if (dr !== 0 && dc !== 0 && Math.abs(dr) !== Math.abs(dc)) return false;
+                return !rayBlocked(board, from, Math.sign(dr), Math.sign(dc), to);
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * Returns true if `color`'s king is in check on the given board.
+     * Board is the flat 8×8 array from the snapshot.
+     */
+    function isKingInCheck(board, color) {
+        let kingRow = -1, kingCol = -1;
+        outer: for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                const p = parseCode(pieceAt(board, r, c));
+                if (p && p.color === color && p.type === "K") {
+                    kingRow = r;
+                    kingCol = c;
+                    break outer;
+                }
+            }
+        }
+        if (kingRow < 0) return false;
+        const oppColor = color === "w" ? "b" : "w";
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                const p = parseCode(pieceAt(board, r, c));
+                if (!p || p.color !== oppColor) continue;
+                if (pieceAttacks(board, p.type, p.color, { row: r, col: c }, { row: kingRow, col: kingCol })) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Returns true if swapping pieces at pos1 and pos2 would put `ownColor`'s king in check.
+     * Performs a lightweight board clone for simulation.
+     */
+    function isKingInCheckAfterSwap(board, pos1, pos2, ownColor) {
+        const b = board.map((row) => [...row]);
+        const tmp = b[pos1.row][pos1.col];
+        b[pos1.row][pos1.col] = b[pos2.row][pos2.col];
+        b[pos2.row][pos2.col] = tmp;
+        return isKingInCheck(b, ownColor);
+    }
+
+    /**
+     * Returns opponent piece positions within Chebyshev 2 of `ownPos` that are valid
+     * second targets for Piece Swap (non-king, and swap does not expose own king).
+     */
+    function pieceSwapValidTargets(board, ownPos, ownColor) {
+        const oppColor = ownColor === "w" ? "b" : "w";
+        const out = [];
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                const p = parseCode(pieceAt(board, r, c));
+                if (!p || p.color !== oppColor || p.type === "K") continue;
+                if (chebyshevDist(ownPos, { row: r, col: c }) > 2) continue;
+                if (!isKingInCheckAfterSwap(board, ownPos, { row: r, col: c }, ownColor)) {
+                    out.push({ row: r, col: c });
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Returns a Set of posKey strings for own non-king pieces that have at least one valid
+     * Piece Swap target (used to highlight eligible first-pick squares).
+     */
+    function pieceSwapEligibleOwnSet(board, ownColor) {
+        const result = new Set();
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                const p = parseCode(pieceAt(board, r, c));
+                if (!p || p.color !== ownColor || p.type === "K") continue;
+                if (pieceSwapValidTargets(board, { row: r, col: c }, ownColor).length > 0) {
+                    result.add(posKey(r, c));
+                }
+            }
+        }
+        return result;
+    }
+
     function pushIfValidMove(out, board, color, row, col) {
         if (!inBounds(row, col)) return false;
         const dst = parseCode(pieceAt(board, row, col));
@@ -4535,11 +4667,19 @@ import {
 
     setupIgnitionDropTarget();
 
+    // Cancel first-pick step of Piece Swap on Escape (keeps the card in ignition).
     // Cancel disruption banish selection mode on Escape.
     document.addEventListener("keydown", (ev) => {
-        if (ev.key === "Escape" && disruptionBanishFlow !== null) {
-            disruptionBanishFlow = null;
-            if (lastSnapshot) renderPlaymat(lastSnapshot);
+        if (ev.key === "Escape") {
+            if (igniteTargetFlow?.cardId === "piece-swap" && igniteTargetFlow.firstPick) {
+                igniteTargetFlow.firstPick = null;
+                if (lastSnapshot?.board) renderBoard(lastSnapshot.board);
+                return;
+            }
+            if (disruptionBanishFlow !== null) {
+                disruptionBanishFlow = null;
+                if (lastSnapshot) renderPlaymat(lastSnapshot);
+            }
         }
     });
 
@@ -4901,6 +5041,21 @@ import {
         const capToR = Number(pendingCap?.toRow ?? -1);
         const capToC = Number(pendingCap?.toCol ?? -1);
 
+        // Precompute Piece Swap targeting highlights.
+        const psOwnColor = playerEl.value === "A" ? "w" : "b";
+        const psFp = igniteTargetFlow?.cardId === "piece-swap" && igniteTargetFlow.stage === "picking"
+            ? (igniteTargetFlow.firstPick || null)
+            : null;
+        const isPsPickingOwn = igniteTargetFlow?.cardId === "piece-swap"
+            && igniteTargetFlow.stage === "picking"
+            && !igniteTargetFlow.firstPick;
+        const psEligibleSet = isPsPickingOwn
+            ? pieceSwapEligibleOwnSet(board || [], psOwnColor)
+            : null;
+        const psValidTargetSet = psFp
+            ? new Set(pieceSwapValidTargets(board || [], psFp, psOwnColor).map((p) => posKey(p.row, p.col)))
+            : null;
+
         for (let gr = 0; gr < 10; gr++) {
             for (let gc = 0; gc < 10; gc++) {
                 const corner = (gr === 0 || gr === 9) && (gc === 0 || gc === 9);
@@ -4944,6 +5099,17 @@ import {
                 if (selectedKey === posKey(r, c)) sq.classList.add("selected");
                 if (moveSet.has(posKey(r, c))) sq.classList.add("move");
                 if (targetKeySet.has(posKey(r, c))) sq.classList.add("target-selected");
+                // Piece Swap two-step targeting highlights.
+                if (psEligibleSet?.has(posKey(r, c))) {
+                    sq.classList.add("ps-eligible");
+                } else if (psFp) {
+                    if (psFp.row === r && psFp.col === c) {
+                        sq.classList.add("ps-own-selected");
+                    } else if (chebyshevDist(psFp, { row: r, col: c }) <= 2) {
+                        sq.classList.add("ps-range");
+                        if (psValidTargetSet?.has(posKey(r, c))) sq.classList.add("ps-target");
+                    }
+                }
                 const auraFxArr = code ? pieceActivePowerAuras(lastSnapshot, r, c) : [];
                 // Double Turn grants an extra move to all pieces of the affected player.
                 // The highlight is visible to both players: check piece color vs seat, not isOwnPiece.
@@ -5036,6 +5202,34 @@ import {
                 sq.addEventListener("click", () => {
                     if (!lastSnapshot?.board || !gameStarted) return;
                     if (igniteTargetFlow?.stage === "picking") {
+                        const ownColor = playerEl.value === "A" ? "w" : "b";
+                        if (igniteTargetFlow.cardId === "piece-swap") {
+                            if (!igniteTargetFlow.firstPick) {
+                                // Stage 1: select own non-king piece with at least one valid target.
+                                const code = sq.dataset.code || "";
+                                if (!code || !isOwnPiece(code)) return;
+                                const p = parseCode(code);
+                                if (!p || p.type === "K") return;
+                                if (pieceSwapValidTargets(lastSnapshot.board, { row: r, col: c }, ownColor).length === 0) return;
+                                igniteTargetFlow.firstPick = { row: r, col: c };
+                                renderBoard(lastSnapshot.board);
+                                return;
+                            }
+                            // Stage 2: select valid opponent piece in range.
+                            const code = sq.dataset.code || "";
+                            if (!code || isOwnPiece(code)) return;
+                            const p = parseCode(code);
+                            if (!p || p.type === "K") return;
+                            const fp = igniteTargetFlow.firstPick;
+                            if (chebyshevDist(fp, { row: r, col: c }) > 2) return;
+                            if (isKingInCheckAfterSwap(lastSnapshot.board, fp, { row: r, col: c }, ownColor)) return;
+                            send("submit_ignition_targets", {
+                                target_pieces: [{ row: fp.row, col: fp.col }, { row: r, col: c }],
+                            });
+                            igniteTargetFlow = null;
+                            return;
+                        }
+                        // Default single-target handling (Knight Touch, Bishop Touch, Rook Touch).
                         const clickedCodeForTarget = sq.dataset.code || "";
                         if (!clickedCodeForTarget || !isOwnPiece(clickedCodeForTarget)) return;
                         send("submit_ignition_targets", {

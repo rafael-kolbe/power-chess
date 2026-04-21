@@ -246,20 +246,29 @@ func (r *RoomSession) maybeAutoResolveCaptureReactionUnsafe() error {
 
 // maybeAutoResolveIgniteReactionUnsafe resolves an empty ignite_reaction window when the
 // opponent's reaction mode skips it (off, or auto with no eligible opening card).
+// A confirmation-only window (no eligible types) auto-resolves for all modes except ReactionModeOn,
+// which waits for the player to manually confirm.
 func (r *RoomSession) maybeAutoResolveIgniteReactionUnsafe() error {
 	rw, stackSize, ok := r.Engine.ReactionWindowSnapshot()
 	if !ok || !rw.Open || rw.Trigger != "ignite_reaction" || stackSize != 0 {
 		return nil
 	}
 	responder := oppositePlayer(rw.Actor)
-	switch r.reactionModeUnsafe(responder) {
-	case ReactionModeOn:
-		return nil
-	case ReactionModeAuto:
-		if gameplay.EligibleForIgniteReactionAUTO(r.Engine.State, responder) {
+	if len(rw.EligibleTypes) == 0 {
+		// Confirmation-only window: only ReactionModeOn waits for manual OK.
+		if r.reactionModeUnsafe(responder) == ReactionModeOn {
 			return nil
 		}
-	default:
+	} else {
+		switch r.reactionModeUnsafe(responder) {
+		case ReactionModeOn:
+			return nil
+		case ReactionModeAuto:
+			if gameplay.EligibleForIgniteReactionAUTO(r.Engine.State, responder) {
+				return nil
+			}
+		default:
+		}
 	}
 	if err := r.Engine.ResolveReactionStack(); err != nil {
 		return err

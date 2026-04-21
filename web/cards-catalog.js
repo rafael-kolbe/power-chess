@@ -54,7 +54,7 @@ const PT = {
     description:
       "Queime x de mana do oponente. x é o custo de mana da carta no slot de ignição do oponente. Se o oponente não tiver mana suficiente, o excesso é queimado da pool de mana energizada.",
     example:
-      "1. O oponente ativa \"Toque do Cavalo\" (custo: 3).\n2. Você ativa Queimadura de Mana como retribuição.\n3. O oponente tem 2 de mana: 2 de mana é queimado da pool de mana, 1 da pool de mana energizada."
+      "1. O oponente ativa \"Toque do Cavalo\" (custo: 3).\n2. Você ativa \"Queimadura de Mana\" como retribuição.\n3. O oponente tem 2 de mana: 2 de mana é queimado da pool de mana, 1 da pool de mana energizada."
   },
   "energy-gain": {
     name: "Ganho de Energia",
@@ -67,7 +67,7 @@ const PT = {
     description:
       "Troque as posições de uma peça sua com uma peça do oponente que estejam a até 2 casas de distância, exceto o rei.",
     example:
-      "1. Você controla um peão em a3.\n2. Você ativa \"Troca de Peças\".\n3. A ignição resolve no turno seguinte.\n4. O oponente controla uma torre em a1.\n5. No turno seguinte você troca o peão em a3 com a torre em a1.\n6. O peão que estava em a3 está agora em a1 e a torre que estava em a1 está agora em a3.\n7. O peão agora em a1 pode promover."
+      "1. Você controla um peão em a3.\n2. Você ativa \"Troca de Peças\".\n3. O oponente controla uma torre em a1.\n4. Você troca o peão em a3 com a torre em a1.\n5. O peão que estava em a3 está agora em a1 e a torre que estava em a1 está agora em a3.\n6. O peão agora em a1 pode promover."
   },
   "mind-control": {
     name: "Controle Mental",
@@ -112,7 +112,7 @@ const PT = {
   "retaliate": {
     name: "Retaliação",
     description:
-      "Alvo: uma carta no slot de recarga do oponente. Queime x de mana do oponente, sendo x o custo de mana da carta alvo e, se fizer isso, ative essa carta (no seu slot de ignição) para você.",
+      "Alvo: uma carta no slot de recarga do oponente. Queime x de mana do oponente, onde x é o custo de mana da carta alvo e, se fizer isso, ative essa carta (no seu slot de ignição) para você.",
     example:
       "1. O oponente tem \"Toque do Cavalo\" no slot de recarga.\n2. O oponente ativa qualquer carta \"Poder\".\n3. Você ativa \"Retaliação\" como retribuição.\n4. Você escolhe o \"Toque do Cavalo\" do oponente, queimando 3 de mana do oponente com sucesso.\n5. Você então ativa o \"Toque do Cavalo\" para si, fortalecendo sua torre em a1.\n6. No seu próximo turno você move a torre em a1 para c2."
   },
@@ -141,7 +141,7 @@ const PT = {
     name: "Alto Lá!",
     description: "Alvo: uma carta ignitada do oponente. Negue o efeito dela.",
     example:
-      "1. O oponente ativa \"Toque do Cavalo\"\n2. Você ativa \"Alto Lá!\" como retribuição.\n3. O efeito de \"Toque do Cavalo\" é negado."
+      "1. O oponente ativa \"Toque do Cavalo\".\n2. Você ativa \"Alto Lá!\" como retribuição.\n3. O efeito de \"Toque do Cavalo\" é negado."
   },
   "renewal": {
     name: "Renovação",
@@ -181,7 +181,7 @@ const PT = {
     description:
       "Esta carta só pode ser ativada se você tiver uma carta no seu slot de ignição. Alvo: essa carta; devolva-a à mão, ganhando mana igual ao custo de mana da carta.",
     example:
-      "1. Você tem \"Turno Duplo\" no slot de ignição.\n2. Seu oponente ativa \"Extinguir\" no seu \"Turno Duplo\".\n3. Você ativa \"Guardar para Depois\" como retribuição.\n4. A carta \"Turno Duplo\" volta à sua mão e você ganha 4 de mana."
+      "1. Você tem \"Turno Duplo\" no slot de ignição.\n2. Seu oponente ativa \"Extinguir\" no seu \"Turno Duplo\".\n3. Você ativa \"Guardar para Depois\" como retribuição.\n4. A carta \"Turno Duplo\" volta à sua mão e você ganha 6 de mana."
   }
 };
 

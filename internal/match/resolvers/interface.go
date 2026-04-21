@@ -59,6 +59,9 @@ type ResolverEngine interface {
 	// IgnitionCardCost returns the ManaCost of the card currently in pid's ignition slot,
 	// or 0 if the slot is unoccupied.
 	IgnitionCardCost(pid gameplay.PlayerID) int
+	// SwapPieces exchanges the positions of the pieces at pos1 and pos2 on the board
+	// without consuming a chess move or altering turn state.
+	SwapPieces(pos1, pos2 chess.Pos)
 }
 
 // EffectResolver is the execution contract for card effects.
