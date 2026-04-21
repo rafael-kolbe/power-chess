@@ -79,10 +79,10 @@ globalThis.__POWER_CHESS_CARD_METADATA__ = [
     "mana": 4,
     "ignition": 0,
     "cooldown": 4,
-    "targets": 0,
+    "targets": 1,
     "effectDuration": 0,
     "name": "Zip Line",
-    "description": "Target a piece you control, except the king, move it to an empty square in the same row.",
+    "description": "Target a piece you control, except the king, move it to an empty square in the same row. This will use the turn movement.",
     "example": "1. You control a bishop on b2.\n2. You activate \"Zip Line\".\n3. The bishop on b2 moves to g2."
   },
   {

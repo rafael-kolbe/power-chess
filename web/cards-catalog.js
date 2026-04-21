@@ -79,7 +79,7 @@ const PT = {
   "zip-line": {
     name: "Tirolesa",
     description:
-      "Alvo: uma peça sua, exceto o rei; mova-a para uma casa vazia na mesma fileira (linha).",
+      "Alvo: uma peça sua, exceto o rei; mova-a para uma casa vazia na mesma fileira (linha). Isso usa o movimento de xadrez do turno.",
     example:
       "1. Você controla um bispo em b2.\n2. Você ativa \"Tirolesa\".\n3. O bispo em b2 move para g2."
   },

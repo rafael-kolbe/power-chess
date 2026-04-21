@@ -482,10 +482,20 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 		BlackQueenSide: cr.BlackQueenSide,
 	}
 	for _, pe := range r.Engine.PendingEffects() {
-		payload.PendingEffects = append(payload.PendingEffects, PendingEffectState{
+		if viewerPID == "" || pe.Owner != viewerPID {
+			continue
+		}
+		pes := PendingEffectState{
 			Owner:  string(pe.Owner),
 			CardID: string(pe.CardID),
-		})
+		}
+		if pe.CardID == match.CardZipLine && pe.ZipLineFrom != nil {
+			r := pe.ZipLineFrom.Row
+			c := pe.ZipLineFrom.Col
+			pes.SourceRow = &r
+			pes.SourceCol = &c
+		}
+		payload.PendingEffects = append(payload.PendingEffects, pes)
 	}
 	payload.ActivationQueueSize = len(s.ResolvedQueue)
 	if rw, stackSize, ok := r.Engine.ReactionWindowSnapshot(); ok {

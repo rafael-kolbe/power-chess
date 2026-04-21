@@ -108,6 +108,7 @@ Cartas do tipo **Disruption** (laranja) podem ser jogadas de duas formas:
 Esta é uma **regra de tipo** centralizada: aplica-se a **todas** as cartas Disruption existentes e futuras, sem necessidade de mencionar o custo no texto individual de cada carta.
 - **Continuous**: oponente só tem janela **no turno em que a carta entra** no slot, não a cada turno seguinte enquanto ela permanecer lá.
 - **Ignition 0**: resolve no mesmo snapshot/turno conforme servidor; múltiplas ignições possíveis se houver mana e slot livre.
+- **Zip Line** (Power, alvo na ignição): após a ignição resolve, o jogador escolhe uma casa vazia na mesma rank da peça alvo; se a peça se deslocar, isso **consome o movimento de xadrez** desse turno e **passa a vez** (inclui limpar jogada extra de **Double Turn** se existir).
 - A zona de ignição **desse jogador** ocupada bloqueia novas ignições **dele**, exceto comportamentos especiais (ex.: **Save It For Later**).
 
 ---

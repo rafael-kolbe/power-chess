@@ -747,6 +747,10 @@ func (c *Client) handleResolvePending(env Envelope) error {
 		pos := chess.Pos{Row: *p.PieceRow, Col: *p.PieceCol}
 		target.PiecePos = &pos
 	}
+	if p.DestRow != nil && p.DestCol != nil {
+		pos := chess.Pos{Row: *p.DestRow, Col: *p.DestCol}
+		target.TargetPos = &pos
+	}
 	if !c.room.BothPlayersConnected() {
 		return protocolError{code: ErrorActionFailed, message: "waiting_for_opponent"}
 	}
@@ -763,7 +767,7 @@ func (c *Client) handleResolvePending(env Envelope) error {
 		if errors.Is(err, errDuplicateRequest) {
 			return c.sendAck(env, "duplicate", "duplicate_request", duplicateRequestMessage)
 		}
-		return err
+		return protocolError{code: ErrorActionFailed, message: err.Error()}
 	}
 	_ = c.sendAck(env, "ok", "", "")
 	c.room.EvaluateMatchOutcome()

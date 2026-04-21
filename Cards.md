@@ -106,11 +106,11 @@ Target a piece your opponent controls, except the king or a queen, and take cont
 # Zip Line
 ## Type: Power
 ## Description
-Target a piece you control, except the king, move it to an empty square in the same row.
+Target a piece you control, except the king, move it to an empty square in the same row. This will use the turn movement.
 ## Cost: 4
 ## Ignition: 0
 ## Cooldown: 4
-## Targets: 0
+## Targets: 1
 ## Effect duration: 0
 ## Example:
 ```

@@ -29,8 +29,10 @@ type PersistedIgnitionTargetLock struct {
 
 // PersistedPendingEffect stores pending effect metadata without function pointers.
 type PersistedPendingEffect struct {
-	Owner  gameplay.PlayerID `json:"owner"`
-	CardID gameplay.CardID   `json:"cardId"`
+	Owner     gameplay.PlayerID `json:"owner"`
+	CardID    gameplay.CardID   `json:"cardId"`
+	SourceRow *int               `json:"sourceRow,omitempty"`
+	SourceCol *int               `json:"sourceCol,omitempty"`
 }
 
 // PersistedReactionAction stores stack items in serializable form.
@@ -51,10 +53,17 @@ func (e *Engine) ExportState() PersistedEngineState {
 	}
 	for _, pid := range []gameplay.PlayerID{gameplay.PlayerA, gameplay.PlayerB} {
 		for _, pe := range e.pendingEffects[pid] {
-			out.PendingEffects = append(out.PendingEffects, PersistedPendingEffect{
+			pp := PersistedPendingEffect{
 				Owner:  pe.Owner,
 				CardID: pe.CardID,
-			})
+			}
+			if pe.CardID == CardZipLine && pe.ZipLineFrom != nil {
+				r := pe.ZipLineFrom.Row
+				c := pe.ZipLineFrom.Col
+				pp.SourceRow = &r
+				pp.SourceCol = &c
+			}
+			out.PendingEffects = append(out.PendingEffects, pp)
 		}
 	}
 	if e.ReactionWindow != nil {
@@ -115,11 +124,16 @@ func NewEngineFromState(snapshot PersistedEngineState) (*Engine, error) {
 		if !ok {
 			return nil, errors.New("missing resolver for persisted pending effect")
 		}
-		e.pendingEffects[pe.Owner] = append(e.pendingEffects[pe.Owner], PendingEffect{
+		pend := PendingEffect{
 			Owner:    pe.Owner,
 			CardID:   pe.CardID,
 			Resolver: resolver,
-		})
+		}
+		if pe.CardID == CardZipLine && pe.SourceRow != nil && pe.SourceCol != nil {
+			p := chess.Pos{Row: *pe.SourceRow, Col: *pe.SourceCol}
+			pend.ZipLineFrom = &p
+		}
+		e.pendingEffects[pe.Owner] = append(e.pendingEffects[pe.Owner], pend)
 	}
 	for _, ra := range snapshot.ReactionStack {
 		resolver, ok := e.resolvers[ra.Card.CardID]

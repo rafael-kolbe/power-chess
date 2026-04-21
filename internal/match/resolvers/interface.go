@@ -69,6 +69,9 @@ type ResolverEngine interface {
 	// SwapPieces exchanges the positions of the pieces at pos1 and pos2 on the board
 	// without consuming a chess move or altering turn state.
 	SwapPieces(pos1, pos2 chess.Pos)
+	// ApplyZipLineTeleport moves the owner's locked piece from from to to on the same rank (if legal),
+	// then ends the owner’s chess turn (including clearing extra-move state).
+	ApplyZipLineTeleport(owner gameplay.PlayerID, from, to chess.Pos) error
 }
 
 // EffectResolver is the execution contract for card effects.

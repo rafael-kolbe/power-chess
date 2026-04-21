@@ -58,6 +58,9 @@ func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, banishH
 	if err := e.errIfOpeningBlocksGameplay(); err != nil {
 		return err
 	}
+	if err := e.errIfPlayerHasUnresolvedPendingEffects(pid); err != nil {
+		return err
+	}
 	if e.ReactionWindow == nil || !e.ReactionWindow.Open {
 		return errors.New("reaction window is not open")
 	}

@@ -189,6 +189,9 @@ type DebugMatchFixturePayload struct {
 type ResolvePendingPayload struct {
 	PieceRow *int `json:"pieceRow,omitempty"`
 	PieceCol *int `json:"pieceCol,omitempty"`
+	// DestRow/DestCol select the destination square for effects such as Zip Line (logical board indices).
+	DestRow *int `json:"destRow,omitempty"`
+	DestCol *int `json:"destCol,omitempty"`
 }
 
 // QueueReactionPayload queues a reaction card with optional target data.
@@ -265,8 +268,10 @@ type PlayerHUDState struct {
 
 // PendingEffectState describes unresolved effects that need player input.
 type PendingEffectState struct {
-	Owner  string `json:"owner"`
-	CardID string `json:"cardId"`
+	Owner     string `json:"owner"`
+	CardID    string `json:"cardId"`
+	SourceRow *int   `json:"sourceRow,omitempty"`
+	SourceCol *int   `json:"sourceCol,omitempty"`
 }
 
 // ReactionWindowState describes current reaction context for frontend prompts.

@@ -36,3 +36,32 @@ func TestEnginePersistenceRoundTrip(t *testing.T) {
 		t.Fatalf("expected pending move to survive")
 	}
 }
+
+// TestZipLinePendingSnapshotRoundTrip ensures Zip Line pending metadata survives export/import.
+func TestZipLinePendingSnapshotRoundTrip(t *testing.T) {
+	state, err := gameplay.NewMatchState(gameplay.StarterDeck(), gameplay.StarterDeck())
+	if err != nil {
+		t.Fatalf("new match state failed: %v", err)
+	}
+	e := NewEngine(state, chess.NewGame())
+	src := chess.Pos{Row: 6, Col: 1}
+	e.pendingEffects[gameplay.PlayerA] = []PendingEffect{{
+		Owner:       gameplay.PlayerA,
+		CardID:      CardZipLine,
+		Resolver:    e.resolvers[CardZipLine],
+		ZipLineFrom: &src,
+	}}
+
+	snapshot := e.ExportState()
+	if len(snapshot.PendingEffects) != 1 || snapshot.PendingEffects[0].SourceRow == nil || snapshot.PendingEffects[0].SourceCol == nil {
+		t.Fatalf("expected exported source coordinates, got %+v", snapshot.PendingEffects)
+	}
+	restored, err := NewEngineFromState(snapshot)
+	if err != nil {
+		t.Fatalf("restore failed: %v", err)
+	}
+	q := restored.pendingEffects[gameplay.PlayerA]
+	if len(q) != 1 || q[0].ZipLineFrom == nil || *q[0].ZipLineFrom != src {
+		t.Fatalf("expected ZipLineFrom restored, got %+v", q)
+	}
+}

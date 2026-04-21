@@ -1483,6 +1483,52 @@ import {
     return `${file}${rank}`;
   }
 
+  /** Zip Line pending effect for the local seat (server sends sourceRow/sourceCol on state_snapshot). */
+  function viewerZipLinePendingSource(snapshot) {
+    const self = playerEl.value;
+    if (!snapshot || !Array.isArray(snapshot.pendingEffects)) return null;
+    for (const pe of snapshot.pendingEffects) {
+      if (String(pe.owner || "") !== self || String(pe.cardId || "") !== "zip-line") continue;
+      if (pe.sourceRow == null || pe.sourceCol == null) continue;
+      return { row: Number(pe.sourceRow), col: Number(pe.sourceCol) };
+    }
+    return null;
+  }
+
+  /** Empty squares on the same rank as `src` (excluding `src`), using logical board indices. */
+  function zipLineDestKeySet(board, src) {
+    const set = new Set();
+    if (!src || !board || !Array.isArray(board)) return set;
+    const r = src.row;
+    for (let c = 0; c < 8; c++) {
+      if (c === src.col) continue;
+      const cell = board[r]?.[c];
+      if (cell && String(cell).trim()) continue;
+      set.add(posKey(r, c));
+    }
+    return set;
+  }
+
+  /**
+   * Lightweight client preflight: own non-king with some empty square on the same rank.
+   * Server still validates check / legality.
+   */
+  function zipLineHasRoughPlayableTarget(board, seatId) {
+    if (!board || !Array.isArray(board)) return false;
+    const oc = seatId === "A" ? "w" : "b";
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const code = board[r]?.[c] || "";
+        if (!code || code[0] !== oc || code[1] === "K") continue;
+        for (let c2 = 0; c2 < 8; c2++) {
+          if (c2 === c) continue;
+          if (!board[r][c2]) return true;
+        }
+      }
+    }
+    return false;
+  }
+
   /** Locked ignition target squares from snapshot (top-level + reaction window mirror). */
   function boardIgnitionTargetPieces(snapshot) {
     const out = [];
@@ -4202,6 +4248,10 @@ import {
       const ownColor = pid === "A" ? "w" : "b";
       if (pieceSwapEligibleOwnSet(board, ownColor).size === 0) return false;
     }
+    if (String(handEntry?.cardId) === "zip-line") {
+      const board = snapshot?.board || [];
+      if (!zipLineHasRoughPlayableTarget(board, pid)) return false;
+    }
     return true;
   }
 
@@ -4961,11 +5011,14 @@ import {
     const selectedKey = selectedFrom ? posKey(selectedFrom.row, selectedFrom.col) : null;
     const dotted = ignitionDottedPiecesForUI(lastSnapshot);
     const targetKeySet = new Set(dotted.map((tp) => posKey(tp.row, tp.col)));
+    const zlSrc = viewerZipLinePendingSource(lastSnapshot);
+    const zlDestSet = zlSrc ? zipLineDestKeySet(lastSnapshot?.board || [], zlSrc) : new Set();
     for (const sq of boardFrameEl.querySelectorAll(".sq[data-row]")) {
       const r = +sq.dataset.row;
       const c = +sq.dataset.col;
       sq.classList.toggle("selected", selectedKey === posKey(r, c));
       sq.classList.toggle("move", moveSet.has(posKey(r, c)));
+      sq.classList.toggle("zip-line-dest", zlDestSet.has(posKey(r, c)));
       sq.classList.toggle("target-selected", targetKeySet.has(posKey(r, c)));
     }
   }
@@ -4977,6 +5030,7 @@ import {
     if (s.mulliganPhaseActive) return false;
     if (!isGameplayInputOpen()) return false;
     if (s.turnPlayer !== playerEl.value) return false;
+    if (viewerZipLinePendingSource(s)) return false;
     return true;
   }
 
@@ -5078,6 +5132,9 @@ import {
       ? new Set(pieceSwapValidTargets(board || [], psFp, psOwnColor).map((p) => posKey(p.row, p.col)))
       : null;
 
+    const zlSrc = viewerZipLinePendingSource(lastSnapshot);
+    const zlDestSet = zlSrc ? zipLineDestKeySet(board || [], zlSrc) : new Set();
+
     for (let gr = 0; gr < 10; gr++) {
       for (let gc = 0; gc < 10; gc++) {
         const corner = (gr === 0 || gr === 9) && (gc === 0 || gc === 9);
@@ -5120,6 +5177,7 @@ import {
         if (code) sq.classList.add("piece");
         if (selectedKey === posKey(r, c)) sq.classList.add("selected");
         if (moveSet.has(posKey(r, c))) sq.classList.add("move");
+        if (zlDestSet.has(posKey(r, c))) sq.classList.add("zip-line-dest");
         if (targetKeySet.has(posKey(r, c))) sq.classList.add("target-selected");
         // Piece Swap two-step targeting highlights.
         if (psEligibleSet?.has(posKey(r, c))) {
@@ -5223,6 +5281,14 @@ import {
 
         sq.addEventListener("click", () => {
           if (!lastSnapshot?.board || !gameStarted) return;
+          const zlPick = viewerZipLinePendingSource(lastSnapshot);
+          if (zlPick && isGameplayInputOpen()) {
+            const zd = zipLineDestKeySet(lastSnapshot.board, zlPick);
+            if (zd.has(posKey(r, c)) && !code) {
+              send("resolve_pending_effect", { destRow: r, destCol: c });
+              return;
+            }
+          }
           if (igniteTargetFlow?.stage === "picking") {
             const ownColor = playerEl.value === "A" ? "w" : "b";
             if (igniteTargetFlow.cardId === "piece-swap") {

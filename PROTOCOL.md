@@ -221,7 +221,7 @@ Broadcast do estado da sala. Campos principais:
         "graveyardCount": 0,
       }
     ],
-    "pendingEffects": [{ "owner": "A", "cardId": "knight-touch" }],
+    "pendingEffects": [{ "owner": "A", "cardId": "zip-line", "sourceRow": 6, "sourceCol": 1 }],
     "pendingCapture": {
       "active": true,
       "fromRow": 6,
@@ -366,13 +366,17 @@ Envia texto JSON (por exemplo um lote de eventos do navegador) para o **log do p
 
 ### `resolve_pending_effect`
 
+Efeitos que exigem alvo **após** a resolução da ignição (ex.: **Zip Line**) ficam em `pendingEffects` no `state_snapshot` **só para o dono** do efeito; para Zip Line inclui `sourceRow` / `sourceCol` (índices lógicos do tabuleiro, mesmo sistema que `submit_move`).
+
 ```json
 {
   "id": "req-5",
   "type": "resolve_pending_effect",
-  "payload": { "pieceRow": 6, "pieceCol": 0 }
+  "payload": { "destRow": 6, "destCol": 6 }
 }
 ```
+
+Enquanto o jogador tiver um efeito pendente próprio, o servidor rejeita outras ações de jogo desse jogador (ex.: `submit_move`, `draw_card`, nova ignição) até enviar um `resolve_pending_effect` válido ou um destino ilegal (mensagem de erro; o efeito continua pendente).
 
 ### `queue_reaction`
 

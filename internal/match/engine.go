@@ -36,6 +36,7 @@ const (
 	CardBlockade       gameplay.CardID = "blockade"
 	CardManaBurn       gameplay.CardID = "mana-burn"
 	CardPieceSwap      gameplay.CardID = "piece-swap"
+	CardZipLine        gameplay.CardID = "zip-line"
 )
 
 type Engine struct {
@@ -163,6 +164,9 @@ func (e *Engine) DrawCard(pid gameplay.PlayerID) error {
 	if err := e.errIfOpeningBlocksGameplay(); err != nil {
 		return err
 	}
+	if err := e.errIfPlayerHasUnresolvedPendingEffects(pid); err != nil {
+		return err
+	}
 	if e.State.CurrentTurn != pid {
 		return errors.New("can only draw on your own turn")
 	}
@@ -180,6 +184,9 @@ func (e *Engine) ActivateCard(pid gameplay.PlayerID, handIndex int) error {
 // ActivateCardWithTargets validates optional target pieces and delegates activation to gameplay state.
 func (e *Engine) ActivateCardWithTargets(pid gameplay.PlayerID, handIndex int, targetPieces []chess.Pos) error {
 	if err := e.errIfOpeningBlocksGameplay(); err != nil {
+		return err
+	}
+	if err := e.errIfPlayerHasUnresolvedPendingEffects(pid); err != nil {
 		return err
 	}
 	p := e.State.Players[pid]
@@ -217,6 +224,9 @@ func (e *Engine) ActivateCardWithTargets(pid gameplay.PlayerID, handIndex int, t
 		if def.ID == CardMindControl && !e.hasAnyMindControlTarget(pid) {
 			return errors.New("no valid mind control targets: opponent has no non-king/non-queen piece")
 		}
+		if def.ID == CardZipLine && !e.hasAnyZipLineTarget(pid) {
+			return errors.New("no valid zip line targets: no piece can zip to an empty square on its rank without leaving the king in check")
+		}
 		if err := e.State.ActivateCard(pid, handIndex); err != nil {
 			return err
 		}
@@ -243,6 +253,9 @@ func (e *Engine) ActivateCardWithTargets(pid gameplay.PlayerID, handIndex int, t
 // then opens ignite_reaction when the catalog allows retribution against this ignition.
 func (e *Engine) SubmitIgnitionTargets(pid gameplay.PlayerID, targetPieces []chess.Pos) error {
 	if err := e.errIfOpeningBlocksGameplay(); err != nil {
+		return err
+	}
+	if err := e.errIfPlayerHasUnresolvedPendingEffects(pid); err != nil {
 		return err
 	}
 	if e.State.CurrentTurn != pid {
@@ -310,6 +323,9 @@ func (e *Engine) validateIgnitionTargetPieces(pid gameplay.PlayerID, cardID game
 	}
 	if cardID == CardMindControl {
 		return e.validateMindControlTarget(pid, targetPieces[0])
+	}
+	if cardID == CardZipLine {
+		return e.validateZipLineIgnitionTarget(pid, targetPieces[0])
 	}
 	playerColor := toColor(pid)
 	for _, pos := range targetPieces {
@@ -544,13 +560,24 @@ func (e *Engine) ResolvePendingEffect(pid gameplay.PlayerID, target EffectTarget
 		return errors.New("no pending effect for player")
 	}
 	pe := queue[0]
+	merged := target
+	if pe.CardID == CardZipLine && pe.ZipLineFrom != nil {
+		from := *pe.ZipLineFrom
+		merged.PiecePos = &from
+	}
+	if err := pe.Resolver.Apply(e, pe.Owner, merged); err != nil {
+		return err
+	}
 	e.pendingEffects[pid] = queue[1:]
-	return pe.Resolver.Apply(e, pe.Owner, target)
+	return nil
 }
 
 // SubmitMove executes a legal chess move, or defers it when a capture reaction window opens.
 func (e *Engine) SubmitMove(pid gameplay.PlayerID, m chess.Move) error {
 	if err := e.errIfOpeningBlocksGameplay(); err != nil {
+		return err
+	}
+	if err := e.errIfPlayerHasUnresolvedPendingEffects(pid); err != nil {
 		return err
 	}
 	e.reconcileTurnState()
@@ -613,11 +640,20 @@ func (e *Engine) handleResolvedEffect(ev *gameplay.ResolvedIgnitionEvent) error 
 		return nil
 	}
 	if resolver.RequiresTarget() {
-		e.pendingEffects[ev.Owner] = append(e.pendingEffects[ev.Owner], PendingEffect{
+		pe := PendingEffect{
 			Owner:    ev.Owner,
 			CardID:   ev.Card.CardID,
 			Resolver: resolver,
-		})
+		}
+		if ev.Card.CardID == CardZipLine {
+			locks := e.ignitionTargets[ev.Owner]
+			if len(locks) != 1 {
+				return fmt.Errorf("zip line requires exactly one locked ignition square")
+			}
+			p := locks[0]
+			pe.ZipLineFrom = &chess.Pos{Row: p.Row, Col: p.Col}
+		}
+		e.pendingEffects[ev.Owner] = append(e.pendingEffects[ev.Owner], pe)
 		return nil
 	}
 	if err := resolver.Apply(e, ev.Owner, EffectTarget{}); err != nil {
@@ -680,6 +716,9 @@ func (e *Engine) runWithNegationDetection(owner gameplay.PlayerID, fn func() err
 // ActivatePlayerSkill executes the selected player skill on the current turn and consumes that turn.
 func (e *Engine) ActivatePlayerSkill(pid gameplay.PlayerID) error {
 	if err := e.errIfOpeningBlocksGameplay(); err != nil {
+		return err
+	}
+	if err := e.errIfPlayerHasUnresolvedPendingEffects(pid); err != nil {
 		return err
 	}
 	color := toColor(pid)
@@ -932,6 +971,8 @@ type PendingEffect struct {
 	Owner    gameplay.PlayerID
 	CardID   gameplay.CardID
 	Resolver EffectResolver
+	// ZipLineFrom is the ignition-locked source square for Zip Line while awaiting destination input.
+	ZipLineFrom *chess.Pos
 }
 
 // --- matchresolvers.ResolverEngine implementation ---

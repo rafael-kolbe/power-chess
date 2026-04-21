@@ -34,8 +34,9 @@
   - Se o alvo for removido antes da ativação (ignição ainda > 0) ou a ativação for negada, a ativação conclui em falha.
 
 ### Zip Line
-- **Custo:** 4 | **Ignição:** 0 | **Recarga:** 4 | **Alvos:** 0 | **Duração:** 0
-- Target a piece you control, except the king, move it to an empty square in the same row.
+- **Custo:** 4 | **Ignição:** 0 | **Recarga:** 4 | **Alvos:** 1 | **Duração:** 0
+- Target a piece you control, except the king, move it to an empty square in the same row. This will use the turn movement.
+- Notas: após a ignição, o jogador escolhe a casa de destino vazia na mesma rank; se a peça se mover, o movimento de xadrez do turno é consumido e a vez passa (inclui limpar estado de **Double Turn** / jogada extra).
 
 ### Sacrifice of the Masses
 - **Custo:** 0 | **Ignição:** 0 | **Recarga:** 10 | **Alvos:** 0 | **Duração:** 0
