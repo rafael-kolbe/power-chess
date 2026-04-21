@@ -67,7 +67,7 @@ export const DEFAULT_DECK_20 = Object.freeze([
   "save-it-for-later",
   "retaliate",
   "retaliate",
-  "retaliate",
+  "mana-burn",
   "counterattack",
 ]);
 
@@ -90,7 +90,7 @@ export function buildMatchDebugFixturePayload() {
     },
     black: {
       deck: [...DEFAULT_DECK_20],
-      hand: ["knight-touch", "clairvoyance", "retaliate"],
+      hand: ["knight-touch", "clairvoyance", "mana-burn"],
       mana: 8,
       maxMana: 10,
       energizedMana: 0,

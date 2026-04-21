@@ -80,11 +80,10 @@ Swap positions of one piece you control with one piece your opponent controls up
 ```
 1. You control a pawn on a3.
 2. You activate "Piece Swap".
-3. Ignition succeeds the next turn.
-4. Opponent controls a rook on a1.
-5. Next turn you swap the pawn on a3 with the rook on a1.
-6. The pawn on a3 is now on a1 and the rook on a1 is now on a3.
-7. The pawn now on a1 can promote.
+3. Your opponent controls a rook on a1.
+4. You swap the pawn on a3 with the rook on a1.
+5. The pawn on a3 is now on a1 and the rook on a1 is now on a3.
+6. The pawn now on a1 can promote.
 ```
 
 # Mind Control
