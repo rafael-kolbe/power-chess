@@ -31,7 +31,7 @@ Deve estar 100% verde antes de qualquer commit.
 | `internal/gameplay/reaction_eligibility_test.go` | Elegibilidade de reação |
 | `internal/match/engine_test.go` | Motor de efeitos e cadeias |
 | `internal/match/reaction_stack_test.go` | Pilha de reações LIFO |
-| `internal/match/resolver_*_test.go` | Testes por resolver/carta |
+| `internal/match/resolvers/<tipo>/*_test.go` | Testes por resolver/carta, junto do pacote do resolver |
 | `internal/server/auth_*_test.go` | Autenticação e validação |
 | `internal/server/debug_match_fixture_test.go` | Fixture de debug (WS) |
 

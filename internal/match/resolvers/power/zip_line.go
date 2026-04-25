@@ -14,12 +14,17 @@ type ZipLineResolver struct{}
 // RequiresTarget reports that the destination square is chosen via resolve_pending_effect.
 func (ZipLineResolver) RequiresTarget() bool { return true }
 
-// Apply teleports the locked source piece to target.TargetPos using the engine hook.
+// Apply teleports the locked source piece to target.TargetPos using the generic teleport hook.
 func (ZipLineResolver) Apply(e resolvers.ResolverEngine, owner gameplay.PlayerID, target resolvers.EffectTarget) error {
 	if target.PiecePos == nil || target.TargetPos == nil {
 		return resolvers.ErrEffectFailed
 	}
 	from := *target.PiecePos
 	to := *target.TargetPos
-	return e.ApplyZipLineTeleport(owner, from, to)
+	return e.ApplyPieceTeleport(owner, from, to, resolvers.TeleportOptions{
+		RequireSameRow:          true,
+		RequireEmptyDestination: true,
+		ConsumeTurn:             true,
+		ForbidKing:              true,
+	})
 }

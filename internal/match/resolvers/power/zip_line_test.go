@@ -1,4 +1,4 @@
-package match
+package power_test
 
 import (
 	"errors"
@@ -6,12 +6,13 @@ import (
 
 	"power-chess/internal/chess"
 	"power-chess/internal/gameplay"
+	"power-chess/internal/match"
 	matchresolvers "power-chess/internal/match/resolvers"
 )
 
-func newZipLineTestEngine(t *testing.T) *Engine {
+func newZipLineTestEngine(t *testing.T) *match.Engine {
 	t.Helper()
-	zl := gameplay.CardInstance{InstanceID: "zl1", CardID: CardZipLine, ManaCost: 4, Ignition: 0, Cooldown: 4}
+	zl := gameplay.CardInstance{InstanceID: "zl1", CardID: match.CardZipLine, ManaCost: 4, Ignition: 0, Cooldown: 4}
 	state, err := gameplay.NewMatchState(testDeckWith(zl), testDeckWith(zl))
 	if err != nil {
 		t.Fatal(err)
@@ -25,7 +26,7 @@ func newZipLineTestEngine(t *testing.T) *Engine {
 	board.SetPiece(chess.Pos{Row: 1, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
 	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{zl}
 	state.Players[gameplay.PlayerA].Mana = 10
-	e := NewEngine(state, board)
+	e := match.NewEngine(state, board)
 	markInPlayForTest(state)
 	return e
 }
@@ -41,18 +42,19 @@ func TestZipLineQueuesPendingAndTeleportsEndsTurn(t *testing.T) {
 	if err := e.ResolveReactionStack(); err != nil {
 		t.Fatalf("close ignite reaction: %v", err)
 	}
-	if len(e.pendingEffects[gameplay.PlayerA]) != 1 {
-		t.Fatalf("expected one pending effect, got %d", len(e.pendingEffects[gameplay.PlayerA]))
+	pending := e.PendingEffects()
+	if len(pending) != 1 {
+		t.Fatalf("expected one pending effect, got %d", len(pending))
 	}
-	pe := e.pendingEffects[gameplay.PlayerA][0]
-	if pe.CardID != CardZipLine || pe.ZipLineFrom == nil || *pe.ZipLineFrom != from {
+	pe := pending[0]
+	if pe.Owner != gameplay.PlayerA || pe.CardID != match.CardZipLine || pe.TeleportFrom == nil || *pe.TeleportFrom != from {
 		t.Fatalf("unexpected pending effect: %+v", pe)
 	}
 
-	if err := e.ResolvePendingEffect(gameplay.PlayerA, EffectTarget{TargetPos: &to}); err != nil {
+	if err := e.ResolvePendingEffect(gameplay.PlayerA, match.EffectTarget{TargetPos: &to}); err != nil {
 		t.Fatalf("resolve pending zip line: %v", err)
 	}
-	if len(e.pendingEffects[gameplay.PlayerA]) != 0 {
+	if len(e.PendingEffects()) != 0 {
 		t.Fatalf("expected pending queue cleared")
 	}
 	got := e.Chess.PieceAt(to)
@@ -82,15 +84,15 @@ func TestZipLineIllegalDestinationKeepsPending(t *testing.T) {
 	if err := e.ResolveReactionStack(); err != nil {
 		t.Fatalf("close ignite reaction: %v", err)
 	}
-	err := e.ResolvePendingEffect(gameplay.PlayerA, EffectTarget{TargetPos: &blocked})
+	err := e.ResolvePendingEffect(gameplay.PlayerA, match.EffectTarget{TargetPos: &blocked})
 	if err == nil {
 		t.Fatal("expected illegal zip destination to fail")
 	}
 	if !errors.Is(err, matchresolvers.ErrEffectFailed) {
 		t.Fatalf("expected ErrEffectFailed, got %v", err)
 	}
-	if len(e.pendingEffects[gameplay.PlayerA]) != 1 {
-		t.Fatalf("expected pending to remain after failed resolve, got len=%d", len(e.pendingEffects[gameplay.PlayerA]))
+	if got := len(e.PendingEffects()); got != 1 {
+		t.Fatalf("expected pending to remain after failed resolve, got len=%d", got)
 	}
 }
 

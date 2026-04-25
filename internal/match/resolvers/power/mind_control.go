@@ -31,5 +31,9 @@ func (MindControlResolver) Apply(e resolvers.ResolverEngine, owner gameplay.Play
 	if ok && def.EffectDuration > 0 {
 		turns = def.EffectDuration
 	}
-	return e.AddMindControlEffect(owner, cardMindControl, target, turns)
+	return e.AddPieceControlEffect(owner, cardMindControl, target, resolvers.PieceControlOptions{
+		DurationTurns:  turns,
+		ForbidKing:     true,
+		ForbiddenTypes: []chess.PieceType{chess.Queen},
+	})
 }

@@ -1,10 +1,11 @@
-package match
+package retribution_test
 
 import (
 	"testing"
 
 	"power-chess/internal/chess"
 	"power-chess/internal/gameplay"
+	"power-chess/internal/match"
 )
 
 // newManaBurnTestEngine builds a minimal engine for Mana Burn tests.
@@ -12,12 +13,12 @@ import (
 // Using Energy Gain (Ignition: 1, Targets: 0) ensures the ignite_reaction window
 // opens immediately after ActivateCard, so PlayerB can queue Mana Burn as retribution.
 // ManaCost is set to 3 on the instance so Mana Burn burns 3.
-func newManaBurnTestEngine(t *testing.T) (*Engine, *gameplay.MatchState) {
+func newManaBurnTestEngine(t *testing.T) (*match.Engine, *gameplay.MatchState) {
 	t.Helper()
 
 	// Energy Gain with ManaCost=3: no targets, ignition=1, reaction window opens immediately.
-	egCard := gameplay.CardInstance{InstanceID: "eg1", CardID: CardEnergyGain, ManaCost: 3, Ignition: 1, Cooldown: 2}
-	mbCard := gameplay.CardInstance{InstanceID: "mb1", CardID: CardManaBurn, ManaCost: 1, Ignition: 0, Cooldown: 3}
+	egCard := gameplay.CardInstance{InstanceID: "eg1", CardID: match.CardEnergyGain, ManaCost: 3, Ignition: 1, Cooldown: 2}
+	mbCard := gameplay.CardInstance{InstanceID: "mb1", CardID: match.CardManaBurn, ManaCost: 1, Ignition: 0, Cooldown: 3}
 
 	state, err := gameplay.NewMatchState(testDeckWith(egCard), testDeckWith(mbCard))
 	if err != nil {
@@ -35,7 +36,7 @@ func newManaBurnTestEngine(t *testing.T) (*Engine, *gameplay.MatchState) {
 	state.Players[gameplay.PlayerB].Mana = 10
 
 	markInPlayForTest(state)
-	return NewEngine(state, board), state
+	return match.NewEngine(state, board), state
 }
 
 // TestManaBurnBurnsFromRegularManaOnly verifies that Mana Burn drains only the regular mana pool
@@ -51,7 +52,7 @@ func TestManaBurnBurnsFromRegularManaOnly(t *testing.T) {
 	}
 	// After activation: Mana = 5, EnergizedMana = 3.
 
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err != nil {
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, match.EffectTarget{}); err != nil {
 		t.Fatalf("PlayerB queue mana-burn: %v", err)
 	}
 	if err := e.ResolveReactionStack(); err != nil {
@@ -82,7 +83,7 @@ func TestManaBurnBurnsFromBothPools(t *testing.T) {
 	}
 	// After activation: Mana = 0, EnergizedMana = 3.
 
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err != nil {
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, match.EffectTarget{}); err != nil {
 		t.Fatalf("PlayerB queue mana-burn: %v", err)
 	}
 	if err := e.ResolveReactionStack(); err != nil {
@@ -112,7 +113,7 @@ func TestManaBurnOverflowPartial(t *testing.T) {
 		t.Fatalf("PlayerA activate: %v", err)
 	}
 
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err != nil {
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, match.EffectTarget{}); err != nil {
 		t.Fatalf("PlayerB queue mana-burn: %v", err)
 	}
 	if err := e.ResolveReactionStack(); err != nil {
@@ -142,7 +143,7 @@ func TestManaBurnDoesNotAffectOwner(t *testing.T) {
 		t.Fatalf("PlayerA activate: %v", err)
 	}
 	// PlayerB pays 1 mana to queue Mana Burn.
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err != nil {
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, match.EffectTarget{}); err != nil {
 		t.Fatalf("PlayerB queue mana-burn: %v", err)
 	}
 	if err := e.ResolveReactionStack(); err != nil {

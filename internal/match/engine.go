@@ -12,6 +12,11 @@ import (
 var errMatchNotStarted = errors.New("match not started")
 var errMulliganInProgress = errors.New("mulligan in progress")
 
+const (
+	errTargetPieceOutOfBounds = "target piece out of board bounds"
+	errTargetPieceSquareEmpty = "target piece square is empty"
+)
+
 // errIfOpeningBlocksGameplay returns an error while the mulligan phase is active or before the first turn has begun.
 func (e *Engine) errIfOpeningBlocksGameplay() error {
 	if e.State.MulliganPhaseActive {
@@ -37,6 +42,7 @@ const (
 	CardManaBurn       gameplay.CardID = "mana-burn"
 	CardPieceSwap      gameplay.CardID = "piece-swap"
 	CardZipLine        gameplay.CardID = "zip-line"
+	CardSacrificeMass  gameplay.CardID = "sacrifice-of-the-masses"
 )
 
 type Engine struct {
@@ -52,8 +58,8 @@ type Engine struct {
 	pendingActivationFX []ActivationFXEvent
 	// movementGrants stores active movement modifiers granted by resolved card effects.
 	movementGrants []MovementGrant
-	// mindControlEffects stores temporary enemy-piece control effects.
-	mindControlEffects []MindControlEffect
+	// pieceControlEffects stores temporary enemy-piece control effects.
+	pieceControlEffects []PieceControlEffect
 	// ignitionTargets stores locked piece targets for the currently ignited card owner.
 	ignitionTargets map[gameplay.PlayerID][]chess.Pos
 	// ignitionTargetCard stores which card owns ignitionTargets for each seat.
@@ -214,6 +220,9 @@ func (e *Engine) ActivateCardWithTargets(pid gameplay.PlayerID, handIndex int, t
 	if len(targetPieces) > 0 && def.Targets == 0 {
 		return errors.New("target_pieces not allowed for this card")
 	}
+	if def.ID == CardSacrificeMass && len(p.Hand) >= gameplay.DefaultMaxHandSize {
+		return errors.New("sacrifice of the masses requires room to draw 2 cards")
+	}
 	// Cards that require piece targets: first ignite_card may move hand→ignition only; targets follow via SubmitIgnitionTargets.
 	if def.Targets > 0 && len(targetPieces) == 0 {
 		// Pre-ignition check: refuse if the card cannot possibly resolve (no valid targets exist).
@@ -226,6 +235,9 @@ func (e *Engine) ActivateCardWithTargets(pid gameplay.PlayerID, handIndex int, t
 		}
 		if def.ID == CardZipLine && !e.hasAnyZipLineTarget(pid) {
 			return errors.New("no valid zip line targets: no piece can zip to an empty square on its rank without leaving the king in check")
+		}
+		if def.ID == CardSacrificeMass && !e.hasAnySacrificeOfTheMassesTarget(pid) {
+			return errors.New("no valid sacrifice targets: no pawn can be sacrificed without leaving the king in check")
 		}
 		if err := e.State.ActivateCard(pid, handIndex); err != nil {
 			return err
@@ -327,14 +339,17 @@ func (e *Engine) validateIgnitionTargetPieces(pid gameplay.PlayerID, cardID game
 	if cardID == CardZipLine {
 		return e.validateZipLineIgnitionTarget(pid, targetPieces[0])
 	}
+	if cardID == CardSacrificeMass {
+		return e.validateSacrificeOfTheMassesTarget(pid, targetPieces[0])
+	}
 	playerColor := toColor(pid)
 	for _, pos := range targetPieces {
 		if pos.Row < 0 || pos.Row > 7 || pos.Col < 0 || pos.Col > 7 {
-			return errors.New("target piece out of board bounds")
+			return errors.New(errTargetPieceOutOfBounds)
 		}
 		piece := e.Chess.PieceAt(pos)
 		if piece.IsEmpty() {
-			return errors.New("target piece square is empty")
+			return errors.New(errTargetPieceSquareEmpty)
 		}
 		if piece.Color != playerColor {
 			return errors.New("target piece must belong to the activating player")
@@ -346,12 +361,12 @@ func (e *Engine) validateIgnitionTargetPieces(pid gameplay.PlayerID, cardID game
 // validateMindControlTarget validates one opponent piece target for Mind Control.
 func (e *Engine) validateMindControlTarget(pid gameplay.PlayerID, target chess.Pos) error {
 	if !target.InBounds() {
-		return errors.New("target piece out of board bounds")
+		return errors.New(errTargetPieceOutOfBounds)
 	}
 	playerColor := toColor(pid)
 	piece := e.Chess.PieceAt(target)
 	if piece.IsEmpty() {
-		return errors.New("target piece square is empty")
+		return errors.New(errTargetPieceSquareEmpty)
 	}
 	if piece.Color == playerColor {
 		return errors.New("target piece must belong to the opponent")
@@ -375,6 +390,48 @@ func (e *Engine) hasAnyMindControlTarget(pid gameplay.PlayerID) bool {
 				continue
 			}
 			return true
+		}
+	}
+	return false
+}
+
+// validateSacrificeOfTheMassesTarget validates one owned pawn target for Sacrifice of the Masses.
+func (e *Engine) validateSacrificeOfTheMassesTarget(pid gameplay.PlayerID, target chess.Pos) error {
+	if !target.InBounds() {
+		return errors.New(errTargetPieceOutOfBounds)
+	}
+	playerColor := toColor(pid)
+	piece := e.Chess.PieceAt(target)
+	if piece.IsEmpty() {
+		return errors.New(errTargetPieceSquareEmpty)
+	}
+	if piece.Color != playerColor {
+		return errors.New("target piece must belong to the activating player")
+	}
+	if piece.Type != chess.Pawn {
+		return errors.New("sacrifice target must be a pawn")
+	}
+	g := e.Chess.Clone()
+	g.SetPiece(target, chess.Piece{})
+	if g.IsCheck(playerColor) {
+		return errors.New("sacrificing this pawn would put your king in check")
+	}
+	return nil
+}
+
+// hasAnySacrificeOfTheMassesTarget returns true when pid controls a pawn that can be sacrificed.
+func (e *Engine) hasAnySacrificeOfTheMassesTarget(pid gameplay.PlayerID) bool {
+	playerColor := toColor(pid)
+	for row := 0; row < 8; row++ {
+		for col := 0; col < 8; col++ {
+			pos := chess.Pos{Row: row, Col: col}
+			p := e.Chess.PieceAt(pos)
+			if p.IsEmpty() || p.Color != playerColor || p.Type != chess.Pawn {
+				continue
+			}
+			if e.validateSacrificeOfTheMassesTarget(pid, pos) == nil {
+				return true
+			}
 		}
 	}
 	return false
@@ -561,8 +618,8 @@ func (e *Engine) ResolvePendingEffect(pid gameplay.PlayerID, target EffectTarget
 	}
 	pe := queue[0]
 	merged := target
-	if pe.CardID == CardZipLine && pe.ZipLineFrom != nil {
-		from := *pe.ZipLineFrom
+	if pe.CardID == CardZipLine && pe.TeleportFrom != nil {
+		from := *pe.TeleportFrom
 		merged.PiecePos = &from
 	}
 	if err := pe.Resolver.Apply(e, pe.Owner, merged); err != nil {
@@ -651,7 +708,7 @@ func (e *Engine) handleResolvedEffect(ev *gameplay.ResolvedIgnitionEvent) error 
 				return fmt.Errorf("zip line requires exactly one locked ignition square")
 			}
 			p := locks[0]
-			pe.ZipLineFrom = &chess.Pos{Row: p.Row, Col: p.Col}
+			pe.TeleportFrom = &chess.Pos{Row: p.Row, Col: p.Col}
 		}
 		e.pendingEffects[ev.Owner] = append(e.pendingEffects[ev.Owner], pe)
 		return nil
@@ -729,7 +786,7 @@ func (e *Engine) ActivatePlayerSkill(pid gameplay.PlayerID) error {
 		return err
 	}
 	e.expireMovementGrantsAfterOwnerTurn(pid)
-	e.expireMindControlEffectsAfterOwnerTurn(pid)
+	e.expirePieceControlEffectsAfterOwnerTurn(pid)
 	delete(e.extraMovesRemaining, pid)
 	delete(e.doubleTurnEffectTurnsLeft, pid)
 	e.Chess.Turn = color.Opponent()
@@ -770,7 +827,7 @@ func pieceRefFromChessPiece(p chess.Piece) (gameplay.PieceRef, bool) {
 // It is used by normal non-capture flow and pending-move finalization.
 func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 	e.pruneStaleMovementGrants()
-	e.pruneStaleMindControlEffects()
+	e.pruneStalePieceControlEffects()
 	captureForMana := e.isCaptureAttempt(pid, m)
 	var captured gameplay.PieceRef
 	haveCaptured := false
@@ -795,11 +852,11 @@ func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 	if err := e.applyAuthorizedMove(pid, m); err != nil {
 		return err
 	}
-	e.syncMindControlIgnitionLocksAfterMove(m)
+	e.syncPieceControlIgnitionLocksAfterMove(m)
 	e.advanceMovementGrantPosition(pid, m.From, m.To)
-	e.advanceMindControlPosition(pid, m.From, m.To)
+	e.advancePieceControlPosition(pid, m.From, m.To)
 	e.pruneStaleMovementGrants()
-	e.pruneStaleMindControlEffects()
+	e.pruneStalePieceControlEffects()
 	if haveCaptured {
 		e.State.AddToGraveyard(pid, captured)
 	}
@@ -815,7 +872,7 @@ func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 		return nil
 	}
 	e.expireMovementGrantsAfterOwnerTurn(pid)
-	e.expireMindControlEffectsAfterOwnerTurn(pid)
+	e.expirePieceControlEffectsAfterOwnerTurn(pid)
 	if err := e.State.EndTurn(pid); err != nil {
 		return err
 	}
@@ -825,9 +882,10 @@ func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 	return nil
 }
 
-// syncMindControlIgnitionLocksAfterMove keeps locked target coordinates aligned while Mind Control
-// is still burning. If the locked piece is captured, the lock is dropped so activation fails.
-func (e *Engine) syncMindControlIgnitionLocksAfterMove(m chess.Move) {
+// syncPieceControlIgnitionLocksAfterMove keeps locked target coordinates aligned while a piece
+// control card (e.g. Mind Control) is still burning. If the locked piece is captured, the lock is
+// dropped so activation fails.
+func (e *Engine) syncPieceControlIgnitionLocksAfterMove(m chess.Move) {
 	for owner, cardID := range e.ignitionTargetCard {
 		if cardID != CardMindControl {
 			continue
@@ -945,6 +1003,12 @@ func (e *Engine) SetExtraMovesRemainingForTest(pid gameplay.PlayerID, n int) {
 	}
 }
 
+// ExtraMovesRemainingForTest returns the remaining extra moves for assertions in resolver tests.
+// This is intended for tests only; do not call from production code.
+func (e *Engine) ExtraMovesRemainingForTest(pid gameplay.PlayerID) int {
+	return e.extraMovesRemaining[pid]
+}
+
 func toColor(pid gameplay.PlayerID) chess.Color {
 	if pid == gameplay.PlayerA {
 		return chess.White
@@ -971,8 +1035,8 @@ type PendingEffect struct {
 	Owner    gameplay.PlayerID
 	CardID   gameplay.CardID
 	Resolver EffectResolver
-	// ZipLineFrom is the ignition-locked source square for Zip Line while awaiting destination input.
-	ZipLineFrom *chess.Pos
+	// TeleportFrom is the ignition-locked source square for pending teleport effects (e.g. Zip Line) while awaiting destination input.
+	TeleportFrom *chess.Pos
 }
 
 // --- matchresolvers.ResolverEngine implementation ---
@@ -1003,24 +1067,60 @@ func (e *Engine) AddMovementGrant(owner gameplay.PlayerID, cardID gameplay.CardI
 	})
 }
 
-// AddMindControlEffect implements matchresolvers.ResolverEngine.
-func (e *Engine) AddMindControlEffect(owner gameplay.PlayerID, cardID gameplay.CardID, target chess.Pos, durationTurns int) error {
+// AddPieceControlEffect implements matchresolvers.ResolverEngine. It validates the target piece
+// against opts (forbidden types, king guard) and then applies a temporary control inversion that
+// expires after opts.DurationTurns of the controller's turns.
+func (e *Engine) AddPieceControlEffect(owner gameplay.PlayerID, cardID gameplay.CardID, target chess.Pos, opts matchresolvers.PieceControlOptions) error {
 	p := e.Chess.PieceAt(target)
 	if p.IsEmpty() {
 		return matchresolvers.ErrEffectFailed
 	}
-	return e.addMindControlEffect(MindControlEffect{
+	controllerColor := toColor(owner)
+	if p.Color == controllerColor {
+		return matchresolvers.ErrEffectFailed
+	}
+	if opts.ForbidKing && p.Type == chess.King {
+		return matchresolvers.ErrEffectFailed
+	}
+	for _, ft := range opts.ForbiddenTypes {
+		if p.Type == ft {
+			return matchresolvers.ErrEffectFailed
+		}
+	}
+	return e.addPieceControlEffect(PieceControlEffect{
 		Owner:             owner,
 		SourceCardID:      cardID,
 		Target:            target,
 		OriginalColor:     p.Color,
-		RemainingTurnEnds: durationTurns,
+		RemainingTurnEnds: opts.DurationTurns,
 	})
 }
 
 // GrantManaFromCardEffect implements matchresolvers.ResolverEngine.
 func (e *Engine) GrantManaFromCardEffect(pid gameplay.PlayerID, amount int) {
 	e.State.GrantManaFromCardEffect(pid, amount)
+}
+
+// ApplyPawnSacrificeReward implements matchresolvers.ResolverEngine.
+// It validates the pawn sacrifice, records the pawn in the opponent capture zone, then applies rewards.
+func (e *Engine) ApplyPawnSacrificeReward(owner gameplay.PlayerID, target chess.Pos, manaAmount, drawCount int) error {
+	if err := e.validateSacrificeOfTheMassesTarget(owner, target); err != nil {
+		return err
+	}
+	if err := e.State.CanDrawCardsNoCost(owner, drawCount); err != nil {
+		return err
+	}
+	piece := e.Chess.PieceAt(target)
+	ref, ok := pieceRefFromChessPiece(piece)
+	if !ok {
+		return errors.New("sacrifice target cannot be captured")
+	}
+	e.Chess.SetPiece(target, chess.Piece{})
+	e.pruneStaleMovementGrants()
+	e.pruneStalePieceControlEffects()
+	e.State.AddToGraveyard(gameplay.OppositePlayer(owner), ref)
+	e.State.GrantManaFromCardEffect(owner, manaAmount)
+	return e.State.DrawCardsNoCost(owner, drawCount)
 }
 
 // BurnManaFromOpponent implements matchresolvers.ResolverEngine.

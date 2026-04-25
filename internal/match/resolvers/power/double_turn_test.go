@@ -1,10 +1,11 @@
-package match
+package power_test
 
 import (
 	"testing"
 
 	"power-chess/internal/chess"
 	"power-chess/internal/gameplay"
+	"power-chess/internal/match"
 )
 
 // activateDoubleTurnAndResolve sets up a minimal match where PlayerA activates a Double Turn
@@ -12,9 +13,9 @@ import (
 // PlayerA's first extra move.
 //
 // Board setup: kings only so move legality is unambiguous. Returns the engine and state.
-func activateDoubleTurnAndResolve(t *testing.T) (*Engine, *gameplay.MatchState, *chess.Game) {
+func activateDoubleTurnAndResolve(t *testing.T) (*match.Engine, *gameplay.MatchState, *chess.Game) {
 	t.Helper()
-	dt := gameplay.CardInstance{InstanceID: "dt1", CardID: CardDoubleTurn, ManaCost: 0, Ignition: 2, Cooldown: 9}
+	dt := gameplay.CardInstance{InstanceID: "dt1", CardID: match.CardDoubleTurn, ManaCost: 0, Ignition: 2, Cooldown: 9}
 	state, err := gameplay.NewMatchState(testDeckWith(dt), testDeckWith(dt))
 	if err != nil {
 		t.Fatal(err)
@@ -29,7 +30,7 @@ func activateDoubleTurnAndResolve(t *testing.T) (*Engine, *gameplay.MatchState, 
 
 	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{dt}
 	state.Players[gameplay.PlayerA].Mana = 10
-	e := NewEngine(state, board)
+	e := match.NewEngine(state, board)
 	markInPlayForTest(state)
 
 	// Activate double-turn (Ignition=2 means it will resolve 2 turns from now for PlayerA).
@@ -58,8 +59,8 @@ func activateDoubleTurnAndResolve(t *testing.T) (*Engine, *gameplay.MatchState, 
 		t.Fatalf("PlayerB move 2: %v", err)
 	}
 	// After StartTurn(A) the resolver has fired and granted the extra move.
-	if e.extraMovesRemaining[gameplay.PlayerA] != 1 {
-		t.Fatalf("expected 1 extra move after ignition resolves, got %d", e.extraMovesRemaining[gameplay.PlayerA])
+	if e.ExtraMovesRemainingForTest(gameplay.PlayerA) != 1 {
+		t.Fatalf("expected 1 extra move after ignition resolves, got %d", e.ExtraMovesRemainingForTest(gameplay.PlayerA))
 	}
 	return e, state, board
 }
@@ -68,7 +69,7 @@ func activateDoubleTurnAndResolve(t *testing.T) (*Engine, *gameplay.MatchState, 
 // records exactly one extra move for PlayerA.
 func TestDoubleTurnResolverGrantsExtraMove(t *testing.T) {
 	e, _, _ := activateDoubleTurnAndResolve(t)
-	if got := e.extraMovesRemaining[gameplay.PlayerA]; got != 1 {
+	if got := e.ExtraMovesRemainingForTest(gameplay.PlayerA); got != 1 {
 		t.Fatalf("want 1 extra move, got %d", got)
 	}
 	if e.DoubleTurnActiveFor() != gameplay.PlayerA {
@@ -92,8 +93,8 @@ func TestDoubleTurnFirstMoveDoesNotEndTurn(t *testing.T) {
 	if e.Chess.Turn != chess.White {
 		t.Fatalf("Chess.Turn should be White after first extra move, got %v", e.Chess.Turn)
 	}
-	if e.extraMovesRemaining[gameplay.PlayerA] != 0 {
-		t.Fatalf("extra move counter should be 0 after consumption, got %d", e.extraMovesRemaining[gameplay.PlayerA])
+	if e.ExtraMovesRemainingForTest(gameplay.PlayerA) != 0 {
+		t.Fatalf("extra move counter should be 0 after consumption, got %d", e.ExtraMovesRemainingForTest(gameplay.PlayerA))
 	}
 }
 
@@ -130,8 +131,8 @@ func TestDoubleTurnIllegalFirstMoveRejected(t *testing.T) {
 		t.Fatal("expected illegal backward pawn move to be rejected")
 	}
 	// Extra move must not have been consumed.
-	if e.extraMovesRemaining[gameplay.PlayerA] != 1 {
-		t.Fatalf("extra move should not be consumed after rejection, got %d", e.extraMovesRemaining[gameplay.PlayerA])
+	if e.ExtraMovesRemainingForTest(gameplay.PlayerA) != 1 {
+		t.Fatalf("extra move should not be consumed after rejection, got %d", e.ExtraMovesRemainingForTest(gameplay.PlayerA))
 	}
 	if e.State.CurrentTurn != gameplay.PlayerA {
 		t.Fatalf("turn should still be PlayerA after rejected move, got %s", e.State.CurrentTurn)
@@ -144,7 +145,7 @@ func TestDoubleTurnIllegalFirstMoveRejected(t *testing.T) {
 // Board: white queen on the same file as the black king with a clear path.
 // Burn pawn shuttles during ignition; queen is untouched and ready on the double-turn.
 func TestDoubleTurnKingCaptureIsIllegal(t *testing.T) {
-	dt := gameplay.CardInstance{InstanceID: "dt1", CardID: CardDoubleTurn, ManaCost: 0, Ignition: 2, Cooldown: 9}
+	dt := gameplay.CardInstance{InstanceID: "dt1", CardID: match.CardDoubleTurn, ManaCost: 0, Ignition: 2, Cooldown: 9}
 	state, err := gameplay.NewMatchState(testDeckWith(dt), testDeckWith(dt))
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +160,7 @@ func TestDoubleTurnKingCaptureIsIllegal(t *testing.T) {
 
 	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{dt}
 	state.Players[gameplay.PlayerA].Mana = 10
-	e := NewEngine(state, board)
+	e := match.NewEngine(state, board)
 	markInPlayForTest(state)
 
 	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
@@ -216,7 +217,7 @@ func TestDoubleTurnDoubleTurnActiveForClearsAfterTurnEnd(t *testing.T) {
 // TestDoubleTurnActivatePlayerSkillClearsExtraMoves ensures that if a player uses a skill
 // during a Double Turn turn, the extra move is discarded and the turn advances normally.
 func TestDoubleTurnActivatePlayerSkillClearsExtraMoves(t *testing.T) {
-	dt := gameplay.CardInstance{InstanceID: "dt1", CardID: CardDoubleTurn, ManaCost: 0, Ignition: 2, Cooldown: 9}
+	dt := gameplay.CardInstance{InstanceID: "dt1", CardID: match.CardDoubleTurn, ManaCost: 0, Ignition: 2, Cooldown: 9}
 	state, err := gameplay.NewMatchState(testDeckWith(dt), testDeckWith(dt))
 	if err != nil {
 		t.Fatal(err)
@@ -234,7 +235,7 @@ func TestDoubleTurnActivatePlayerSkillClearsExtraMoves(t *testing.T) {
 
 	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{dt}
 	state.Players[gameplay.PlayerA].Mana = 10
-	e := NewEngine(state, board)
+	e := match.NewEngine(state, board)
 	markInPlayForTest(state)
 
 	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
@@ -248,8 +249,8 @@ func TestDoubleTurnActivatePlayerSkillClearsExtraMoves(t *testing.T) {
 	_ = e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 5, Col: 0}, To: chess.Pos{Row: 4, Col: 0}})
 	_ = e.SubmitMove(gameplay.PlayerB, chess.Move{From: chess.Pos{Row: 0, Col: 3}, To: chess.Pos{Row: 0, Col: 2}})
 
-	if e.extraMovesRemaining[gameplay.PlayerA] != 1 {
-		t.Fatalf("expected extra move, got %d", e.extraMovesRemaining[gameplay.PlayerA])
+	if e.ExtraMovesRemainingForTest(gameplay.PlayerA) != 1 {
+		t.Fatalf("expected extra move, got %d", e.ExtraMovesRemainingForTest(gameplay.PlayerA))
 	}
 
 	// Use the skill instead of moving — the extra move should be discarded.
@@ -260,7 +261,7 @@ func TestDoubleTurnActivatePlayerSkillClearsExtraMoves(t *testing.T) {
 	if state.CurrentTurn != gameplay.PlayerB {
 		t.Fatalf("turn should advance to PlayerB after skill activation, got %s", state.CurrentTurn)
 	}
-	if e.extraMovesRemaining[gameplay.PlayerA] != 0 {
-		t.Fatalf("extra moves should be cleared after skill activation, got %d", e.extraMovesRemaining[gameplay.PlayerA])
+	if e.ExtraMovesRemainingForTest(gameplay.PlayerA) != 0 {
+		t.Fatalf("extra moves should be cleared after skill activation, got %d", e.ExtraMovesRemainingForTest(gameplay.PlayerA))
 	}
 }

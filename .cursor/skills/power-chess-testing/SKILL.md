@@ -35,7 +35,8 @@ For card-effect workstreams, branch naming must follow `feature/<card-id>` (for 
 |---------|------|----------------|
 | `internal/chess` | `engine_coverage_test.go` | `IsStalemate`, `ApplyPseudoLegalMove`, `IsSquareAttacked` edge cases |
 | `internal/gameplay` | `turn_coverage_test.go` | `GrantCaptureBonusMana`, `ConsumeCardFromHand`, `EndTurn`, `StartTurn`, `SelectPlayerSkill`, `tickCooldowns`, `EnterMulliganPhaseWithoutShuffle` |
-| `internal/match` | `engine_coverage_test.go` | `EndTurn`, `ActivatePlayerSkill`, `PendingEffects`, `ReactionWindowSnapshot`, `EffectResolver` implementations |
+| `internal/match` | `engine_coverage_test.go` | `EndTurn`, `ActivatePlayerSkill`, `PendingEffects`, `ReactionWindowSnapshot`, match runtime behavior |
+| `internal/match/resolvers/<type>` | `*_test.go` | `EffectResolver` implementations colocated with resolver packages |
 | `internal/server` | `ws_integration_test.go` | Original WebSocket integration tests |
 | `internal/server` | `ws_handlers_test.go` | New handler tests: confirm_mulligan, submit_move, ignite_card, draw_card, leave_match, debug_match_fixture |
 
@@ -94,7 +95,7 @@ go test ./... -coverprofile=coverage.out && go tool cover -func=coverage.out | t
 
 Focus new tests on handlers and resolvers in:
 - `internal/server/ws.go` — handler functions
-- `internal/match/resolvers.go` — `Apply` and `RequiresTarget` implementations
+- `internal/match/resolvers/<type>` — `Apply` and `RequiresTarget` implementations
 - `internal/gameplay/state.go` — turn/mana helpers
 
 ## Troubleshooting

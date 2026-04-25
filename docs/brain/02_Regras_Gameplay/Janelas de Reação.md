@@ -14,13 +14,13 @@
 ## Ordem na cadeia (resolução LIFO)
 
 - `Com resposta:` Ignição de uma carta > Resposta do oponente > Confirmação do primeiro jogador > Animação "Resolving Effects" > Resolução iniciada (LIFO) > Animação "Glow" + Teste success/fail > Se `success` o efeito da carta é chamado aqui; Se `fail`, animação "Glow Black&White" + o efeito não é chamado e nada acontece > Próxima carta da pilha entra em resolução > Animação "Glow" + Teste success/fail > Se `success` o efeito da carta é chamado aqui; Se `fail`, animação "Glow Black&White" + o efeito não é chamado e nada acontece > ... Continua até acabarem as cartas da pilha de reações
-- `Sem resposta:` Ignição de uma carta > Oponente dá 'OK' > Resolução iniciada (LIFO) > Animação "Glow" + Teste success/fail > Se `success` o efeito da carta é chamado aqui; Se `fail`, animação "Glow Black&White" + o efeito não é chamado e nada acontece
+- `Sem resposta:` Ignição de uma carta > Oponente confirma com **Confirm Play / Confirmar Jogada** > Resolução iniciada (LIFO) > Animação "Glow" + Teste success/fail > Se `success` o efeito da carta é chamado aqui; Se `fail`, animação "Glow Black&White" + o efeito não é chamado e nada acontece
 
 ## Toggle "Reactions" (OFF / ON / AUTO)
 
 | Modo     | Comportamento do servidor                                                                                                                             |
 | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **OFF**  | Não abre janela enquanto oponente age ('OK' automático por trás); `capture_attempt` também é sempre aceito com 'OK' automaticamente, sem abrir janela |
+| **OFF**  | Não abre janela enquanto oponente age (confirmação automática por trás); `capture_attempt` também é aceito automaticamente, sem abrir janela |
 | **ON**   | Oponente recebe direito de reação mesmo sem resposta viável                                                                                           |
 | **AUTO** | Direito de reação só se identificável que o jogador pode responder: cartas na mão + mana atual + regra de cópia na recarga + tipo permitido na janela |
 

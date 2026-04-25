@@ -126,7 +126,7 @@ Target a pawn you control, sacrifice it to gain 6 mana and draw 2 cards.
 ## Cost: 0
 ## Ignition: 0
 ## Cooldown: 10
-## Targets: 0
+## Targets: 1
 ## Effect duration: 0
 ## Example:
 ```

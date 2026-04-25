@@ -25,7 +25,8 @@
 internal/
 ├── chess/        motor de xadrez puro (movimentos, xeque, xeque-mate)
 ├── gameplay/     estado de partida (deck, mana, ignição, recarga, cartas)
-├── match/        efeitos de carta, reações, cadeias Counter, resolvers
+├── match/        runtime da partida, reações, cadeias Counter, hooks de engine
+│   └── resolvers/ efeitos de carta por tipo
 ├── server/       protocolo WS, handlers HTTP, salas, auth, decks
 └── ranking/      ELO
 ```

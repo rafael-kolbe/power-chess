@@ -21,9 +21,9 @@ func (e *Engine) errIfPlayerHasUnresolvedPendingEffects(pid gameplay.PlayerID) e
 	return nil
 }
 
-// zipLineHasLegalDestination reports whether the piece at from can teleport to some empty square
-// on the same rank without leaving the activating player's king in check.
-func (e *Engine) zipLineHasLegalDestination(pid gameplay.PlayerID, from chess.Pos) bool {
+// hasSameRankTeleportDestination reports whether the piece at from can teleport to some empty
+// square on the same rank without leaving the activating player's king in check.
+func (e *Engine) hasSameRankTeleportDestination(pid gameplay.PlayerID, from chess.Pos) bool {
 	own := toColor(pid)
 	for col := 0; col < 8; col++ {
 		to := chess.Pos{Row: from.Row, Col: col}
@@ -48,12 +48,12 @@ func (e *Engine) zipLineHasLegalDestination(pid gameplay.PlayerID, from chess.Po
 // validateZipLineIgnitionTarget checks the ignition target square for Zip Line.
 func (e *Engine) validateZipLineIgnitionTarget(pid gameplay.PlayerID, from chess.Pos) error {
 	if !from.InBounds() {
-		return errors.New("target piece out of board bounds")
+		return errors.New(errTargetPieceOutOfBounds)
 	}
 	own := toColor(pid)
 	piece := e.Chess.PieceAt(from)
 	if piece.IsEmpty() {
-		return errors.New("target piece square is empty")
+		return errors.New(errTargetPieceSquareEmpty)
 	}
 	if piece.Color != own {
 		return errors.New("target piece must belong to the activating player")
@@ -61,7 +61,7 @@ func (e *Engine) validateZipLineIgnitionTarget(pid gameplay.PlayerID, from chess
 	if piece.Type == chess.King {
 		return errors.New("zip line cannot target the king")
 	}
-	if !e.zipLineHasLegalDestination(pid, from) {
+	if !e.hasSameRankTeleportDestination(pid, from) {
 		return errors.New("no valid zip line destination from that square")
 	}
 	return nil
@@ -78,7 +78,7 @@ func (e *Engine) hasAnyZipLineTarget(pid gameplay.PlayerID) bool {
 			if p.IsEmpty() || p.Color != own || p.Type == chess.King {
 				continue
 			}
-			if e.zipLineHasLegalDestination(pid, from) {
+			if e.hasSameRankTeleportDestination(pid, from) {
 				return true
 			}
 		}
@@ -86,31 +86,37 @@ func (e *Engine) hasAnyZipLineTarget(pid gameplay.PlayerID) bool {
 	return false
 }
 
-// ApplyZipLineTeleport validates a same-rank empty teleport, applies it on the live board, then
-// ends the chess turn for the owner (consuming any Double Turn extra move state), matching the
-// tail of applyMoveCore after a normal move.
-func (e *Engine) ApplyZipLineTeleport(owner gameplay.PlayerID, from, to chess.Pos) error {
+// ApplyPieceTeleport moves the piece at from to to subject to opts constraints, then optionally
+// ends the owner's chess turn when opts.ConsumeTurn is true (consuming any Double Turn extra
+// move state), matching the tail of applyMoveCore after a normal move.
+func (e *Engine) ApplyPieceTeleport(owner gameplay.PlayerID, from, to chess.Pos, opts matchresolvers.TeleportOptions) error {
 	if err := e.errIfOpeningBlocksGameplay(); err != nil {
 		return err
 	}
 	if e.State.CurrentTurn != owner {
-		return fmt.Errorf("zip line can only be resolved on your turn")
+		return fmt.Errorf("teleport can only be resolved on your turn")
 	}
 	if e.Chess.Turn != toColor(owner) {
-		return fmt.Errorf("chess turn out of sync for zip line")
+		return fmt.Errorf("chess turn out of sync for teleport")
 	}
 	if e.ReactionWindow != nil && e.ReactionWindow.Open {
-		return fmt.Errorf("cannot resolve zip line while a reaction window is open")
+		return fmt.Errorf("cannot resolve teleport while a reaction window is open")
 	}
 	own := toColor(owner)
 	p := e.Chess.PieceAt(from)
-	if p.IsEmpty() || p.Color != own || p.Type == chess.King {
+	if p.IsEmpty() || p.Color != own {
 		return matchresolvers.ErrEffectFailed
 	}
-	if from.Row != to.Row || from == to {
+	if opts.ForbidKing && p.Type == chess.King {
 		return matchresolvers.ErrEffectFailed
 	}
-	if !e.Chess.PieceAt(to).IsEmpty() {
+	if from == to {
+		return matchresolvers.ErrEffectFailed
+	}
+	if opts.RequireSameRow && from.Row != to.Row {
+		return matchresolvers.ErrEffectFailed
+	}
+	if opts.RequireEmptyDestination && !e.Chess.PieceAt(to).IsEmpty() {
 		return matchresolvers.ErrEffectFailed
 	}
 	cp := e.Chess.Clone()
@@ -122,29 +128,31 @@ func (e *Engine) ApplyZipLineTeleport(owner gameplay.PlayerID, from, to chess.Po
 	}
 
 	e.pruneStaleMovementGrants()
-	e.pruneStaleMindControlEffects()
+	e.pruneStalePieceControlEffects()
 	if err := e.Chess.TeleportZipLine(from, to); err != nil {
 		return err
 	}
 	m := chess.Move{From: from, To: to}
-	e.syncMindControlIgnitionLocksAfterMove(m)
+	e.syncPieceControlIgnitionLocksAfterMove(m)
 	e.advanceMovementGrantPosition(owner, from, to)
-	e.advanceMindControlPosition(owner, from, to)
+	e.advancePieceControlPosition(owner, from, to)
 	e.pruneStaleMovementGrants()
-	e.pruneStaleMindControlEffects()
+	e.pruneStalePieceControlEffects()
 
-	delete(e.extraMovesRemaining, owner)
-	delete(e.doubleTurnEffectTurnsLeft, owner)
-	e.expireMovementGrantsAfterOwnerTurn(owner)
-	e.expireMindControlEffectsAfterOwnerTurn(owner)
-	if err := e.State.EndTurn(owner); err != nil {
-		return err
-	}
-	next := e.State.CurrentTurn
-	e.Chess.Turn = toColor(next)
-	e.reconcileTurnState()
-	if err := e.StartTurn(next); err != nil {
-		return err
+	if opts.ConsumeTurn {
+		delete(e.extraMovesRemaining, owner)
+		delete(e.doubleTurnEffectTurnsLeft, owner)
+		e.expireMovementGrantsAfterOwnerTurn(owner)
+		e.expirePieceControlEffectsAfterOwnerTurn(owner)
+		if err := e.State.EndTurn(owner); err != nil {
+			return err
+		}
+		next := e.State.CurrentTurn
+		e.Chess.Turn = toColor(next)
+		e.reconcileTurnState()
+		if err := e.StartTurn(next); err != nil {
+			return err
+		}
 	}
 	return nil
 }

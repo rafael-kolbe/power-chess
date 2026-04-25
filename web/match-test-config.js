@@ -82,8 +82,8 @@ export function buildMatchDebugFixturePayload() {
     test_environment: true,
     white: {
       deck: [...DEFAULT_DECK_20],
-      hand: ["zip-line", "mind-control", "extinguish"],
-      mana: 8,
+      hand: ["zip-line", "sacrifice-of-the-masses", "extinguish"],
+      mana: 2,
       maxMana: 10,
       energizedMana: 0,
       maxEnergized: 20,

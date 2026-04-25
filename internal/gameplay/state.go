@@ -16,6 +16,7 @@ const (
 	DefaultExtraManaPerTurnCap  = 1
 	DefaultIgnitionSlotCapacity = 1
 	errNotEnoughMana            = "not enough mana"
+	errHandFull                 = "hand is full"
 )
 
 type PlayerID string
@@ -44,10 +45,10 @@ type PieceRef struct {
 
 // IgnitionSlot stores the currently igniting card (single slot).
 type IgnitionSlot struct {
-	Card             CardInstance
-	TurnsRemaining   int
-	Occupied         bool
-	ActivationOwner  PlayerID
+	Card            CardInstance
+	TurnsRemaining  int
+	Occupied        bool
+	ActivationOwner PlayerID
 	// EffectNegated is true when an opponent effect (e.g. Extinguish) marked this ignition
 	// activation as negated; resolution uses failure and the UI shows a negate overlay until the
 	// card leaves the ignition zone.
@@ -236,10 +237,44 @@ func (s *MatchState) DrawCard(pid PlayerID) error {
 		return errors.New(errNotEnoughMana)
 	}
 	if len(p.Hand) >= DefaultMaxHandSize {
-		return errors.New("hand is full")
+		return errors.New(errHandFull)
 	}
 	p.Mana -= DefaultDrawCardManaCost
 	return s.drawCardNoCost(pid)
+}
+
+// CanDrawCardsNoCost validates whether pid can draw count cards without paying mana.
+func (s *MatchState) CanDrawCardsNoCost(pid PlayerID, count int) error {
+	if count < 0 {
+		return errors.New("invalid draw count")
+	}
+	if count == 0 {
+		return nil
+	}
+	p := s.Players[pid]
+	if p == nil {
+		return errors.New("unknown player")
+	}
+	if len(p.Deck) < count {
+		return errors.New("deck does not have enough cards")
+	}
+	if len(p.Hand)+count > DefaultMaxHandSize {
+		return errors.New(errHandFull)
+	}
+	return nil
+}
+
+// DrawCardsNoCost moves count cards from deck to hand without charging mana.
+func (s *MatchState) DrawCardsNoCost(pid PlayerID, count int) error {
+	if err := s.CanDrawCardsNoCost(pid, count); err != nil {
+		return err
+	}
+	for i := 0; i < count; i++ {
+		if err := s.drawCardNoCost(pid); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *MatchState) drawCardNoCost(pid PlayerID) error {
@@ -248,7 +283,7 @@ func (s *MatchState) drawCardNoCost(pid PlayerID) error {
 		return errors.New("deck is empty")
 	}
 	if len(p.Hand) >= DefaultMaxHandSize {
-		return errors.New("hand is full")
+		return errors.New(errHandFull)
 	}
 	svc := NewZoneService()
 	_, nextDeck, nextHand, err := svc.MoveCardBetweenSlices(p.Deck, p.Hand, 0)
@@ -286,11 +321,11 @@ func (s *MatchState) ActivateCard(pid PlayerID, handIndex int) error {
 	}
 	p.Hand = nextHand
 	p.Ignition = IgnitionSlot{
-		Card:             card,
-		TurnsRemaining:   card.Ignition,
-		Occupied:         true,
-		ActivationOwner:  pid,
-		EffectNegated:    false,
+		Card:            card,
+		TurnsRemaining:  card.Ignition,
+		Occupied:        true,
+		ActivationOwner: pid,
+		EffectNegated:   false,
 	}
 	return nil
 }
