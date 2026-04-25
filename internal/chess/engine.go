@@ -144,8 +144,7 @@ func (g *Game) ApplyMove(m Move) error {
 
 	legal := false
 	for _, cand := range g.LegalMovesFrom(m.From) {
-		if cand.To == m.To {
-			m.Promotion = cand.Promotion
+		if moveMatchesCandidate(m, cand) {
 			legal = true
 			break
 		}
@@ -178,6 +177,9 @@ func (g *Game) ApplyPseudoLegalMove(m Move) error {
 	}
 	if !t.IsEmpty() && t.Color == p.Color {
 		return fmt.Errorf("cannot capture own piece")
+	}
+	if err := validatePromotionChoice(p, m); err != nil {
+		return err
 	}
 	cp := g.clone()
 	cp.applyUnchecked(m)
@@ -234,6 +236,53 @@ func (g *Game) applyUnchecked(m Move) {
 	g.SetPiece(m.To, p)
 
 	g.updateCastlingRights(m, p)
+}
+
+// moveMatchesCandidate reports whether a requested move exactly matches a legal
+// candidate, including the selected promotion piece when promotion is required.
+func moveMatchesCandidate(requested, candidate Move) bool {
+	return requested.To == candidate.To && requested.Promotion == candidate.Promotion
+}
+
+// validatePromotionChoice enforces explicit and valid promotion selections.
+func validatePromotionChoice(piece Piece, m Move) error {
+	promotes := piece.Type == Pawn && (m.To.Row == 0 || m.To.Row == 7)
+	if !promotes {
+		if m.Promotion != NoPiece {
+			return fmt.Errorf("promotion is only allowed for pawn promotion")
+		}
+		return nil
+	}
+	if isPromotionPiece(m.Promotion) {
+		return nil
+	}
+	return fmt.Errorf("invalid promotion piece")
+}
+
+// isPromotionPiece reports whether a piece type is legal for pawn promotion.
+func isPromotionPiece(piece PieceType) bool {
+	switch piece {
+	case Queen, Rook, Bishop, Knight:
+		return true
+	default:
+		return false
+	}
+}
+
+// appendPawnMove appends either a normal pawn move or all legal promotion
+// choices when the destination is the promotion rank.
+func appendPawnMove(moves []Move, from, to Pos, color Color) []Move {
+	promoRow := 0
+	if color == Black {
+		promoRow = 7
+	}
+	if to.Row != promoRow {
+		return append(moves, Move{From: from, To: to})
+	}
+	for _, promotion := range []PieceType{Queen, Rook, Bishop, Knight} {
+		moves = append(moves, Move{From: from, To: to, Promotion: promotion})
+	}
+	return moves
 }
 
 func (g *Game) updateCastlingRights(m Move, moved Piece) {
@@ -386,9 +435,9 @@ func (g *Game) pseudoMovesForAttack(from Pos) []Move {
 }
 
 func (g *Game) pawnMoves(from Pos, color Color, attackOnly bool) []Move {
-	dir, startRow, promoRow := -1, 6, 0
+	dir, startRow := -1, 6
 	if color == Black {
-		dir, startRow, promoRow = 1, 1, 7
+		dir, startRow = 1, 1
 	}
 	moves := []Move{}
 
@@ -404,11 +453,7 @@ func (g *Game) pawnMoves(from Pos, color Color, attackOnly bool) []Move {
 			continue
 		}
 		if !target.IsEmpty() && target.Color != color {
-			mv := Move{From: from, To: to}
-			if to.Row == promoRow {
-				mv.Promotion = Queen
-			}
-			moves = append(moves, mv)
+			moves = appendPawnMove(moves, from, to, color)
 		}
 		if g.EnPassant.Valid && to == g.EnPassant.Target {
 			moves = append(moves, Move{From: from, To: to})
@@ -420,11 +465,7 @@ func (g *Game) pawnMoves(from Pos, color Color, attackOnly bool) []Move {
 
 	one := Pos{Row: from.Row + dir, Col: from.Col}
 	if one.InBounds() && g.PieceAt(one).IsEmpty() {
-		mv := Move{From: from, To: one}
-		if one.Row == promoRow {
-			mv.Promotion = Queen
-		}
-		moves = append(moves, mv)
+		moves = appendPawnMove(moves, from, one, color)
 		two := Pos{Row: from.Row + 2*dir, Col: from.Col}
 		if from.Row == startRow && g.PieceAt(two).IsEmpty() {
 			moves = append(moves, Move{From: from, To: two})

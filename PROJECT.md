@@ -22,6 +22,7 @@
 - Vitória por **checkmate** (ou condições de fim expostas no protocolo).
 - Poderes podem causar xeque-mate, salvo se o texto da carta proibir.
 - O **rei nunca é capturado** diretamente; jogadas que “capturam” o rei são ilegais.
+- Promoção de peão exige escolha explícita do jogador: **cavalo**, **bispo**, **torre** ou **rainha**.
 - Peças capturadas vão para **Captura** (zona de peças capturadas pelo oponente; no protocolo ainda `graveyard*`); alguns efeitos podem interagir com isso.
 
 ### Termos: ignição, ativação e negação (canônico)

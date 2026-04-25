@@ -921,7 +921,7 @@ func (e *Engine) applyAuthorizedMove(pid gameplay.PlayerID, m chess.Move) error 
 // isStandardLegalMove checks whether m is currently legal under standard chess rules.
 func (e *Engine) isStandardLegalMove(m chess.Move) bool {
 	for _, cand := range e.Chess.LegalMovesFrom(m.From) {
-		if cand.To == m.To {
+		if cand.To == m.To && cand.Promotion == m.Promotion {
 			return true
 		}
 	}

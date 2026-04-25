@@ -255,3 +255,49 @@ func TestPawnPromotion(t *testing.T) {
 		t.Fatal("pawn should promote to queen")
 	}
 }
+
+// TestPawnPromotionChoiceAllowsAllPromotablePieces verifies that promotion is
+// chosen by the move instead of always defaulting to queen.
+func TestPawnPromotionChoiceAllowsAllPromotablePieces(t *testing.T) {
+	for _, promotion := range []PieceType{Queen, Rook, Bishop, Knight} {
+		g := NewEmptyGame(White)
+		g.SetPiece(Pos{Row: 1, Col: 0}, Piece{Type: Pawn, Color: White})
+		g.SetPiece(Pos{Row: 7, Col: 4}, Piece{Type: King, Color: White})
+		g.SetPiece(Pos{Row: 0, Col: 4}, Piece{Type: King, Color: Black})
+
+		if err := g.ApplyMove(Move{From: Pos{Row: 1, Col: 0}, To: Pos{Row: 0, Col: 0}, Promotion: promotion}); err != nil {
+			t.Fatalf("promotion to %v should succeed: %v", promotion, err)
+		}
+		if got := g.PieceAt(Pos{Row: 0, Col: 0}).Type; got != promotion {
+			t.Fatalf("promotion piece: want %v got %v", promotion, got)
+		}
+	}
+}
+
+// TestPawnPromotionRequiresExplicitChoice verifies that promotion moves no
+// longer silently become queens when the client omits the promotion piece.
+func TestPawnPromotionRequiresExplicitChoice(t *testing.T) {
+	g := NewEmptyGame(White)
+	g.SetPiece(Pos{Row: 1, Col: 0}, Piece{Type: Pawn, Color: White})
+	g.SetPiece(Pos{Row: 7, Col: 4}, Piece{Type: King, Color: White})
+	g.SetPiece(Pos{Row: 0, Col: 4}, Piece{Type: King, Color: Black})
+
+	if err := g.ApplyMove(Move{From: Pos{Row: 1, Col: 0}, To: Pos{Row: 0, Col: 0}}); err == nil {
+		t.Fatal("expected promotion without a piece choice to be illegal")
+	}
+}
+
+// TestPawnPromotionRejectsInvalidPiece verifies that pawns cannot promote to a
+// king, pawn, or empty piece.
+func TestPawnPromotionRejectsInvalidPiece(t *testing.T) {
+	for _, promotion := range []PieceType{NoPiece, Pawn, King} {
+		g := NewEmptyGame(White)
+		g.SetPiece(Pos{Row: 1, Col: 0}, Piece{Type: Pawn, Color: White})
+		g.SetPiece(Pos{Row: 7, Col: 4}, Piece{Type: King, Color: White})
+		g.SetPiece(Pos{Row: 0, Col: 4}, Piece{Type: King, Color: Black})
+
+		if err := g.ApplyMove(Move{From: Pos{Row: 1, Col: 0}, To: Pos{Row: 0, Col: 0}, Promotion: promotion}); err == nil {
+			t.Fatalf("expected promotion to %v to be illegal", promotion)
+		}
+	}
+}

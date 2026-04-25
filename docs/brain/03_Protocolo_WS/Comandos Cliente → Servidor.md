@@ -8,7 +8,7 @@
 |------|-----------|
 | `ping` | Keepalive |
 | `join_match` | Entrar/criar sala (`roomId`, `pieceType`, `playerId`, etc.) |
-| `submit_move` | Mover peça (`fromRow`, `fromCol`, `toRow`, `toCol`) |
+| `submit_move` | Mover peça (`fromRow`, `fromCol`, `toRow`, `toCol`; `promotion` obrigatório ao promover peão) |
 | `ignite_card` | Mover carta da mão para ignição (`handIndex`) |
 | `submit_ignition_targets` | Confirmar alvos para carta que exige targets (`target_pieces`) |
 | `draw_card` | Comprar carta do deck (2 mana; só no próprio turno fora de janelas) |
@@ -33,6 +33,10 @@
 ### `confirm_mulligan`
 - `handIndices`: lista 0-based das cartas a devolver; vazia = aceitar todas.
 - Quando o **segundo** jogador confirma, inicia o primeiro turno (brancas).
+
+### `submit_move`
+- Promoção de peão exige `promotion`: `queen`, `rook`, `bishop` ou `knight`.
+- O servidor rejeita promoção sem escolha explícita ou para peça inválida.
 
 ### `ignite_card` + `submit_ignition_targets`
 - Cartas com `targets > 0`: primeiro `ignite_card` (mão → ignição); snapshot expõe `ignitionTargeting.awaitingTargetChoice`; então `submit_ignition_targets` para trabar os alvos; só depois o servidor abre `ignite_reaction`.

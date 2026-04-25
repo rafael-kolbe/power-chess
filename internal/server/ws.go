@@ -551,8 +551,9 @@ func (c *Client) handleSubmitMove(env Envelope) error {
 		return err
 	}
 	mv := chess.Move{
-		From: chess.Pos{Row: p.FromRow, Col: p.FromCol},
-		To:   chess.Pos{Row: p.ToRow, Col: p.ToCol},
+		From:      chess.Pos{Row: p.FromRow, Col: p.FromCol},
+		To:        chess.Pos{Row: p.ToRow, Col: p.ToCol},
+		Promotion: promotionPieceFromPayload(p.Promotion),
 	}
 	if !c.room.BothPlayersConnected() {
 		return protocolError{code: ErrorActionFailed, message: "waiting_for_opponent"}
@@ -581,6 +582,24 @@ func (c *Client) handleSubmitMove(env Envelope) error {
 	c.room.TouchActivity()
 	c.room.BroadcastSnapshot()
 	return nil
+}
+
+// promotionPieceFromPayload converts submit_move promotion text into a chess
+// piece type. Empty or unknown values are intentionally left as NoPiece so the
+// authoritative chess engine rejects invalid promotion moves.
+func promotionPieceFromPayload(raw string) chess.PieceType {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "queen", "q":
+		return chess.Queen
+	case "rook", "r":
+		return chess.Rook
+	case "bishop", "b":
+		return chess.Bishop
+	case "knight", "n":
+		return chess.Knight
+	default:
+		return chess.NoPiece
+	}
 }
 
 // handleIgniteCard moves a hand card into the player's ignition zone (opens reactions when applicable).

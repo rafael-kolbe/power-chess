@@ -96,10 +96,11 @@ type JoinMatchPayload struct {
 
 // SubmitMovePayload sends a chess move from frontend to backend.
 type SubmitMovePayload struct {
-	FromRow int `json:"fromRow"`
-	FromCol int `json:"fromCol"`
-	ToRow   int `json:"toRow"`
-	ToCol   int `json:"toCol"`
+	FromRow   int    `json:"fromRow"`
+	FromCol   int    `json:"fromCol"`
+	ToRow     int    `json:"toRow"`
+	ToCol     int    `json:"toCol"`
+	Promotion string `json:"promotion,omitempty"`
 }
 
 // IgniteCardPayload moves a card from hand into this player's ignition zone (may open reaction windows).
@@ -138,11 +139,11 @@ type ActivePieceEffectSnapshot struct {
 
 // ActivateCardEventPayload is server→client: ignition finished and the effect resolution step ran.
 type ActivateCardEventPayload struct {
-	PlayerID          string `json:"playerId"`
-	CardID            string `json:"cardId"`
-	CardType          string `json:"cardType,omitempty"`
-	Success           bool   `json:"success"`
-	RetainIgnition    bool   `json:"retainIgnition,omitempty"`
+	PlayerID       string `json:"playerId"`
+	CardID         string `json:"cardId"`
+	CardType       string `json:"cardType,omitempty"`
+	Success        bool   `json:"success"`
+	RetainIgnition bool   `json:"retainIgnition,omitempty"`
 	// NegatesActivationOf is the player ID whose card in the ignition zone had its activation
 	// negated by this event (EffectNegated transitioned false→true). Non-empty only when this
 	// event caused that transition. Client must show the negate overlay immediately after the glow.
@@ -260,10 +261,10 @@ type PlayerHUDState struct {
 	// ReactionMode is off / on / auto — server authority for when to open reaction windows.
 	ReactionMode string `json:"reactionMode,omitempty"`
 	// Per-player ignition zone (public to both players).
-	IgnitionOn               bool   `json:"ignitionOn,omitempty"`
-	IgnitionCard             string `json:"ignitionCard,omitempty"`
-	IgnitionTurnsRemaining   int    `json:"ignitionTurnsRemaining,omitempty"`
-	IgnitionEffectNegated    bool   `json:"ignitionEffectNegated,omitempty"`
+	IgnitionOn             bool   `json:"ignitionOn,omitempty"`
+	IgnitionCard           string `json:"ignitionCard,omitempty"`
+	IgnitionTurnsRemaining int    `json:"ignitionTurnsRemaining,omitempty"`
+	IgnitionEffectNegated  bool   `json:"ignitionEffectNegated,omitempty"`
 }
 
 // PendingEffectState describes unresolved effects that need player input.
@@ -368,14 +369,14 @@ type StateSnapshotPayload struct {
 	DoubleTurnActiveFor string `json:"doubleTurnActiveFor,omitempty"`
 	// DoubleTurnTurnsRemaining is the number of owner turns the Double Turn effect has left
 	// for the player in DoubleTurnActiveFor. Used for the duration badge on highlighted pieces.
-	DoubleTurnTurnsRemaining int `json:"doubleTurnTurnsRemaining,omitempty"`
-	PendingCapture      PendingCaptureState `json:"pendingCapture"`
-	MatchEnded         bool                        `json:"matchEnded"`
-	Winner             string                      `json:"winner,omitempty"`
-	EndReason          string                      `json:"endReason,omitempty"`
-	RematchA           bool                        `json:"rematchA"`
-	RematchB           bool                        `json:"rematchB"`
-	PostMatchMsLeft    int64                       `json:"postMatchMsLeft,omitempty"`
+	DoubleTurnTurnsRemaining int                 `json:"doubleTurnTurnsRemaining,omitempty"`
+	PendingCapture           PendingCaptureState `json:"pendingCapture"`
+	MatchEnded               bool                `json:"matchEnded"`
+	Winner                   string              `json:"winner,omitempty"`
+	EndReason                string              `json:"endReason,omitempty"`
+	RematchA                 bool                `json:"rematchA"`
+	RematchB                 bool                `json:"rematchB"`
+	PostMatchMsLeft          int64               `json:"postMatchMsLeft,omitempty"`
 }
 
 // DecodeEnvelope validates and decodes a raw websocket frame into Envelope.
