@@ -56,3 +56,16 @@ func TestIgniteCardPayloadUnmarshalsTargetPieces(t *testing.T) {
 		t.Fatalf("target pieces mismatch: %+v", p.TargetPieces)
 	}
 }
+
+// TestSubmitMovePayloadUnmarshalsPromotion verifies that pawn promotion choice
+// can travel through the submit_move payload.
+func TestSubmitMovePayloadUnmarshalsPromotion(t *testing.T) {
+	var p SubmitMovePayload
+	raw := []byte(`{"fromRow":1,"fromCol":0,"toRow":0,"toCol":0,"promotion":"knight"}`)
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.Promotion != "knight" {
+		t.Fatalf("promotion: want knight got %q", p.Promotion)
+	}
+}

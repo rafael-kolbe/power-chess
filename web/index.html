@@ -204,6 +204,17 @@
       </div>
     </div>
 
+    <dialog id="promotionOverlay" class="modal-overlay hidden" aria-labelledby="promotionTitle">
+      <div class="modal-dialog promotion-dialog">
+        <h3 id="promotionTitle" class="promotion-title">Choose promotion</h3>
+        <p id="promotionBody" class="modal-body">Choose the piece your pawn promotes to.</p>
+        <div id="promotionChoices" class="promotion-choices"></div>
+        <div class="modal-actions">
+          <button type="button" id="promotionCancel" class="match-end-btn-secondary">Cancel</button>
+        </div>
+      </div>
+    </dialog>
+
     <div id="gameShell" class="game-shell-hud hidden">
       <div
         id="opponentDisconnectOverlay"

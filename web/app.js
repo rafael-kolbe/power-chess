@@ -71,6 +71,8 @@ import {
   let mulliganPick = new Set();
   /** Updates mulligan countdown text while the opening phase is active. */
   let mulliganUiTimerId = null;
+  /** @type {((value: string | null) => void) | null} Resolves the open promotion modal choice. */
+  let promotionChoiceResolver = null;
 
   /** Set after we send debug_match_fixture (match-test-config); reset on new WebSocket. */
   let matchTestFixtureSent = false;
@@ -166,6 +168,11 @@ import {
   const deckViewGridEl = document.getElementById("deckViewGrid");
   const deckViewTitleEl = document.getElementById("deckViewTitle");
   const deckViewCloseBtnEl = document.getElementById("deckViewCloseBtn");
+  const promotionOverlayEl = document.getElementById("promotionOverlay");
+  const promotionTitleEl = document.getElementById("promotionTitle");
+  const promotionBodyEl = document.getElementById("promotionBody");
+  const promotionChoicesEl = document.getElementById("promotionChoices");
+  const promotionCancelEl = document.getElementById("promotionCancel");
 
   const i18n = {
     "en-US": {
@@ -312,6 +319,12 @@ import {
       mulliganLine: "Mulligan — White: {w} | Black: {b}",
       mulliganPending: "…",
       mulliganAutoIn: "Auto-confirms in {s}s",
+      promotionTitle: "Choose promotion",
+      promotionBody: "Choose the piece your pawn promotes to.",
+      promotionQueen: "Queen",
+      promotionRook: "Rook",
+      promotionBishop: "Bishop",
+      promotionKnight: "Knight",
     },
     "pt-BR": {
       title: "POWER CHESS (Alpha)",
@@ -459,6 +472,12 @@ import {
       mulliganLine: "Mulligan — Brancas: {w} | Pretas: {b}",
       mulliganPending: "…",
       mulliganAutoIn: "Confirmação automática em {s}s",
+      promotionTitle: "Escolha a promoção",
+      promotionBody: "Escolha a peça para promover o peão.",
+      promotionQueen: "Rainha",
+      promotionRook: "Torre",
+      promotionBishop: "Bispo",
+      promotionKnight: "Cavalo",
     },
   };
   let locale = "en-US";
@@ -1450,6 +1469,12 @@ import {
     N: "Knight",
     P: "Pawn",
   };
+  const promotionChoices = [
+    { value: "queen", type: "Q", labelKey: "promotionQueen" },
+    { value: "rook", type: "R", labelKey: "promotionRook" },
+    { value: "bishop", type: "B", labelKey: "promotionBishop" },
+    { value: "knight", type: "N", labelKey: "promotionKnight" },
+  ];
 
   /**
    * pieceImageURL maps engine codes (wK, bQ) to PNG paths under /public/pieces/.
@@ -4900,14 +4925,73 @@ import {
     });
   }
 
-  function sendMove(from, to) {
+  function isPromotionMove(from, to) {
+    const code = lastSnapshot?.board?.[from.row]?.[from.col] || "";
+    const piece = parseCode(code);
+    return piece?.type === "P" && (to.row === 0 || to.row === 7);
+  }
+
+  function closePromotionModal(value) {
+    if (!promotionOverlayEl) return;
+    if (typeof promotionOverlayEl.close === "function" && promotionOverlayEl.open) {
+      promotionOverlayEl.close();
+    }
+    promotionOverlayEl.classList.add("hidden");
+    promotionOverlayEl.setAttribute("aria-hidden", "true");
+    const resolve = promotionChoiceResolver;
+    promotionChoiceResolver = null;
+    if (resolve) resolve(value);
+  }
+
+  function requestPromotionChoice(from) {
+    if (!promotionOverlayEl || !promotionChoicesEl) return Promise.resolve(null);
+    if (promotionChoiceResolver) closePromotionModal(null);
+    const code = lastSnapshot?.board?.[from.row]?.[from.col] || "";
+    const color = code[0] === "b" ? "b" : "w";
+    if (promotionTitleEl) promotionTitleEl.textContent = t("promotionTitle");
+    if (promotionBodyEl) promotionBodyEl.textContent = t("promotionBody");
+    if (promotionCancelEl) promotionCancelEl.textContent = t("cancel");
+    promotionChoicesEl.innerHTML = "";
+    for (const choice of promotionChoices) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "promotion-choice";
+      btn.dataset.promotion = choice.value;
+      const img = document.createElement("img");
+      img.src = pieceImageURL(`${color}${choice.type}`);
+      img.alt = t(choice.labelKey);
+      const label = document.createElement("span");
+      label.textContent = t(choice.labelKey);
+      btn.appendChild(img);
+      btn.appendChild(label);
+      btn.addEventListener("click", () => closePromotionModal(choice.value));
+      promotionChoicesEl.appendChild(btn);
+    }
+    promotionOverlayEl.classList.remove("hidden");
+    promotionOverlayEl.setAttribute("aria-hidden", "false");
+    if (typeof promotionOverlayEl.showModal === "function" && !promotionOverlayEl.open) {
+      promotionOverlayEl.showModal();
+    }
+    promotionChoicesEl.querySelector("button")?.focus();
+    return new Promise((resolve) => {
+      promotionChoiceResolver = resolve;
+    });
+  }
+
+  async function sendMove(from, to) {
     if (!isGameplayInputOpen()) return;
-    send("submit_move", {
+    const payload = {
       fromRow: from.row,
       fromCol: from.col,
       toRow: to.row,
       toCol: to.col,
-    });
+    };
+    if (isPromotionMove(from, to)) {
+      const promotion = await requestPromotionChoice(from);
+      if (!promotion || !isGameplayInputOpen()) return;
+      payload.promotion = promotion;
+    }
+    send("submit_move", payload);
   }
 
   function pushClientTrace(entry) {
@@ -5931,6 +6015,16 @@ import {
       if (ev.target === deckViewModalEl) closeDeckViewModal();
     });
   }
+  if (promotionCancelEl) promotionCancelEl.addEventListener("click", () => closePromotionModal(null));
+  if (promotionOverlayEl) {
+    promotionOverlayEl.addEventListener("cancel", (ev) => {
+      ev.preventDefault();
+      closePromotionModal(null);
+    });
+  }
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && promotionChoiceResolver) closePromotionModal(null);
+  });
   if (authRegisterBtnEl) authRegisterBtnEl.addEventListener("click", () => void submitRegister());
   if (authLoginBtnEl) authLoginBtnEl.addEventListener("click", () => void submitLogin());
   if (logoutBtnEl) logoutBtnEl.addEventListener("click", () => logoutSession());
