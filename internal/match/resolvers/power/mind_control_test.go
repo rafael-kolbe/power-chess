@@ -1,15 +1,17 @@
-package match
+package power_test
 
 import (
+	"strings"
 	"testing"
 
 	"power-chess/internal/chess"
 	"power-chess/internal/gameplay"
+	"power-chess/internal/match"
 )
 
-func newMindControlTestEngine(t *testing.T) (*Engine, chess.Pos) {
+func newMindControlTestEngine(t *testing.T) (*match.Engine, chess.Pos) {
 	t.Helper()
-	mc := gameplay.CardInstance{InstanceID: "mc1", CardID: CardMindControl, ManaCost: 7, Ignition: 2, Cooldown: 10}
+	mc := gameplay.CardInstance{InstanceID: "mc1", CardID: match.CardMindControl, ManaCost: 7, Ignition: 2, Cooldown: 10}
 	state, err := gameplay.NewMatchState(testDeckWith(mc), testDeckWith(mc))
 	if err != nil {
 		t.Fatal(err)
@@ -23,12 +25,12 @@ func newMindControlTestEngine(t *testing.T) (*Engine, chess.Pos) {
 	board.SetPiece(target, chess.Piece{Type: chess.Rook, Color: chess.Black})
 	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{mc}
 	state.Players[gameplay.PlayerA].Mana = 10
-	e := NewEngine(state, board)
+	e := match.NewEngine(state, board)
 	markInPlayForTest(state)
 	return e, target
 }
 
-func burnMindControlIgnition(t *testing.T, e *Engine) {
+func burnMindControlIgnition(t *testing.T, e *match.Engine) {
 	t.Helper()
 	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 2}, To: chess.Pos{Row: 5, Col: 2}}); err != nil {
 		t.Fatalf("player A move 1: %v", err)
@@ -57,9 +59,9 @@ func TestMindControlResolverTransfersControlOnResolve(t *testing.T) {
 	if p.Type != chess.Rook || p.Color != chess.White {
 		t.Fatalf("expected controlled white rook at target, got %+v", p)
 	}
-	mc := e.CloneMindControlEffects()
+	mc := e.ClonePieceControlEffects()
 	if len(mc) != 1 || mc[0].RemainingTurnEnds != 3 {
-		t.Fatalf("expected one active mind control effect with 3 turns, got %+v", mc)
+		t.Fatalf("expected one active piece control effect with 3 turns, got %+v", mc)
 	}
 }
 
@@ -112,15 +114,15 @@ func TestMindControlResolverFailsWhenTargetNoLongerValid(t *testing.T) {
 	if err := e.SubmitMove(gameplay.PlayerB, chess.Move{From: chess.Pos{Row: 2, Col: 2}, To: chess.Pos{Row: 3, Col: 2}}); err != nil {
 		t.Fatalf("player B move 2: %v", err)
 	}
-	if got := len(e.CloneMindControlEffects()); got != 0 {
-		t.Fatalf("expected no active mind control effects on failed activation, got %d", got)
+	if got := len(e.ClonePieceControlEffects()); got != 0 {
+		t.Fatalf("expected no active piece control effects on failed activation, got %d", got)
 	}
 	events := e.PullActivationFXEvents()
 	if len(events) == 0 {
 		t.Fatal("expected activation fx events")
 	}
 	last := events[len(events)-1]
-	if last.CardID != CardMindControl || last.Success {
+	if last.CardID != match.CardMindControl || last.Success {
 		t.Fatalf("expected final activation fx fail for mind-control, got %+v", last)
 	}
 }
@@ -157,8 +159,8 @@ func TestMindControlEffectExpiresAndRestoresOriginalColor(t *testing.T) {
 	if p.Type != chess.Rook || p.Color != chess.Black {
 		t.Fatalf("expected piece to return to original black color, got %+v", p)
 	}
-	if got := len(e.CloneMindControlEffects()); got != 0 {
-		t.Fatalf("expected no remaining mind control effects after expiration, got %d", got)
+	if got := len(e.ClonePieceControlEffects()); got != 0 {
+		t.Fatalf("expected no remaining piece control effects after expiration, got %d", got)
 	}
 }
 
@@ -174,7 +176,7 @@ func TestMindControlEffectClearsImmediatelyWhenControlledPieceIsCaptured(t *test
 		t.Fatalf("resolve ignite reaction: %v", err)
 	}
 	burnMindControlIgnition(t, e)
-	if got := len(e.CloneMindControlEffects()); got != 1 {
+	if got := len(e.ClonePieceControlEffects()); got != 1 {
 		t.Fatalf("expected one active effect before capture, got %d", got)
 	}
 	// PlayerA ends turn with a king move.
@@ -188,11 +190,43 @@ func TestMindControlEffectClearsImmediatelyWhenControlledPieceIsCaptured(t *test
 	if err := e.ResolveReactionStack(); err != nil {
 		t.Fatalf("resolve capture reaction: %v", err)
 	}
-	if got := len(e.CloneMindControlEffects()); got != 0 {
+	if got := len(e.ClonePieceControlEffects()); got != 0 {
 		t.Fatalf("expected effect removed immediately after capture, got %d", got)
 	}
 	p := e.Chess.PieceAt(target)
 	if p.Type != chess.King || p.Color != chess.Black {
 		t.Fatalf("expected black king on captured square, got %+v", p)
+	}
+}
+
+func TestMindControlRejectsOwnOrRoyalTargets(t *testing.T) {
+	e, _ := newMindControlTestEngine(t)
+	if err := e.ActivateCardWithTargets(gameplay.PlayerA, 0, []chess.Pos{{Row: 6, Col: 2}}); err == nil {
+		t.Fatal("expected own-piece target to be rejected")
+	}
+	e, _ = newMindControlTestEngine(t)
+	e.Chess.SetPiece(chess.Pos{Row: 0, Col: 1}, chess.Piece{Type: chess.Queen, Color: chess.Black})
+	if err := e.ActivateCardWithTargets(gameplay.PlayerA, 0, []chess.Pos{{Row: 0, Col: 1}}); err == nil {
+		t.Fatal("expected queen target to be rejected")
+	}
+}
+
+func TestMindControlPreIgnitionFailsWithoutValidTargets(t *testing.T) {
+	e, _ := newMindControlTestEngine(t)
+	for row := 0; row < 8; row++ {
+		for col := 0; col < 8; col++ {
+			p := e.Chess.PieceAt(chess.Pos{Row: row, Col: col})
+			if p.IsEmpty() || p.Color != chess.Black || p.Type == chess.King {
+				continue
+			}
+			e.Chess.SetPiece(chess.Pos{Row: row, Col: col}, chess.Piece{})
+		}
+	}
+	err := e.ActivateCard(gameplay.PlayerA, 0)
+	if err == nil {
+		t.Fatal("expected activation to fail without valid mind control targets")
+	}
+	if !strings.Contains(err.Error(), "no valid mind control targets") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

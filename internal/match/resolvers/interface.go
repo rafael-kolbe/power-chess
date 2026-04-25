@@ -25,6 +25,28 @@ const (
 	MovementGrantRookPattern MovementGrantKind = "rook_pattern"
 )
 
+// TeleportOptions configures which board constraints apply when ApplyPieceTeleport is called.
+type TeleportOptions struct {
+	// RequireSameRow enforces that from and to share the same rank.
+	RequireSameRow bool
+	// RequireEmptyDestination enforces that the destination square is unoccupied.
+	RequireEmptyDestination bool
+	// ConsumeTurn ends the owner's chess turn after the teleport (clears extra-move state).
+	ConsumeTurn bool
+	// ForbidKing rejects the move if the piece at from is a King.
+	ForbidKing bool
+}
+
+// PieceControlOptions configures constraints and duration for AddPieceControlEffect.
+type PieceControlOptions struct {
+	// DurationTurns is the number of the controller's turns the effect lasts.
+	DurationTurns int
+	// ForbidKing rejects targets that are a King.
+	ForbidKing bool
+	// ForbiddenTypes lists additional piece types that cannot be targeted.
+	ForbiddenTypes []chess.PieceType
+}
+
 // EffectTarget holds optional targeting context supplied with a card activation or reaction.
 type EffectTarget struct {
 	PiecePos    *chess.Pos
@@ -47,8 +69,11 @@ type ResolverEngine interface {
 	OwnerColor(owner gameplay.PlayerID) chess.Color
 	// AddMovementGrant registers a movement-pattern grant for a piece.
 	AddMovementGrant(owner gameplay.PlayerID, cardID gameplay.CardID, target chess.Pos, kind MovementGrantKind, durationTurns int)
-	// AddMindControlEffect flips target control to owner and restores original color when duration ends.
-	AddMindControlEffect(owner gameplay.PlayerID, cardID gameplay.CardID, target chess.Pos, durationTurns int) error
+	// AddPieceControlEffect transfers temporary control of target to owner for the duration
+	// specified in opts. The engine validates forbidden piece types from opts before applying.
+	AddPieceControlEffect(owner gameplay.PlayerID, cardID gameplay.CardID, target chess.Pos, opts PieceControlOptions) error
+	// ApplyPawnSacrificeReward sacrifices an owned pawn into the opponent capture zone, then grants mana and draws cards.
+	ApplyPawnSacrificeReward(owner gameplay.PlayerID, target chess.Pos, manaAmount, drawCount int) error
 	// GrantManaFromCardEffect awards bonus mana to pid on successful effect resolution.
 	GrantManaFromCardEffect(pid gameplay.PlayerID, amount int)
 	// IncrementExtraMoves grants one additional chess move this turn to pid.
@@ -69,9 +94,9 @@ type ResolverEngine interface {
 	// SwapPieces exchanges the positions of the pieces at pos1 and pos2 on the board
 	// without consuming a chess move or altering turn state.
 	SwapPieces(pos1, pos2 chess.Pos)
-	// ApplyZipLineTeleport moves the owner's locked piece from from to to on the same rank (if legal),
-	// then ends the owner’s chess turn (including clearing extra-move state).
-	ApplyZipLineTeleport(owner gameplay.PlayerID, from, to chess.Pos) error
+	// ApplyPieceTeleport moves the piece at from to to subject to opts constraints,
+	// then optionally ends the owner's chess turn when opts.ConsumeTurn is true.
+	ApplyPieceTeleport(owner gameplay.PlayerID, from, to chess.Pos, opts TeleportOptions) error
 }
 
 // EffectResolver is the execution contract for card effects.

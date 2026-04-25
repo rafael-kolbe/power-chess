@@ -238,7 +238,6 @@
             <option value="auto">Auto</option>
           </select>
         </label>
-        <button id="reactionPassBtn" type="button" class="match-end-btn-secondary hidden">OK</button>
       </div>
       <div id="boardArea" class="playmat-area">
         <!-- Left column: opp hand/ignition/cooldown (top) + self banish/deck (bottom) -->
@@ -369,6 +368,10 @@
 
           <!-- Own right zones (bottom half) -->
           <div class="pm-side-group pm-side-group--own" id="rightZonesSelf">
+            <div id="playerActionBanner" class="pm-action-banner hidden" aria-live="polite">
+              <span id="playerActionHint" class="pm-action-banner-hint"></span>
+              <button id="reactionPassBtn" type="button" class="pm-action-banner-confirm hidden">Confirm Play</button>
+            </div>
             <div class="pm-ignition-cooldown-row pm-ignition-cooldown-row--self">
               <div
                 class="pm-zone pm-zone--ignition pm-zone--ignition-self"
@@ -388,9 +391,6 @@
               <div class="pm-hand-area" id="handSelf" aria-label="Your hand">
                 <span class="pm-hand-area__label" id="handLabelSelf">Hand</span>
                 <div class="pm-hand-cards"></div>
-                <div id="disruptionBanishBar" class="pm-disruption-banish-bar hidden" aria-live="polite">
-                  <span id="disruptionBanishHint"></span>
-                </div>
               </div>
               <div id="mulliganBar" class="pm-mulligan-bar hidden" aria-live="polite">
                 <p class="pm-mulligan-hint" id="mulliganHint"></p>

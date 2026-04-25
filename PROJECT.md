@@ -109,6 +109,7 @@ Esta é uma **regra de tipo** centralizada: aplica-se a **todas** as cartas Disr
 - **Continuous**: oponente só tem janela **no turno em que a carta entra** no slot, não a cada turno seguinte enquanto ela permanecer lá.
 - **Ignition 0**: resolve no mesmo snapshot/turno conforme servidor; múltiplas ignições possíveis se houver mana e slot livre.
 - **Zip Line** (Power, alvo na ignição): após a ignição resolve, o jogador escolhe uma casa vazia na mesma rank da peça alvo; se a peça se deslocar, isso **consome o movimento de xadrez** desse turno e **passa a vez** (inclui limpar jogada extra de **Double Turn** se existir).
+- **Sacrifice of the Masses** (Power, alvo na ignição): o alvo deve ser um peão próprio; a carta só pode ser jogada com no máximo 4 cartas na mão, pois precisa comprar 2 cartas após sair da mão. Se resolver com sucesso, o peão vai para a Captura do oponente, o dono ganha 6 mana e compra 2 cartas sem pagar o custo normal de compra.
 - A zona de ignição **desse jogador** ocupada bloqueia novas ignições **dele**, exceto comportamentos especiais (ex.: **Save It For Later**).
 
 ---
@@ -245,7 +246,8 @@ Ordem aproximada; itens podem ser paralelizados onde fizer sentido.
 Aplicar este padrão para todas as novas cartas, evitando lógica espalhada e `if/else` por carta no fluxo principal.
 
 1. **Resolver dedicado por carta**  
-   - Criar um resolver próprio em `internal/match/` (ex.: `resolver_knight_touch.go`).  
+   - Criar um resolver próprio em `internal/match/resolvers/<tipo>/<slug>.go` (ex.: `resolvers/power/knight_touch.go`).  
+   - Manter os testes do resolver junto do pacote do resolver (`internal/match/resolvers/<tipo>/<slug>_test.go`).
    - Registrar no `DefaultResolvers()` sem alterar o pipeline central.
 
 2. **Estado de efeito genérico no runtime**  
@@ -255,9 +257,12 @@ Aplicar este padrão para todas as novas cartas, evitando lógica espalhada e `i
 3. **Capacidades por composição, não substituição**  
    - Efeitos devem **adicionar capacidades** à peça/jogador (ex.: novo padrão de movimento), sem remover comportamento nativo, salvo quando o texto da carta exigir.
 
-4. **Pontos únicos de aplicação**  
-   - Fluxo central (`SubmitMove`/`applyMoveCore`/resolução de pilha) só consulta serviços/estados genéricos.  
-   - Regras específicas ficam encapsuladas em resolver + tipos de estado do efeito.
+4. **Capabilities genéricas no engine — não hooks por carta**  
+   - O engine expõe capabilities reutilizáveis via `ResolverEngine` (interface em `internal/match/resolvers/interface.go`), parametrizadas por structs de opções.  
+   - `ApplyPieceTeleport(owner, from, to, TeleportOptions)` — move uma peça no tabuleiro com validações configuráveis (mesma fileira, destino vazio, consome turno, proibir rei); implementado em `teleport_effects.go`.  
+   - `AddPieceControlEffect(owner, cardID, target, PieceControlOptions)` — inverte temporariamente o controle de uma peça adversária por N turnos do dono; implementado em `piece_control_effects.go`.  
+   - Resolvers descrevem as regras da carta via opções concretas; o engine aplica o efeito no tabuleiro.  
+   - Fluxo central (`SubmitMove`/`applyMoveCore`/resolução de pilha) só consulta serviços/estados genéricos.
 
 5. **Ciclo de vida explícito**  
    - Definir claramente: criação do efeito, manutenção (ex.: acompanhar posição da peça), expiração por turno/condição e limpeza quando alvo deixa de ser válido.

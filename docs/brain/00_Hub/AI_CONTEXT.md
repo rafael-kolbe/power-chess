@@ -53,5 +53,6 @@ Jogo multiplayer **1v1** de xadrez com sistema de **cartas de poder** (TCG-like)
 | `internal/server` | Protocolo, handlers, salas |
 | `internal/chess` | Motor de xadrez |
 | `internal/gameplay` | Estado de partida (deck, mana, ignição, recarga) |
-| `internal/match` | Efeitos, reações, cadeias Counter, resolvers |
+| `internal/match` | Runtime da partida, reações, cadeias Counter, hooks de engine |
+| `internal/match/resolvers` | Resolvers de efeitos por tipo de carta |
 | `internal/ranking` | ELO |

@@ -1,19 +1,20 @@
-package match
+package power_test
 
 import (
 	"testing"
 
 	"power-chess/internal/chess"
 	"power-chess/internal/gameplay"
+	"power-chess/internal/match"
 )
 
 // newPieceSwapTestEngine builds a minimal engine for Piece Swap tests.
 // PlayerA has a Piece Swap card (Ignition:0, Targets:2) and enough mana to activate it.
 // The board has kings on their standard squares plus a pawn (A) on c5 and a knight (B) on e5.
-func newPieceSwapTestEngine(t *testing.T) (*Engine, *gameplay.MatchState) {
+func newPieceSwapTestEngine(t *testing.T) (*match.Engine, *gameplay.MatchState) {
 	t.Helper()
 
-	psCard := gameplay.CardInstance{InstanceID: "ps1", CardID: CardPieceSwap, ManaCost: 6, Ignition: 0, Cooldown: 6}
+	psCard := gameplay.CardInstance{InstanceID: "ps1", CardID: match.CardPieceSwap, ManaCost: 6, Ignition: 0, Cooldown: 6}
 
 	state, err := gameplay.NewMatchState(testDeckWith(psCard), testDeckWith(psCard))
 	if err != nil {
@@ -36,7 +37,7 @@ func newPieceSwapTestEngine(t *testing.T) (*Engine, *gameplay.MatchState) {
 	state.Players[gameplay.PlayerB].Mana = 10
 
 	markInPlayForTest(state)
-	return NewEngine(state, board), state
+	return match.NewEngine(state, board), state
 }
 
 // TestPieceSwap_SuccessSwapsPositions verifies that a valid Piece Swap swaps the two pieces.
@@ -85,8 +86,8 @@ func TestPieceSwap_RejectsKingAsFirstTarget(t *testing.T) {
 func TestPieceSwap_RejectsKingAsSecondTarget(t *testing.T) {
 	e, _ := newPieceSwapTestEngine(t)
 
-	pawnPos := chess.Pos{Row: 3, Col: 2}  // White pawn
-	oppKing := chess.Pos{Row: 0, Col: 4}  // Black king
+	pawnPos := chess.Pos{Row: 3, Col: 2} // White pawn
+	oppKing := chess.Pos{Row: 0, Col: 4} // Black king
 
 	targets := []chess.Pos{pawnPos, oppKing}
 	if err := e.ActivateCardWithTargets(gameplay.PlayerA, 0, targets); err == nil {
@@ -148,7 +149,7 @@ func TestPieceSwap_ConfirmationOnlyWindowWhenOpponentIgnitionOccupied(t *testing
 	e, state := newPieceSwapTestEngine(t)
 
 	// Place a card in PlayerB's ignition slot directly.
-	energyCard := gameplay.CardInstance{InstanceID: "eg1", CardID: CardEnergyGain, ManaCost: 0, Ignition: 1, Cooldown: 2}
+	energyCard := gameplay.CardInstance{InstanceID: "eg1", CardID: match.CardEnergyGain, ManaCost: 0, Ignition: 1, Cooldown: 2}
 	state.Players[gameplay.PlayerB].Ignition = gameplay.IgnitionSlot{
 		Occupied:        true,
 		Card:            energyCard,

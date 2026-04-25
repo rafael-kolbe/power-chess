@@ -39,8 +39,9 @@
 - Notas: após a ignição, o jogador escolhe a casa de destino vazia na mesma rank; se a peça se mover, o movimento de xadrez do turno é consumido e a vez passa (inclui limpar estado de **Double Turn** / jogada extra).
 
 ### Sacrifice of the Masses
-- **Custo:** 0 | **Ignição:** 0 | **Recarga:** 10 | **Alvos:** 0 | **Duração:** 0
+- **Custo:** 0 | **Ignição:** 0 | **Recarga:** 10 | **Alvos:** 1 | **Duração:** 0
 - Target a pawn you control, sacrifice it to gain 6 mana and draw 2 cards.
+- Notas: o alvo deve ser um peão próprio; só pode ser jogada com no máximo 4 cartas na mão, para existir espaço para comprar 2 cartas. Ao resolver com sucesso, o peão sai do tabuleiro, entra na zona Captura do oponente, o dono ganha 6 de mana e compra 2 cartas sem pagar o custo normal de compra.
 
 ### Archmage Arsenal
 - **Custo:** 1 | **Ignição:** 0 | **Recarga:** 2 | **Alvos:** 0 | **Duração:** 0

@@ -49,7 +49,7 @@ func TestZipLinePendingSnapshotRoundTrip(t *testing.T) {
 		Owner:       gameplay.PlayerA,
 		CardID:      CardZipLine,
 		Resolver:    e.resolvers[CardZipLine],
-		ZipLineFrom: &src,
+		TeleportFrom: &src,
 	}}
 
 	snapshot := e.ExportState()
@@ -61,7 +61,7 @@ func TestZipLinePendingSnapshotRoundTrip(t *testing.T) {
 		t.Fatalf("restore failed: %v", err)
 	}
 	q := restored.pendingEffects[gameplay.PlayerA]
-	if len(q) != 1 || q[0].ZipLineFrom == nil || *q[0].ZipLineFrom != src {
-		t.Fatalf("expected ZipLineFrom restored, got %+v", q)
+	if len(q) != 1 || q[0].TeleportFrom == nil || *q[0].TeleportFrom != src {
+		t.Fatalf("expected TeleportFrom restored, got %+v", q)
 	}
 }

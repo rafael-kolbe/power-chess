@@ -91,7 +91,7 @@ globalThis.__POWER_CHESS_CARD_METADATA__ = [
     "mana": 0,
     "ignition": 0,
     "cooldown": 10,
-    "targets": 0,
+    "targets": 1,
     "effectDuration": 0,
     "name": "Sacrifice of the Masses",
     "description": "Target a pawn you control, sacrifice it to gain 6 mana and draw 2 cards.",

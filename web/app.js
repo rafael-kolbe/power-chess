@@ -213,7 +213,7 @@ import {
       reactionModeOff: "Off",
       reactionModeOn: "On",
       reactionModeAuto: "Auto",
-      reactionPassOk: "OK",
+      reactionPassOk: "Confirm Play",
       toggleOn: "On",
       toggleOff: "Off",
       coordsLabel: "Coords",
@@ -297,6 +297,15 @@ import {
       connectErrorPrefix: "Could not connect:",
       mulliganHint: "Tap cards to mark them red (they return to the deck). Confirm when ready.",
       disruptionBanishHint: "Select a Power card from your hand to banish as the reaction cost. Press Esc to cancel.",
+      selectIgnitionTargetHint: "Select the card target on the board.",
+      selectOwnPieceHint: "Select one of your pieces on the board.",
+      selectOwnPawnHint: "Select one of your pawns to sacrifice.",
+      selectOpponentPieceHint: "Select an opponent piece on the board.",
+      selectPieceSwapFirstHint: "Select one of your pieces to swap.",
+      selectPieceSwapSecondHint: "Select an opponent piece within 2 squares.",
+      selectZipLineDestinationHint: "Select an empty square in the same row.",
+      selectMoveDestinationHint: "Select a destination square.",
+      confirmPlayHint: "Confirm to continue the play.",
       mulliganConfirm: "Confirm mulligan",
       mulliganWaitingYou: "Waiting for you to confirm…",
       mulliganWaitingOpp: "Waiting for opponent…",
@@ -349,7 +358,7 @@ import {
       reactionModeOff: "Desligado",
       reactionModeOn: "Ligado",
       reactionModeAuto: "Automático",
-      reactionPassOk: "OK",
+      reactionPassOk: "Confirmar Jogada",
       toggleOn: "Ligado",
       toggleOff: "Desligado",
       coordsLabel: "Coords",
@@ -435,6 +444,15 @@ import {
       mulliganHint: "Toque nas cartas para marcar em vermelho (voltam ao deck). Confirme quando terminar.",
       disruptionBanishHint:
         "Selecione uma carta Power da mão para banir como custo de reação. Pressione Esc para cancelar.",
+      selectIgnitionTargetHint: "Selecione o alvo da carta no tabuleiro.",
+      selectOwnPieceHint: "Selecione uma das suas peças no tabuleiro.",
+      selectOwnPawnHint: "Selecione um dos seus peões para sacrificar.",
+      selectOpponentPieceHint: "Selecione uma peça do oponente no tabuleiro.",
+      selectPieceSwapFirstHint: "Selecione uma das suas peças para trocar.",
+      selectPieceSwapSecondHint: "Selecione uma peça do oponente a até 2 casas.",
+      selectZipLineDestinationHint: "Selecione uma casa vazia na mesma linha.",
+      selectMoveDestinationHint: "Selecione uma casa de destino.",
+      confirmPlayHint: "Confirme para continuar a jogada.",
       mulliganConfirm: "Confirmar mulligan",
       mulliganWaitingYou: "Aguardando sua confirmação…",
       mulliganWaitingOpp: "Aguardando o oponente…",
@@ -2237,10 +2255,10 @@ import {
     cooldownOpp: document.getElementById("cooldownOpp"),
     ignitionSelf: document.getElementById("ignitionSelf"),
     ignitionOpp: document.getElementById("ignitionOpp"),
+    playerActionBanner: document.getElementById("playerActionBanner"),
+    playerActionHint: document.getElementById("playerActionHint"),
     mulliganBar: document.getElementById("mulliganBar"),
     mulliganHint: document.getElementById("mulliganHint"),
-    disruptionBanishBar: document.getElementById("disruptionBanishBar"),
-    disruptionBanishHintEl: document.getElementById("disruptionBanishHint"),
     mulliganTimer: document.getElementById("mulliganTimer"),
     mulliganCounts: document.getElementById("mulliganCounts"),
     mulliganConfirmBtn: document.getElementById("mulliganConfirmBtn"),
@@ -2995,6 +3013,7 @@ import {
     renderIgnitionZone(snapshot);
     renderCooldownZone(self, opp);
     renderHandZone(self, opp);
+    renderPlayerActionBanner(snapshot);
     updateDrawButton(snapshot, self);
     renderMulliganBar(snapshot);
   }
@@ -4014,21 +4033,39 @@ import {
   function renderHandZone(self, opp) {
     renderOwnHand(pmEl.handSelf, self);
     renderOppHand(pmEl.handOpp, opp);
-    updateDisruptionBanishBar();
   }
 
-  /**
-   * Shows or hides the disruption banish hint bar depending on whether banish selection mode is active.
-   */
-  function updateDisruptionBanishBar() {
-    const bar = pmEl.disruptionBanishBar;
-    const hint = pmEl.disruptionBanishHintEl;
-    if (!bar) return;
-    if (disruptionBanishFlow !== null) {
-      if (hint) hint.textContent = t("disruptionBanishHint");
-      bar.classList.remove("hidden");
-    } else {
-      bar.classList.add("hidden");
+  function actionPromptForSnapshot(snapshot) {
+    if (disruptionBanishFlow !== null) return t("disruptionBanishHint");
+    const zipLinePending = viewerZipLinePendingSource(snapshot);
+    if (zipLinePending) return t("selectZipLineDestinationHint");
+    if (igniteTargetFlow?.stage === "picking") {
+      if (igniteTargetFlow.cardId === "piece-swap") {
+        return igniteTargetFlow.firstPick ? t("selectPieceSwapSecondHint") : t("selectPieceSwapFirstHint");
+      }
+      if (igniteTargetFlow.cardId === "mind-control") return t("selectOpponentPieceHint");
+      if (igniteTargetFlow.cardId === "sacrifice-of-the-masses") return t("selectOwnPawnHint");
+      return t("selectOwnPieceHint");
+    }
+    if (igniteTargetFlow?.stage === "placed") return t("selectIgnitionTargetHint");
+    if (selectedFrom && isGameplayInputOpen()) return t("selectMoveDestinationHint");
+    if (canPassReactionPriority(snapshot, playerEl.value)) return t("confirmPlayHint");
+    return "";
+  }
+
+  function renderPlayerActionBanner(snapshot) {
+    const banner = pmEl.playerActionBanner;
+    const hint = pmEl.playerActionHint;
+    if (!banner || !hint) return;
+    const canPass = canPassReactionPriority(snapshot, playerEl.value);
+    const prompt = actionPromptForSnapshot(snapshot);
+    hint.textContent = prompt;
+    banner.classList.toggle("hidden", !prompt && !canPass);
+    banner.classList.toggle("pm-action-banner--confirm", canPass);
+    if (reactionPassBtnEl) {
+      reactionPassBtnEl.textContent = t("reactionPassOk");
+      reactionPassBtnEl.classList.toggle("hidden", !canPass);
+      reactionPassBtnEl.disabled = !canPass || !isGameplayInputOpen();
     }
   }
 
@@ -4252,6 +4289,10 @@ import {
       const board = snapshot?.board || [];
       if (!zipLineHasRoughPlayableTarget(board, pid)) return false;
     }
+    if (String(handEntry?.cardId) === "sacrifice-of-the-masses") {
+      const self = hudForSeat(snapshot, pid);
+      if ((self?.hand || []).length >= 5) return false;
+    }
     return true;
   }
 
@@ -4314,10 +4355,7 @@ import {
   }
 
   function updateReactionPassButton(snapshot) {
-    if (!reactionPassBtnEl) return;
-    const canPass = canPassReactionPriority(snapshot, playerEl.value);
-    reactionPassBtnEl.classList.toggle("hidden", !canPass);
-    reactionPassBtnEl.disabled = !canPass || !isGameplayInputOpen();
+    renderPlayerActionBanner(snapshot);
   }
 
   function renderOppHand(container, opp) {
@@ -5331,6 +5369,17 @@ import {
               igniteTargetFlow = null;
               return;
             }
+            if (igniteTargetFlow.cardId === "sacrifice-of-the-masses") {
+              const targetCode = sq.dataset.code || "";
+              if (!targetCode || !isOwnPiece(targetCode)) return;
+              const p = parseCode(targetCode);
+              if (!p || p.type !== "P") return;
+              send("submit_ignition_targets", {
+                target_pieces: [{ row: r, col: c }],
+              });
+              igniteTargetFlow = null;
+              return;
+            }
             // Default single-target handling (Knight/Bishop/Rook Touch).
             const clickedCodeForTarget = sq.dataset.code || "";
             if (!clickedCodeForTarget || !isOwnPiece(clickedCodeForTarget)) return;
@@ -5347,6 +5396,7 @@ import {
             selectedFrom = logical;
             highlightedMoves = computeMoves(lastSnapshot.board, selectedFrom, ep, lastSnapshot?.castlingRights);
             renderBoard(lastSnapshot.board);
+            renderPlayerActionBanner(lastSnapshot);
             return;
           }
           const destSet = boardMoveKeySet();
@@ -5355,6 +5405,7 @@ import {
             selectedFrom = null;
             highlightedMoves = [];
             renderBoard(lastSnapshot.board);
+            renderPlayerActionBanner(lastSnapshot);
           }
         });
 
@@ -5380,6 +5431,7 @@ import {
             lastSnapshot?.castlingRights,
           );
           refreshBoardHighlights();
+          renderPlayerActionBanner(lastSnapshot);
           const pImg = sq.querySelector(".piece-img");
           if (pImg instanceof HTMLImageElement) {
             const w = pImg.offsetWidth || 48;
@@ -5422,6 +5474,7 @@ import {
           highlightedMoves = [];
           sendMove(from, to);
           if (lastSnapshot?.board) renderBoard(lastSnapshot.board);
+          renderPlayerActionBanner(lastSnapshot);
         });
 
         sq.addEventListener("dragend", () => {
@@ -5432,6 +5485,7 @@ import {
           selectedFrom = null;
           highlightedMoves = [];
           if (lastSnapshot?.board) renderBoard(lastSnapshot.board);
+          renderPlayerActionBanner(lastSnapshot);
         });
 
         boardFrameEl.appendChild(sq);

@@ -13,16 +13,20 @@ Cada carta nova deve ter um **resolver dedicado**. Nunca adicionar lógica de ca
 - Registrar no `DefaultResolvers()` em `resolvers.go` sem alterar o pipeline central.
 
 ### 2. Estado de efeito genérico no runtime
-- Modelar efeitos temporários como estado estruturado e serializável (ex.: `MovementGrant`).
+- Modelar efeitos temporários como estado estruturado e serializável (ex.: `MovementGrant`, `PieceControlEffect`).
 - Persistir no snapshot do engine (`persistence.go`) para suportar reconexão/restauração.
 
 ### 3. Capacidades por composição, não substituição
 - Efeitos devem **adicionar capacidades** à peça/jogador (ex.: novo padrão de movimento).
 - Não remover comportamento nativo, salvo quando o texto da carta exigir.
 
-### 4. Pontos únicos de aplicação
-- Fluxo central só consulta serviços/estados genéricos.
-- Regras específicas ficam encapsuladas em resolver + tipos de estado do efeito.
+### 4. Capabilities genéricas no engine — não hooks por carta
+- O engine expõe capabilities reutilizáveis via `ResolverEngine` (interface em `internal/match/resolvers/interface.go`).
+- Cada capability aceita um struct de opções que parametriza o comportamento:
+  - `ApplyPieceTeleport(owner, from, to, TeleportOptions)` — move uma peça sem consumo de lance de xadrez, com validações configuráveis (mesma fileira, destino vazio, consome turno, proibir rei).
+  - `AddPieceControlEffect(owner, cardID, target, PieceControlOptions)` — inverte temporariamente o controle de uma peça adversária, com duração e tipos proibidos configuráveis.
+- Resolvers descrevem as regras da carta passando opções concretas para a capability; o engine aplica o efeito no tabuleiro.
+- Arquivos de capabilities vivem em `internal/match/teleport_effects.go` e `internal/match/piece_control_effects.go`.
 
 ### 5. Ciclo de vida explícito
 Definir claramente:

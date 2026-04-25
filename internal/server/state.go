@@ -489,9 +489,9 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 			Owner:  string(pe.Owner),
 			CardID: string(pe.CardID),
 		}
-		if pe.CardID == match.CardZipLine && pe.ZipLineFrom != nil {
-			r := pe.ZipLineFrom.Row
-			c := pe.ZipLineFrom.Col
+		if pe.CardID == match.CardZipLine && pe.TeleportFrom != nil {
+			r := pe.TeleportFrom.Row
+			c := pe.TeleportFrom.Col
 			pes.SourceRow = &r
 			pes.SourceCol = &c
 		}
@@ -570,7 +570,7 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 			TurnsRemaining: g.RemainingOwnerTurns,
 		})
 	}
-	for _, mc := range r.Engine.CloneMindControlEffects() {
+	for _, mc := range r.Engine.ClonePieceControlEffects() {
 		if mc.RemainingTurnEnds <= 0 {
 			continue
 		}
