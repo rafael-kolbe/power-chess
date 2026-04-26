@@ -69,3 +69,46 @@ func TestSubmitMovePayloadUnmarshalsPromotion(t *testing.T) {
 		t.Fatalf("promotion: want knight got %q", p.Promotion)
 	}
 }
+
+// TestResolvePendingPayloadAcceptsTargetCardID verifies that the deck-search target card field
+// round-trips through JSON correctly.
+func TestResolvePendingPayloadAcceptsTargetCardID(t *testing.T) {
+	cardID := "knight-touch"
+	raw, err := json.Marshal(ResolvePendingPayload{TargetCardID: &cardID})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out ResolvePendingPayload
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.TargetCardID == nil || *out.TargetCardID != cardID {
+		t.Fatalf("expected targetCardId %q, got %v", cardID, out.TargetCardID)
+	}
+}
+
+// TestPendingEffectStateDeckSearchChoicesRoundTrip ensures deck search choices serialize correctly.
+func TestPendingEffectStateDeckSearchChoicesRoundTrip(t *testing.T) {
+	pes := PendingEffectState{
+		Owner:  "A",
+		CardID: "archmage-arsenal",
+		DeckSearchChoices: []DeckSearchChoice{
+			{CardID: "knight-touch"},
+			{CardID: "energy-gain"},
+		},
+	}
+	raw, err := json.Marshal(pes)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out PendingEffectState
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(out.DeckSearchChoices) != 2 {
+		t.Fatalf("expected 2 choices, got %d", len(out.DeckSearchChoices))
+	}
+	if out.DeckSearchChoices[0].CardID != "knight-touch" {
+		t.Fatalf("expected first choice knight-touch, got %s", out.DeckSearchChoices[0].CardID)
+	}
+}

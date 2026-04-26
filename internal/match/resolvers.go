@@ -37,6 +37,7 @@ func DefaultResolvers() map[gameplay.CardID]EffectResolver {
 	m[CardMindControl] = power.MindControlResolver{}
 	m[CardZipLine] = power.ZipLineResolver{}
 	m[CardSacrificeMass] = power.SacrificeOfTheMassesResolver{}
+	m[CardArchmageArsenal] = power.ArchmageArsenalResolver{}
 	m[CardExtinguish] = disruption.ExtinguishResolver{}
 	m[CardManaBurn] = retribution.ManaBurnResolver{}
 	return m

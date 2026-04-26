@@ -378,17 +378,33 @@ Envia texto JSON (por exemplo um lote de eventos do navegador) para o **log do p
 
 ### `resolve_pending_effect`
 
-Efeitos que exigem alvo **após** a resolução da ignição (ex.: **Zip Line**) ficam em `pendingEffects` no `state_snapshot` **só para o dono** do efeito; para Zip Line inclui `sourceRow` / `sourceCol` (índices lógicos do tabuleiro, mesmo sistema que `submit_move`).
+Efeitos que exigem alvo **após** a resolução da ignição (ex.: **Zip Line**, **Archmage Arsenal**) ficam em `pendingEffects` no `state_snapshot` **só para o dono** do efeito.
+
+**Campos por tipo de efeito pendente:**
+
+| Campo no snapshot | Presente quando |
+|---|---|
+| `sourceRow` / `sourceCol` | **Zip Line** — índices lógicos da peça de origem (mesmo sistema que `submit_move`) |
+| `deckSearchChoices[]` | **Archmage Arsenal** (e futuras cartas de busca no deck) — lista `{ cardId }` das cartas elegíveis no deck atual do jogador; pode ser vazia quando não há alvos legais |
+
+**Payload para cada tipo:**
 
 ```json
-{
-  "id": "req-5",
-  "type": "resolve_pending_effect",
-  "payload": { "destRow": 6, "destCol": 6 }
-}
+{ "id": "req-5a", "type": "resolve_pending_effect", "payload": { "destRow": 6, "destCol": 6 } }
 ```
+*(Zip Line — destino no tabuleiro)*
 
-Enquanto o jogador tiver um efeito pendente próprio, o servidor rejeita outras ações de jogo desse jogador (ex.: `submit_move`, `draw_card`, nova ignição) até enviar um `resolve_pending_effect` válido ou um destino ilegal (mensagem de erro; o efeito continua pendente).
+```json
+{ "id": "req-5b", "type": "resolve_pending_effect", "payload": { "targetCardId": "knight-touch" } }
+```
+*(Archmage Arsenal — ID da carta escolhida do deck)*
+
+```json
+{ "id": "req-5c", "type": "resolve_pending_effect", "payload": {} }
+```
+*(Archmage Arsenal — confirmar lista vazia quando `deckSearchChoices` está vazia; o mana já foi pago e não é reembolsado)*
+
+Enquanto o jogador tiver um efeito pendente próprio, o servidor rejeita outras ações de jogo desse jogador (ex.: `submit_move`, `draw_card`, nova ignição) até enviar um `resolve_pending_effect` válido ou um destino/alvo ilegal (mensagem de erro; o efeito continua pendente).
 
 ### `queue_reaction`
 

@@ -770,6 +770,10 @@ func (c *Client) handleResolvePending(env Envelope) error {
 		pos := chess.Pos{Row: *p.DestRow, Col: *p.DestCol}
 		target.TargetPos = &pos
 	}
+	if p.TargetCardID != nil {
+		id := gameplay.CardID(*p.TargetCardID)
+		target.TargetCard = &id
+	}
 	if !c.room.BothPlayersConnected() {
 		return protocolError{code: ErrorActionFailed, message: "waiting_for_opponent"}
 	}

@@ -193,6 +193,9 @@ type ResolvePendingPayload struct {
 	// DestRow/DestCol select the destination square for effects such as Zip Line (logical board indices).
 	DestRow *int `json:"destRow,omitempty"`
 	DestCol *int `json:"destCol,omitempty"`
+	// TargetCardID identifies the chosen card for deck-search effects (e.g. Archmage Arsenal).
+	// Omit (null) when confirming an empty search result.
+	TargetCardID *string `json:"targetCardId,omitempty"`
 }
 
 // QueueReactionPayload queues a reaction card with optional target data.
@@ -267,12 +270,20 @@ type PlayerHUDState struct {
 	IgnitionEffectNegated  bool   `json:"ignitionEffectNegated,omitempty"`
 }
 
+// DeckSearchChoice is one eligible card returned by a deck-search pending effect (e.g. Archmage Arsenal).
+type DeckSearchChoice struct {
+	CardID string `json:"cardId"`
+}
+
 // PendingEffectState describes unresolved effects that need player input.
 type PendingEffectState struct {
 	Owner     string `json:"owner"`
 	CardID    string `json:"cardId"`
 	SourceRow *int   `json:"sourceRow,omitempty"`
 	SourceCol *int   `json:"sourceCol,omitempty"`
+	// DeckSearchChoices lists eligible cards for deck-search effects (e.g. Archmage Arsenal).
+	// Nil when the pending effect is not a deck-search kind.
+	DeckSearchChoices []DeckSearchChoice `json:"deckSearchChoices,omitempty"`
 }
 
 // ReactionWindowState describes current reaction context for frontend prompts.

@@ -16,7 +16,7 @@
 | `set_reaction_mode` | Alterar toggle reactions (`mode`: `off`/`on`/`auto`) |
 | `queue_reaction` | Enfileirar carta de reação (`handIndex`, opcionais `pieceRow`/`pieceCol`) |
 | `resolve_reactions` | Confirmar pass ou disparar resolução da cadeia |
-| `resolve_pending_effect` | Resolver efeito pendente de carta com alvo (`pieceRow`, `pieceCol`) |
+| `resolve_pending_effect` | Resolver efeito pendente de carta com alvo (`destRow`/`destCol` para Zip Line; `targetCardId` para Archmage Arsenal; payload vazio para confirmar lista vazia de busca no deck) |
 | `leave_match` | Abandonar partida |
 | `stay_in_room` | Permanecer na sala após fim de partida |
 | `request_rematch` | Votar rematch |
@@ -40,6 +40,17 @@
 
 ### `ignite_card` + `submit_ignition_targets`
 - Cartas com `targets > 0`: primeiro `ignite_card` (mão → ignição); snapshot expõe `ignitionTargeting.awaitingTargetChoice`; então `submit_ignition_targets` para trabar os alvos; só depois o servidor abre `ignite_reaction`.
+
+### `resolve_pending_effect`
+Efeitos pós-ignição que exigem input ficam em `pendingEffects` no `state_snapshot` (só para o dono).
+
+| Carta | Campo enviado no payload | Notas |
+|-------|--------------------------|-------|
+| **Zip Line** | `destRow` / `destCol` | Quadrado destino (índices lógicos) |
+| **Archmage Arsenal** | `targetCardId` | ID da carta escolhida do deck |
+| **Archmage Arsenal** (lista vazia) | *(payload vazio `{}`)* | Confirma que não há alvos legais; mana pago não é reembolsado |
+
+O snapshot expõe `deckSearchChoices: [{ cardId }]` para o dono do efeito de busca; a lista pode ser vazia quando não há alvos legais no deck.
 
 ### `debug_match_fixture` (desenvolvimento)
 - Só com `ADMIN_DEBUG_MATCH` ativo no servidor.

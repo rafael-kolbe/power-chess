@@ -41,8 +41,9 @@ const (
 	CardBlockade       gameplay.CardID = "blockade"
 	CardManaBurn       gameplay.CardID = "mana-burn"
 	CardPieceSwap      gameplay.CardID = "piece-swap"
-	CardZipLine        gameplay.CardID = "zip-line"
-	CardSacrificeMass  gameplay.CardID = "sacrifice-of-the-masses"
+	CardZipLine          gameplay.CardID = "zip-line"
+	CardSacrificeMass    gameplay.CardID = "sacrifice-of-the-masses"
+	CardArchmageArsenal  gameplay.CardID = "archmage-arsenal"
 )
 
 type Engine struct {
@@ -710,6 +711,9 @@ func (e *Engine) handleResolvedEffect(ev *gameplay.ResolvedIgnitionEvent) error 
 			p := locks[0]
 			pe.TeleportFrom = &chess.Pos{Row: p.Row, Col: p.Col}
 		}
+		if ev.Card.CardID == CardArchmageArsenal {
+			pe.DeckSearchChoices = archmageDeckSearchChoices(e.State.Players[ev.Owner])
+		}
 		e.pendingEffects[ev.Owner] = append(e.pendingEffects[ev.Owner], pe)
 		return nil
 	}
@@ -1037,6 +1041,9 @@ type PendingEffect struct {
 	Resolver EffectResolver
 	// TeleportFrom is the ignition-locked source square for pending teleport effects (e.g. Zip Line) while awaiting destination input.
 	TeleportFrom *chess.Pos
+	// DeckSearchChoices holds the eligible deck cards pre-computed at ignition resolution time for
+	// deck-search effects (e.g. Archmage Arsenal). Empty for non-search pending effects.
+	DeckSearchChoices []gameplay.CardInstance
 }
 
 // --- matchresolvers.ResolverEngine implementation ---
@@ -1197,4 +1204,38 @@ func (e *Engine) MarkOpponentCardEffectNegated(opponentPID gameplay.PlayerID) er
 	}
 	p.Ignition.EffectNegated = true
 	return nil
+}
+
+// SearchDeckToHand implements matchresolvers.ResolverEngine. It delegates to the match state to
+// move the first instance of cardID from the owner's deck to their hand and shuffle the remainder.
+func (e *Engine) SearchDeckToHand(owner gameplay.PlayerID, cardID gameplay.CardID) error {
+	return e.State.SearchDeckToHandByCardID(owner, cardID)
+}
+
+// archmageDeckSearchChoices returns the Power cards with cost <= 3 (excluding archmage-arsenal itself)
+// present in the player's current deck, deduplicated by card ID for the UI choice list.
+func archmageDeckSearchChoices(p *gameplay.PlayerState) []gameplay.CardInstance {
+	seen := map[gameplay.CardID]bool{}
+	var choices []gameplay.CardInstance
+	for _, c := range p.Deck {
+		if seen[c.CardID] {
+			continue
+		}
+		def, ok := gameplay.CardDefinitionByID(c.CardID)
+		if !ok {
+			continue
+		}
+		if def.Type != gameplay.CardTypePower {
+			continue
+		}
+		if def.Cost > 3 {
+			continue
+		}
+		if c.CardID == CardArchmageArsenal {
+			continue
+		}
+		seen[c.CardID] = true
+		choices = append(choices, c)
+	}
+	return choices
 }
