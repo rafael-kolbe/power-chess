@@ -311,7 +311,6 @@ import {
       selectPieceSwapFirstHint: "Select one of your pieces to swap.",
       selectPieceSwapSecondHint: "Select an opponent piece within 2 squares.",
       selectZipLineDestinationHint: "Select an empty square in the same row.",
-      selectMoveDestinationHint: "Select a destination square.",
       confirmPlayHint: "Confirm to continue the play.",
       mulliganConfirm: "Confirm mulligan",
       mulliganWaitingYou: "Waiting for you to confirm…",
@@ -464,7 +463,6 @@ import {
       selectPieceSwapFirstHint: "Selecione uma das suas peças para trocar.",
       selectPieceSwapSecondHint: "Selecione uma peça do oponente a até 2 casas.",
       selectZipLineDestinationHint: "Selecione uma casa vazia na mesma linha.",
-      selectMoveDestinationHint: "Selecione uma casa de destino.",
       confirmPlayHint: "Confirme para continuar a jogada.",
       mulliganConfirm: "Confirmar mulligan",
       mulliganWaitingYou: "Aguardando sua confirmação…",
@@ -4073,7 +4071,6 @@ import {
       return t("selectOwnPieceHint");
     }
     if (igniteTargetFlow?.stage === "placed") return t("selectIgnitionTargetHint");
-    if (selectedFrom && isGameplayInputOpen()) return t("selectMoveDestinationHint");
     if (canPassReactionPriority(snapshot, playerEl.value)) return t("confirmPlayHint");
     return "";
   }
@@ -5112,11 +5109,44 @@ import {
     ws.send(JSON.stringify({ id: `req-${seq++}`, type, payload }));
   }
 
-  function makeEdgeLabel(text) {
+  function makeEdgeLabel(text, classNames = []) {
     const el = document.createElement("div");
     el.className = "edge-label";
+    for (const className of classNames) {
+      if (className) el.classList.add(className);
+    }
     el.textContent = text;
     return el;
+  }
+
+  function expectedActionPlayer(snapshot) {
+    if (!snapshot || !gameStarted || snapshot.matchEnded || snapshot.mulliganPhaseActive) return "";
+    if (snapshot.reconnectPendingFor) return "";
+    if (Number(snapshot.connectedA ?? 1) <= 0 || Number(snapshot.connectedB ?? 1) <= 0) return "";
+
+    if (snapshot.reactionWindow?.open) {
+      return currentReactionResponder(snapshot);
+    }
+    const targeting = snapshot.ignitionTargeting;
+    if (targeting?.awaitingTargetChoice && targeting.owner) {
+      return String(targeting.owner);
+    }
+    if (Array.isArray(snapshot.pendingEffects) && snapshot.pendingEffects.length > 0) {
+      const pendingOwner = snapshot.pendingEffects.find((pe) => pe?.owner)?.owner;
+      if (pendingOwner) return String(pendingOwner);
+    }
+    return String(snapshot.turnPlayer || "");
+  }
+
+  function seatForLogicalHalf(row) {
+    return row >= 4 ? "A" : "B";
+  }
+
+  function actionEdgeClasses(logicalRow, expectedSeat) {
+    const sideSeat = seatForLogicalHalf(logicalRow);
+    if (!expectedSeat || sideSeat !== expectedSeat) return [];
+    const isOwnAction = expectedSeat === playerEl.value;
+    return ["edge-label--action", isOwnAction ? "edge-label--action-own" : "edge-label--action-opponent"];
   }
 
   /** @returns {Set<string>} Keys for currently highlighted destination squares. */
@@ -5256,6 +5286,7 @@ import {
 
     const zlSrc = viewerZipLinePendingSource(lastSnapshot);
     const zlDestSet = zlSrc ? zipLineDestKeySet(board || [], zlSrc) : new Set();
+    const actionSeat = expectedActionPlayer(lastSnapshot);
 
     for (let gr = 0; gr < 10; gr++) {
       for (let gc = 0; gc < 10; gc++) {
@@ -5269,22 +5300,26 @@ import {
 
         if (gr === 0 && gc >= 1 && gc <= 8) {
           const dc = gc - 1;
-          boardFrameEl.appendChild(makeEdgeLabel(fileLetterFromDisplayEdge(0, dc)));
+          const { row } = displayToLogical(0, dc);
+          boardFrameEl.appendChild(makeEdgeLabel(fileLetterFromDisplayEdge(0, dc), actionEdgeClasses(row, actionSeat)));
           continue;
         }
         if (gr === 9 && gc >= 1 && gc <= 8) {
           const dc = gc - 1;
-          boardFrameEl.appendChild(makeEdgeLabel(fileLetterFromDisplayEdge(7, dc)));
+          const { row } = displayToLogical(7, dc);
+          boardFrameEl.appendChild(makeEdgeLabel(fileLetterFromDisplayEdge(7, dc), actionEdgeClasses(row, actionSeat)));
           continue;
         }
         if (gc === 0 && gr >= 1 && gr <= 8) {
           const dr = gr - 1;
-          boardFrameEl.appendChild(makeEdgeLabel(rankDigitFromDisplayEdge(dr, 0)));
+          const { row } = displayToLogical(dr, 0);
+          boardFrameEl.appendChild(makeEdgeLabel(rankDigitFromDisplayEdge(dr, 0), actionEdgeClasses(row, actionSeat)));
           continue;
         }
         if (gc === 9 && gr >= 1 && gr <= 8) {
           const dr = gr - 1;
-          boardFrameEl.appendChild(makeEdgeLabel(rankDigitFromDisplayEdge(dr, 7)));
+          const { row } = displayToLogical(dr, 7);
+          boardFrameEl.appendChild(makeEdgeLabel(rankDigitFromDisplayEdge(dr, 7), actionEdgeClasses(row, actionSeat)));
           continue;
         }
 
