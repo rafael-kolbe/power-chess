@@ -185,7 +185,7 @@ Give any piece you control, except the king or a bishop, the ability to move as 
 # Retaliate
 ## Type: Retribution
 ## Description
-Target a card on your opponent's cooldown slot, burn x mana from your opponent, where x is the mana cost of the targeted card, and if you do, activate that card (in your ignition slot) for yourself.
+Target a "Power" card on your opponent's cooldown slot, burn x mana from your opponent, where x is the mana cost of the targeted card, and if you do, activate that card's effect for yourself.
 ## Cost: 2
 ## Ignition: 0
 ## Cooldown: 9

@@ -29,21 +29,22 @@ func (e *Engine) errIfOpeningBlocksGameplay() error {
 }
 
 const (
-	CardKnightTouch    gameplay.CardID = "knight-touch"
-	CardRookTouch      gameplay.CardID = "rook-touch"
-	CardBishopTouch    gameplay.CardID = "bishop-touch"
-	CardMindControl    gameplay.CardID = "mind-control"
-	CardEnergyGain     gameplay.CardID = "energy-gain"
-	CardDoubleTurn     gameplay.CardID = "double-turn"
-	CardStopRightThere gameplay.CardID = "stop-right-there"
-	CardExtinguish     gameplay.CardID = "extinguish"
-	CardCounterattack  gameplay.CardID = "counterattack"
-	CardBlockade       gameplay.CardID = "blockade"
-	CardManaBurn       gameplay.CardID = "mana-burn"
-	CardPieceSwap      gameplay.CardID = "piece-swap"
-	CardZipLine          gameplay.CardID = "zip-line"
-	CardSacrificeMass    gameplay.CardID = "sacrifice-of-the-masses"
-	CardArchmageArsenal  gameplay.CardID = "archmage-arsenal"
+	CardKnightTouch     gameplay.CardID = "knight-touch"
+	CardRookTouch       gameplay.CardID = "rook-touch"
+	CardBishopTouch     gameplay.CardID = "bishop-touch"
+	CardMindControl     gameplay.CardID = "mind-control"
+	CardEnergyGain      gameplay.CardID = "energy-gain"
+	CardDoubleTurn      gameplay.CardID = "double-turn"
+	CardStopRightThere  gameplay.CardID = "stop-right-there"
+	CardExtinguish      gameplay.CardID = "extinguish"
+	CardCounterattack   gameplay.CardID = "counterattack"
+	CardBlockade        gameplay.CardID = "blockade"
+	CardManaBurn        gameplay.CardID = "mana-burn"
+	CardRetaliate       gameplay.CardID = "retaliate"
+	CardPieceSwap       gameplay.CardID = "piece-swap"
+	CardZipLine         gameplay.CardID = "zip-line"
+	CardSacrificeMass   gameplay.CardID = "sacrifice-of-the-masses"
+	CardArchmageArsenal gameplay.CardID = "archmage-arsenal"
 )
 
 type Engine struct {
@@ -619,15 +620,84 @@ func (e *Engine) ResolvePendingEffect(pid gameplay.PlayerID, target EffectTarget
 	}
 	pe := queue[0]
 	merged := target
+	if pe.EmitActivationFX {
+		if err := e.prepareCopiedPendingTarget(&pe, target, &merged); err != nil {
+			return err
+		}
+	}
 	if pe.CardID == CardZipLine && pe.TeleportFrom != nil {
 		from := *pe.TeleportFrom
 		merged.PiecePos = &from
 	}
 	if err := pe.Resolver.Apply(e, pe.Owner, merged); err != nil {
-		return err
+		if !pe.EmitActivationFX || !errors.Is(err, matchresolvers.ErrEffectFailed) {
+			return err
+		}
+		e.appendActivationFX(pe.Owner, pe.CardID, false)
+		e.pendingEffects[pid] = queue[1:]
+		e.clearCopiedPendingTarget(pe)
+		return e.resumeReactionStackAfterPendingEffect()
+	}
+	if pe.EmitActivationFX {
+		e.appendActivationFX(pe.Owner, pe.CardID, true)
+		e.clearCopiedPendingTarget(pe)
 	}
 	e.pendingEffects[pid] = queue[1:]
+	return e.resumeReactionStackAfterPendingEffect()
+}
+
+// prepareCopiedPendingTarget validates and stages target data for a copied target-requiring effect.
+func (e *Engine) prepareCopiedPendingTarget(pe *PendingEffect, target EffectTarget, merged *EffectTarget) error {
+	def, ok := gameplay.CardDefinitionByID(pe.CardID)
+	if !ok || def.Targets == 0 {
+		return nil
+	}
+	targets, err := e.pendingEffectTargetPieces(pe.CardID, target)
+	if err != nil {
+		return err
+	}
+	if err := e.validateIgnitionTargetPieces(pe.Owner, pe.CardID, targets); err != nil {
+		return err
+	}
+	if pe.CardID == CardZipLine {
+		from := targets[0]
+		pe.TeleportFrom = &chess.Pos{Row: from.Row, Col: from.Col}
+		merged.PiecePos = &from
+		return nil
+	}
+	e.lockIgnitionTargetPieces(pe.Owner, pe.CardID, targets)
 	return nil
+}
+
+// clearCopiedPendingTarget removes temporary target locks used by copied effects.
+func (e *Engine) clearCopiedPendingTarget(pe PendingEffect) {
+	if !pe.EmitActivationFX {
+		return
+	}
+	e.ignitionTargets[pe.Owner] = nil
+	delete(e.ignitionTargetCard, pe.Owner)
+}
+
+// pendingEffectTargetPieces converts a generic pending-effect payload into card target positions.
+func (e *Engine) pendingEffectTargetPieces(cardID gameplay.CardID, target EffectTarget) ([]chess.Pos, error) {
+	if cardID == CardPieceSwap {
+		if target.PiecePos == nil || target.TargetPos == nil {
+			return nil, errors.New("copied piece swap requires two target pieces")
+		}
+		return []chess.Pos{*target.PiecePos, *target.TargetPos}, nil
+	}
+	if target.PiecePos == nil {
+		return nil, errors.New("copied effect requires a target piece")
+	}
+	return []chess.Pos{*target.PiecePos}, nil
+}
+
+// resumeReactionStackAfterPendingEffect continues any paused reaction stack after target input.
+func (e *Engine) resumeReactionStackAfterPendingEffect() error {
+	if e.ReactionWindow == nil || !e.ReactionWindow.Open {
+		return nil
+	}
+	return e.ResolveReactionStack()
 }
 
 // SubmitMove executes a legal chess move, or defers it when a capture reaction window opens.
@@ -1039,6 +1109,9 @@ type PendingEffect struct {
 	Owner    gameplay.PlayerID
 	CardID   gameplay.CardID
 	Resolver EffectResolver
+	// EmitActivationFX is true for effects activated by another card (e.g. Retaliate)
+	// because there is no ignition-resolution event to announce them.
+	EmitActivationFX bool
 	// TeleportFrom is the ignition-locked source square for pending teleport effects (e.g. Zip Line) while awaiting destination input.
 	TeleportFrom *chess.Pos
 	// DeckSearchChoices holds the eligible deck cards pre-computed at ignition resolution time for
@@ -1142,6 +1215,76 @@ func (e *Engine) BurnManaFromOpponent(opponentPID gameplay.PlayerID, amount int)
 // The method name is preserved for compatibility with existing resolver code.
 func (e *Engine) DeferManaBurn(opponentPID gameplay.PlayerID, amount int) {
 	e.State.BurnMana(opponentPID, amount)
+}
+
+// ResolveCooldownPowerEffect implements matchresolvers.ResolverEngine.
+// It burns exact regular mana from owner's opponent, then activates the selected
+// opponent cooldown Power resolver for owner.
+func (e *Engine) ResolveCooldownPowerEffect(owner gameplay.PlayerID, targetCardID gameplay.CardID) error {
+	target, ok := e.retaliateCooldownTarget(owner, targetCardID)
+	if !ok {
+		return matchresolvers.ErrEffectFailed
+	}
+	opp := gameplay.OppositePlayer(owner)
+	if !e.State.BurnRegularManaIfAvailable(opp, target.Card.ManaCost) {
+		return matchresolvers.ErrEffectFailed
+	}
+	resolver, ok := e.resolvers[target.Card.CardID]
+	if !ok {
+		return matchresolvers.ErrEffectFailed
+	}
+	def, ok := gameplay.CardDefinitionByID(target.Card.CardID)
+	if !ok {
+		return matchresolvers.ErrEffectFailed
+	}
+	if def.Targets > 0 || resolver.RequiresTarget() {
+		pe := PendingEffect{
+			Owner:            owner,
+			CardID:           target.Card.CardID,
+			Resolver:         resolver,
+			EmitActivationFX: true,
+		}
+		if target.Card.CardID == CardArchmageArsenal {
+			pe.DeckSearchChoices = archmageDeckSearchChoices(e.State.Players[owner])
+		}
+		e.pendingEffects[owner] = append(e.pendingEffects[owner], pe)
+		return nil
+	}
+	if err := resolver.Apply(e, owner, EffectTarget{}); err != nil {
+		if errors.Is(err, matchresolvers.ErrEffectFailed) {
+			e.appendActivationFX(owner, target.Card.CardID, false)
+			return nil
+		}
+		return err
+	}
+	e.appendActivationFX(owner, target.Card.CardID, true)
+	return nil
+}
+
+// retaliateCooldownTarget returns a valid Retaliate target from owner's opponent cooldown zone.
+func (e *Engine) retaliateCooldownTarget(owner gameplay.PlayerID, targetCardID gameplay.CardID) (gameplay.CooldownEntry, bool) {
+	if targetCardID == "" {
+		return gameplay.CooldownEntry{}, false
+	}
+	opp := gameplay.OppositePlayer(owner)
+	oppState := e.State.Players[opp]
+	if oppState == nil {
+		return gameplay.CooldownEntry{}, false
+	}
+	for _, cd := range oppState.Cooldowns {
+		if cd.Card.CardID != targetCardID {
+			continue
+		}
+		def, ok := gameplay.CardDefinitionByID(cd.Card.CardID)
+		if !ok || def.Type != gameplay.CardTypePower {
+			return gameplay.CooldownEntry{}, false
+		}
+		if oppState.Mana < cd.Card.ManaCost {
+			return gameplay.CooldownEntry{}, false
+		}
+		return cd, true
+	}
+	return gameplay.CooldownEntry{}, false
 }
 
 // HasPendingManaBurns reports whether there are queued burns waiting to be applied.

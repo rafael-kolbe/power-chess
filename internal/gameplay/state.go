@@ -580,6 +580,20 @@ func (s *MatchState) BurnMana(pid PlayerID, amount int) {
 	}
 }
 
+// BurnRegularManaIfAvailable drains amount from pid's regular mana only.
+// It returns false and leaves mana unchanged when the player cannot pay the full amount.
+func (s *MatchState) BurnRegularManaIfAvailable(pid PlayerID, amount int) bool {
+	if amount <= 0 {
+		return true
+	}
+	p := s.Players[pid]
+	if p == nil || p.Mana < amount {
+		return false
+	}
+	p.Mana -= amount
+	return true
+}
+
 func (s *MatchState) addEnergizedMana(pid PlayerID, amount int) {
 	p := s.Players[pid]
 	p.EnergizedMana += amount

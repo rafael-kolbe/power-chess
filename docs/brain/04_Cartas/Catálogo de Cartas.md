@@ -77,7 +77,7 @@
 
 ### Retaliate
 - **Custo:** 2 | **Ignição:** 0 | **Recarga:** 9 | **Alvos:** 0 | **Duração:** 0
-- Target a card on your opponent's cooldown slot, burn x mana from your opponent, where x is the mana cost of the targeted card, and if you do, activate that card (in your ignition slot) for yourself.
+- Target a "Power" card on your opponent's cooldown slot, burn x mana from your opponent, where x is the mana cost of the targeted card, and if you do, activate that card's effect for yourself.
 
 ### Stop Right There!
 - **Custo:** 3 | **Ignição:** 0 | **Recarga:** 5 | **Alvos:** 0 | **Duração:** 0

@@ -88,6 +88,9 @@ type ResolverEngine interface {
 	// DeferManaBurn applies a mana-burn effect as part of the current successful resolution step.
 	// The legacy name is kept for compatibility with existing resolvers.
 	DeferManaBurn(opponentPID gameplay.PlayerID, amount int)
+	// ResolveCooldownPowerEffect activates a valid opponent cooldown Power card for owner
+	// as part of the currently resolving effect.
+	ResolveCooldownPowerEffect(owner gameplay.PlayerID, targetCardID gameplay.CardID) error
 	// IgnitionCardCost returns the ManaCost of the card currently in pid's ignition slot,
 	// or 0 if the slot is unoccupied.
 	IgnitionCardCost(pid gameplay.PlayerID) int

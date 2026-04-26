@@ -90,7 +90,7 @@ export function buildMatchDebugFixturePayload() {
     },
     black: {
       deck: [...DEFAULT_DECK_20],
-      hand: ["extinguish", "clairvoyance", "mana-burn"],
+      hand: ["extinguish", "retaliate", "mana-burn"],
       mana: 8,
       maxMana: 10,
       energizedMana: 0,

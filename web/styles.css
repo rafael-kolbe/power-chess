@@ -2407,6 +2407,13 @@ pre {
   animation: pm-banish-target-pulse 1.4s ease-in-out infinite;
 }
 
+.pm-cooldown-card-wrap--retaliate-target {
+  cursor: pointer;
+  outline: 2px solid rgb(255 165 40 / 90%);
+  border-radius: 4px;
+  animation: pm-banish-target-pulse 1.4s ease-in-out infinite;
+}
+
 @keyframes pm-banish-target-pulse {
   0%, 100% { box-shadow: 0 0 8px 2px rgb(255 130 30 / 25%); }
   50% { box-shadow: 0 0 20px 8px rgb(255 140 30 / 60%); }

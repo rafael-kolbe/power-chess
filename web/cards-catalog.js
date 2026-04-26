@@ -112,7 +112,7 @@ const PT = {
   "retaliate": {
     name: "Retaliação",
     description:
-      "Alvo: uma carta no slot de recarga do oponente. Queime x de mana do oponente, onde x é o custo de mana da carta alvo e, se fizer isso, ative essa carta (no seu slot de ignição) para você.",
+      "Alvo: uma carta \"Poder\" no slot de recarga do oponente. Queime x de mana do oponente, onde x é o custo de mana da carta alvo e, se fizer isso, ative o efeito dessa carta para você.",
     example:
       "1. O oponente tem \"Toque do Cavalo\" no slot de recarga.\n2. O oponente ativa qualquer carta \"Poder\".\n3. Você ativa \"Retaliação\" como retribuição.\n4. Você escolhe o \"Toque do Cavalo\" do oponente, queimando 3 de mana do oponente com sucesso.\n5. Você então ativa o \"Toque do Cavalo\" para si, fortalecendo sua torre em a1.\n6. No seu próximo turno você move a torre em a1 para c2."
   },

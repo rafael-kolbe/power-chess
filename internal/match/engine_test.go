@@ -1126,3 +1126,141 @@ func TestEnergyGainManaCappedAtMaxMana(t *testing.T) {
 		t.Fatalf("expected mana capped at max 10, got %d", state.Players[gameplay.PlayerA].Mana)
 	}
 }
+
+func TestRetaliateRejectsWhenOpponentCannotPayRegularManaForCooldownPower(t *testing.T) {
+	eg := gameplay.CardInstance{InstanceID: "eg1", CardID: CardEnergyGain, ManaCost: 0, Ignition: 1, Cooldown: 2}
+	ret := gameplay.CardInstance{InstanceID: "ret1", CardID: CardRetaliate, ManaCost: 2, Ignition: 0, Cooldown: 9}
+	kt := gameplay.CardInstance{InstanceID: "kt-cd", CardID: CardKnightTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
+	state, err := gameplay.NewMatchState(testDeckWith(eg), testDeckWith(ret))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.CurrentTurn = gameplay.PlayerA
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{eg}
+	state.Players[gameplay.PlayerA].Mana = 2
+	state.Players[gameplay.PlayerA].EnergizedMana = 10
+	state.Players[gameplay.PlayerA].Cooldowns = []gameplay.CooldownEntry{{Card: kt, TurnsRemaining: 1}}
+	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{ret}
+	state.Players[gameplay.PlayerB].Mana = 10
+	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	markInPlayForTest(state)
+
+	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
+		t.Fatalf("activate energy-gain: %v", err)
+	}
+	target := CardKnightTouch
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{TargetCard: &target}); err == nil {
+		t.Fatal("expected Retaliate to reject cooldown Power when opponent has insufficient regular mana")
+	}
+	if len(state.Players[gameplay.PlayerB].Hand) != 1 {
+		t.Fatal("rejected Retaliate must remain in hand")
+	}
+}
+
+func TestRetaliateBurnsRegularManaAndCopiesTargetlessPowerBeforeNextChainCard(t *testing.T) {
+	eg := gameplay.CardInstance{InstanceID: "eg1", CardID: CardEnergyGain, ManaCost: 3, Ignition: 1, Cooldown: 2}
+	ret := gameplay.CardInstance{InstanceID: "ret1", CardID: CardRetaliate, ManaCost: 2, Ignition: 0, Cooldown: 9}
+	mb := gameplay.CardInstance{InstanceID: "mb1", CardID: CardManaBurn, ManaCost: 1, Ignition: 0, Cooldown: 3}
+	copiedEnergy := gameplay.CardInstance{InstanceID: "eg-cd", CardID: CardEnergyGain, ManaCost: 0, Ignition: 1, Cooldown: 2}
+	state, err := gameplay.NewMatchState(testDeckWith(eg), testDeckWith(mb))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.CurrentTurn = gameplay.PlayerA
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{eg, ret}
+	state.Players[gameplay.PlayerA].Mana = 8
+	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{mb}
+	state.Players[gameplay.PlayerB].Mana = 10
+	state.Players[gameplay.PlayerB].Cooldowns = []gameplay.CooldownEntry{{Card: copiedEnergy, TurnsRemaining: 1}}
+	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	markInPlayForTest(state)
+
+	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
+		t.Fatalf("activate energy-gain: %v", err)
+	}
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err != nil {
+		t.Fatalf("queue mana-burn: %v", err)
+	}
+	target := CardEnergyGain
+	if err := e.QueueReactionCard(gameplay.PlayerA, 0, -1, EffectTarget{TargetCard: &target}); err != nil {
+		t.Fatalf("queue retaliate above mana-burn: %v", err)
+	}
+	if err := e.ResolveReactionStack(); err != nil {
+		t.Fatalf("resolve reactions: %v", err)
+	}
+	if got := state.Players[gameplay.PlayerA].Mana; got != 4 {
+		t.Fatalf("expected copied Energy Gain to resolve before lower Mana Burn, got PlayerA mana %d", got)
+	}
+	if got := state.Players[gameplay.PlayerB].Mana; got != 9 {
+		t.Fatalf("expected PlayerB to only pay Mana Burn when copied target costs 0, got mana %d", got)
+	}
+	events := e.PullActivationFXEvents()
+	if len(events) < 3 {
+		t.Fatalf("expected activation events for mana-burn, copied energy-gain, and retaliate, got %+v", events)
+	}
+	if events[0].CardID != CardEnergyGain || events[1].CardID != CardRetaliate || events[2].CardID != CardManaBurn {
+		t.Fatalf("expected copied effect to resolve before lower chain card, got %+v", events)
+	}
+}
+
+func TestRetaliatePausesChainForCopiedPowerTargetsThenResumes(t *testing.T) {
+	eg := gameplay.CardInstance{InstanceID: "eg1", CardID: CardEnergyGain, ManaCost: 0, Ignition: 1, Cooldown: 2}
+	ret := gameplay.CardInstance{InstanceID: "ret1", CardID: CardRetaliate, ManaCost: 2, Ignition: 0, Cooldown: 9}
+	mb := gameplay.CardInstance{InstanceID: "mb1", CardID: CardManaBurn, ManaCost: 1, Ignition: 0, Cooldown: 3}
+	kt := gameplay.CardInstance{InstanceID: "kt-cd", CardID: CardKnightTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
+	state, err := gameplay.NewMatchState(testDeckWith(eg), testDeckWith(ret))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.CurrentTurn = gameplay.PlayerA
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{eg, mb}
+	state.Players[gameplay.PlayerA].Mana = 10
+	state.Players[gameplay.PlayerA].Cooldowns = []gameplay.CooldownEntry{{Card: kt, TurnsRemaining: 1}}
+	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{ret}
+	state.Players[gameplay.PlayerB].Mana = 10
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 3, Col: 3}, chess.Piece{Type: chess.Rook, Color: chess.Black})
+	e := NewEngine(state, board)
+	markInPlayForTest(state)
+
+	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
+		t.Fatalf("activate energy-gain: %v", err)
+	}
+	target := CardKnightTouch
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{TargetCard: &target}); err != nil {
+		t.Fatalf("queue retaliate: %v", err)
+	}
+	if err := e.QueueReactionCard(gameplay.PlayerA, 0, -1, EffectTarget{}); err != nil {
+		t.Fatalf("queue mana-burn above retaliate: %v", err)
+	}
+	if err := e.ResolveReactionStack(); err != nil {
+		t.Fatalf("resolve first part of reactions: %v", err)
+	}
+	if pending := e.PendingEffects(); len(pending) != 1 || pending[0].Owner != gameplay.PlayerB || pending[0].CardID != CardKnightTouch {
+		t.Fatalf("expected copied Knight Touch pending effect for PlayerB, got %+v", pending)
+	}
+	if got := len(e.ReactionStackEntries()); got != 0 {
+		t.Fatalf("expected no remaining reaction cards after Retaliate paused, got %d", got)
+	}
+	if rw, _, ok := e.ReactionWindowSnapshot(); !ok || !rw.Open {
+		t.Fatalf("reaction window should stay open while copied effect is pending")
+	}
+	if err := e.ResolvePendingEffect(gameplay.PlayerB, EffectTarget{PiecePos: &chess.Pos{Row: 3, Col: 3}}); err != nil {
+		t.Fatalf("resolve copied knight-touch target: %v", err)
+	}
+	if pending := e.PendingEffects(); len(pending) != 0 {
+		t.Fatalf("pending copied effect should be consumed, got %+v", pending)
+	}
+	if rw, _, ok := e.ReactionWindowSnapshot(); ok && rw.Open {
+		t.Fatalf("reaction window should close after pending copied effect completes, got %+v", rw)
+	}
+	if len(e.movementGrants) != 1 {
+		t.Fatalf("expected one copied Knight Touch movement grant, got %+v", e.movementGrants)
+	}
+	grant := e.movementGrants[0]
+	if grant.Owner != gameplay.PlayerB || grant.SourceCardID != CardKnightTouch || grant.Target != (chess.Pos{Row: 3, Col: 3}) {
+		t.Fatalf("unexpected copied Knight Touch grant: %+v", grant)
+	}
+}

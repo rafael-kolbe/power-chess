@@ -25,7 +25,33 @@ func EligibleForOpeningRetributionAUTO(s *MatchState, pid PlayerID) bool {
 		if p.Mana < def.Cost {
 			continue
 		}
+		if c.CardID == "retaliate" && !HasValidRetaliateCooldownTarget(s, pid) {
+			continue
+		}
 		return true
+	}
+	return false
+}
+
+// HasValidRetaliateCooldownTarget reports whether pid can choose at least one opponent
+// cooldown Power card whose full cost can be burned from the opponent's regular mana.
+func HasValidRetaliateCooldownTarget(s *MatchState, pid PlayerID) bool {
+	if s == nil {
+		return false
+	}
+	opp := OppositePlayer(pid)
+	oppState := s.Players[opp]
+	if oppState == nil {
+		return false
+	}
+	for _, cd := range oppState.Cooldowns {
+		def, ok := CardDefinitionByID(cd.Card.CardID)
+		if !ok || def.Type != CardTypePower {
+			continue
+		}
+		if oppState.Mana >= cd.Card.ManaCost {
+			return true
+		}
 	}
 	return false
 }

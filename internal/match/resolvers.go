@@ -40,5 +40,6 @@ func DefaultResolvers() map[gameplay.CardID]EffectResolver {
 	m[CardArchmageArsenal] = power.ArchmageArsenalResolver{}
 	m[CardExtinguish] = disruption.ExtinguishResolver{}
 	m[CardManaBurn] = retribution.ManaBurnResolver{}
+	m[CardRetaliate] = retribution.RetaliateResolver{}
 	return m
 }

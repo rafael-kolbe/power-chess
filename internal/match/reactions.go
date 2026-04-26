@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"power-chess/internal/gameplay"
+	matchresolvers "power-chess/internal/match/resolvers"
 )
 
 // ReactionWindow defines an open response window (Counter/Retribution) for the current trigger.
@@ -151,6 +152,9 @@ func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, banishH
 			return errors.New("only Counter cards can respond to Counter cards")
 		}
 	}
+	if err := e.validateReactionTarget(pid, card.CardID, target); err != nil {
+		return err
+	}
 	resolver, ok := e.resolvers[card.CardID]
 	if !ok {
 		return errors.New("card has no resolver")
@@ -165,6 +169,20 @@ func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, banishH
 		Target:   target,
 		Resolver: resolver,
 	})
+	return nil
+}
+
+// validateReactionTarget checks card-specific target payloads before reaction costs are paid.
+func (e *Engine) validateReactionTarget(pid gameplay.PlayerID, cardID gameplay.CardID, target EffectTarget) error {
+	if cardID != CardRetaliate {
+		return nil
+	}
+	if target.TargetCard == nil {
+		return errors.New("retaliate requires a target cooldown Power card")
+	}
+	if _, ok := e.retaliateCooldownTarget(pid, *target.TargetCard); !ok {
+		return errors.New("retaliate target must be an opponent cooldown Power card they can pay with regular mana")
+	}
 	return nil
 }
 
@@ -208,6 +226,9 @@ func (e *Engine) canExtendRetributionFollowUp(pid gameplay.PlayerID, prevDef gam
 			continue
 		}
 		if p.Mana < def.Cost {
+			continue
+		}
+		if c.CardID == CardRetaliate && !gameplay.HasValidRetaliateCooldownTarget(e.State, pid) {
 			continue
 		}
 		if !ignitionOccupied || gameplay.CardClearsOpponentIgnitionForChain(c.CardID) {
@@ -332,14 +353,18 @@ func (e *Engine) ResolveReactionStack() error {
 			return a.Resolver.Apply(e, a.Owner, a.Target)
 		})
 		if err != nil {
-			return err
+			if !errors.Is(err, matchresolvers.ErrEffectFailed) {
+				return err
+			}
 		}
-		// success is always true for current reaction-stack card types (Retribution, Counter,
-		// Disruption). When a negation mechanic for reaction cards is added, update this flag
-		// and the deferred-effect rollback below will automatically apply.
-		success := true
+		// Some reaction effects can fail during resolution if their target condition changed
+		// while higher stack entries resolved; the card still leaves the stack.
+		success := !errors.Is(err, matchresolvers.ErrEffectFailed)
 		e.appendActivationFXNegating(a.Owner, a.Card.CardID, success, negatesActivationOf)
 		e.State.SendCardToCooldown(a.Owner, a.Card)
+		if e.hasPendingEffects() {
+			return nil
+		}
 	}
 	if e.pendingMove != nil {
 		pm := *e.pendingMove
@@ -385,6 +410,16 @@ func (e *Engine) PendingEffects() []PendingEffect {
 		out = append(out, queue...)
 	}
 	return out
+}
+
+// hasPendingEffects reports whether any player has unresolved target-dependent effects.
+func (e *Engine) hasPendingEffects() bool {
+	for _, pid := range []gameplay.PlayerID{gameplay.PlayerA, gameplay.PlayerB} {
+		if len(e.pendingEffects[pid]) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // ReactionWindowSnapshot returns a copy of current reaction window and stack size.
