@@ -25,8 +25,9 @@ func DefaultDeckPresetCardIDs() []CardID {
 		{"extinguish", 2},
 		{"clairvoyance", 1},
 		{"save-it-for-later", 1},
-		{"retaliate", 3},
+		{"retaliate", 2},
 		{"counterattack", 1},
+		{"archmage-arsenal", 1},
 	}
 	out := make([]CardID, 0, DefaultDeckSize)
 	for _, e := range pattern {

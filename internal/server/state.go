@@ -490,10 +490,17 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 			CardID: string(pe.CardID),
 		}
 		if pe.CardID == match.CardZipLine && pe.TeleportFrom != nil {
-			r := pe.TeleportFrom.Row
-			c := pe.TeleportFrom.Col
-			pes.SourceRow = &r
-			pes.SourceCol = &c
+			row := pe.TeleportFrom.Row
+			col := pe.TeleportFrom.Col
+			pes.SourceRow = &row
+			pes.SourceCol = &col
+		}
+		if pe.CardID == match.CardArchmageArsenal {
+			for _, choice := range pe.DeckSearchChoices {
+				pes.DeckSearchChoices = append(pes.DeckSearchChoices, DeckSearchChoice{
+					CardID: string(choice.CardID),
+				})
+			}
 		}
 		payload.PendingEffects = append(payload.PendingEffects, pes)
 	}

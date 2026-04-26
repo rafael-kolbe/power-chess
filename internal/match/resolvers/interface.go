@@ -97,6 +97,9 @@ type ResolverEngine interface {
 	// ApplyPieceTeleport moves the piece at from to to subject to opts constraints,
 	// then optionally ends the owner's chess turn when opts.ConsumeTurn is true.
 	ApplyPieceTeleport(owner gameplay.PlayerID, from, to chess.Pos, opts TeleportOptions) error
+	// SearchDeckToHand moves the first card with cardID from the owner's deck to their hand
+	// and shuffles the remaining deck. Returns an error if the card is not found or the hand is full.
+	SearchDeckToHand(owner gameplay.PlayerID, cardID gameplay.CardID) error
 }
 
 // EffectResolver is the execution contract for card effects.

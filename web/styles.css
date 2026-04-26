@@ -2697,6 +2697,53 @@ pre {
 }
 
 /* =============================================================================
+   Deck-search overlay (Archmage Arsenal and future search cards)
+   ============================================================================= */
+
+.deck-search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.78);
+}
+
+.deck-search-overlay.hidden {
+  display: none;
+}
+
+.deck-search-dialog {
+  max-width: min(1200px, 98vw);
+  max-height: min(92vh, 960px);
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.deck-search-empty {
+  text-align: center;
+  padding: 28px 16px;
+  color: #aaa;
+  font-size: 1rem;
+}
+
+.deck-search-grid .deck-view-card-wrap {
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+
+.deck-search-grid .deck-view-card-wrap:hover {
+  transform: translateY(-6px);
+}
+
+.deck-search-confirm-row {
+  justify-content: center;
+  padding-top: 12px;
+}
+
+/* =============================================================================
    Match debug (below board)
    ============================================================================= */
 

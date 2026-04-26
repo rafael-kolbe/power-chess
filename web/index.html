@@ -229,6 +229,26 @@
           <p id="opponentDisconnectHint" class="opponent-disconnect-hint"></p>
         </div>
       </div>
+
+      <div
+        id="deckSearchOverlay"
+        class="deck-search-overlay hidden"
+        aria-hidden="true"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="deckSearchTitle"
+      >
+        <div class="modal-dialog deck-search-dialog">
+          <div class="deck-view-dialog__head">
+            <h3 id="deckSearchTitle">Search Deck</h3>
+          </div>
+          <p id="deckSearchEmpty" class="deck-search-empty hidden">No legal targets in deck.</p>
+          <div id="deckSearchGrid" class="deck-view-grid deck-search-grid"></div>
+          <div id="deckSearchConfirmRow" class="modal-actions deck-search-confirm-row hidden">
+            <button type="button" id="deckSearchConfirmBtn" class="match-end-btn-primary">Confirm</button>
+          </div>
+        </div>
+      </div>
       <div class="row match-header-row">
         <span id="inRoomLabel" class="in-room-label"></span>
         <button id="disconnectBtn" type="button">Leave room</button>

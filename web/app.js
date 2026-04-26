@@ -73,6 +73,12 @@ import {
   let mulliganUiTimerId = null;
   /** @type {((value: string | null) => void) | null} Resolves the open promotion modal choice. */
   let promotionChoiceResolver = null;
+  /**
+   * Tracks whether a deck-search pending effect modal is currently open for the local player.
+   * Set to the card ID of the pending effect when open, null otherwise.
+   * @type {string | null}
+   */
+  let deckSearchOpenForCard = null;
 
   /** Set after we send debug_match_fixture (match-test-config); reset on new WebSocket. */
   let matchTestFixtureSent = false;
@@ -173,6 +179,11 @@ import {
   const promotionBodyEl = document.getElementById("promotionBody");
   const promotionChoicesEl = document.getElementById("promotionChoices");
   const promotionCancelEl = document.getElementById("promotionCancel");
+  const deckSearchOverlayEl = document.getElementById("deckSearchOverlay");
+  const deckSearchGridEl = document.getElementById("deckSearchGrid");
+  const deckSearchEmptyEl = document.getElementById("deckSearchEmpty");
+  const deckSearchConfirmRowEl = document.getElementById("deckSearchConfirmRow");
+  const deckSearchConfirmBtnEl = document.getElementById("deckSearchConfirmBtn");
 
   const i18n = {
     "en-US": {
@@ -311,6 +322,7 @@ import {
       selectPieceSwapFirstHint: "Select one of your pieces to swap.",
       selectPieceSwapSecondHint: "Select an opponent piece within 2 squares.",
       selectZipLineDestinationHint: "Select an empty square in the same row.",
+      selectDeckSearchCardHint: "Select a card from your deck to add to your hand.",
       confirmPlayHint: "Confirm to continue the play.",
       mulliganConfirm: "Confirm mulligan",
       mulliganWaitingYou: "Waiting for you to confirm…",
@@ -463,6 +475,7 @@ import {
       selectPieceSwapFirstHint: "Selecione uma das suas peças para trocar.",
       selectPieceSwapSecondHint: "Selecione uma peça do oponente a até 2 casas.",
       selectZipLineDestinationHint: "Selecione uma casa vazia na mesma linha.",
+      selectDeckSearchCardHint: "Selecione uma carta do seu deck para adicionar à mão.",
       confirmPlayHint: "Confirme para continuar a jogada.",
       mulliganConfirm: "Confirmar mulligan",
       mulliganWaitingYou: "Aguardando sua confirmação…",
@@ -742,6 +755,86 @@ import {
     deckViewModalEl.classList.add("hidden");
     deckViewModalEl.setAttribute("aria-hidden", "true");
     deckViewGridEl.innerHTML = "";
+  }
+
+  /**
+   * Opens the in-match deck-search modal for a pending deck-search effect.
+   * @param {Array<{cardId: string}>} choices - Eligible cards from the server.
+   * @param {string} pendingCardID - The card ID of the pending effect (e.g. "archmage-arsenal").
+   */
+  function openDeckSearchModal(choices, pendingCardID) {
+    if (!deckSearchOverlayEl || !deckSearchGridEl) return;
+    deckSearchOpenForCard = pendingCardID;
+    deckSearchGridEl.innerHTML = "";
+
+    const hasChoices = Array.isArray(choices) && choices.length > 0;
+    if (deckSearchEmptyEl) deckSearchEmptyEl.classList.toggle("hidden", hasChoices);
+    if (deckSearchConfirmRowEl) deckSearchConfirmRowEl.classList.toggle("hidden", hasChoices);
+
+    if (hasChoices) {
+      const catalog = getLocalizedCardCatalog(locale);
+      const byId = new Map(catalog.map((c) => [c.id, c]));
+      for (const choice of choices) {
+        const def = byId.get(choice.cardId);
+        if (!def) continue;
+        const wrap = document.createElement("div");
+        wrap.className = "deck-view-card-wrap";
+        wrap.dataset.cardId = choice.cardId;
+        const cardEl = createPowerCard({
+          type: def.type,
+          name: def.name,
+          description: def.description,
+          example: def.example,
+          mana: def.mana,
+          ignition: def.ignition,
+          cooldown: def.cooldown,
+          cardWidth: "200px",
+        });
+        wrap.appendChild(cardEl);
+        wrap.addEventListener("click", () => {
+          if (!isGameplayInputOpen()) return;
+          send("resolve_pending_effect", { targetCardId: choice.cardId });
+          closeDeckSearchModal();
+        });
+        deckSearchGridEl.appendChild(wrap);
+      }
+    }
+
+    deckSearchOverlayEl.classList.remove("hidden");
+    deckSearchOverlayEl.setAttribute("aria-hidden", "false");
+  }
+
+  /** Closes the deck-search modal and resets its state. */
+  function closeDeckSearchModal() {
+    deckSearchOpenForCard = null;
+    if (!deckSearchOverlayEl) return;
+    deckSearchOverlayEl.classList.add("hidden");
+    deckSearchOverlayEl.setAttribute("aria-hidden", "true");
+    if (deckSearchGridEl) deckSearchGridEl.innerHTML = "";
+  }
+
+  /**
+   * Syncs the deck-search modal visibility with the current snapshot.
+   * Opens the modal when the local player has an archmage-arsenal pending effect;
+   * closes it when the pending effect is gone.
+   * @param {object} snapshot
+   */
+  function maybeUpdateDeckSearchModal(snapshot) {
+    const self = playerEl?.value;
+    if (!self || !snapshot) return;
+    const pending = Array.isArray(snapshot.pendingEffects) ? snapshot.pendingEffects : [];
+    const archmagePE = pending.find(
+      (pe) => String(pe.owner || "") === self && String(pe.cardId || "") === "archmage-arsenal",
+    );
+    if (archmagePE) {
+      if (!deckSearchOpenForCard) {
+        openDeckSearchModal(archmagePE.deckSearchChoices || [], "archmage-arsenal");
+      }
+    } else {
+      if (deckSearchOpenForCard) {
+        closeDeckSearchModal();
+      }
+    }
   }
 
   async function openDeckViewModal() {
@@ -1431,6 +1524,7 @@ import {
           if (!doReactionResolve && !skipDupPlaymatAnim && hasEffectAnimationDelta(prevSnap, nextSnap)) {
             blockGameplayInputForEffects(900);
           }
+          maybeUpdateDeckSearchModal(nextSnap);
           renderPlaymat(nextSnap);
           pmPrevSnapshot = nextSnap;
           syncPlayerRoleLabels(nextSnap);
@@ -4060,6 +4154,7 @@ import {
 
   function actionPromptForSnapshot(snapshot) {
     if (disruptionBanishFlow !== null) return t("disruptionBanishHint");
+    if (deckSearchOpenForCard) return t("selectDeckSearchCardHint");
     const zipLinePending = viewerZipLinePendingSource(snapshot);
     if (zipLinePending) return t("selectZipLineDestinationHint");
     if (igniteTargetFlow?.stage === "picking") {
@@ -6055,6 +6150,13 @@ import {
     promotionOverlayEl.addEventListener("cancel", (ev) => {
       ev.preventDefault();
       closePromotionModal(null);
+    });
+  }
+  if (deckSearchConfirmBtnEl) {
+    deckSearchConfirmBtnEl.addEventListener("click", () => {
+      if (!isGameplayInputOpen()) return;
+      send("resolve_pending_effect", {});
+      closeDeckSearchModal();
     });
   }
   document.addEventListener("keydown", (ev) => {

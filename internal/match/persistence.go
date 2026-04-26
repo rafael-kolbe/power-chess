@@ -133,6 +133,9 @@ func NewEngineFromState(snapshot PersistedEngineState) (*Engine, error) {
 			p := chess.Pos{Row: *pe.SourceRow, Col: *pe.SourceCol}
 			pend.TeleportFrom = &p
 		}
+		if pe.CardID == CardArchmageArsenal {
+			pend.DeckSearchChoices = archmageDeckSearchChoices(e.State.Players[pe.Owner])
+		}
 		e.pendingEffects[pe.Owner] = append(e.pendingEffects[pe.Owner], pend)
 	}
 	for _, ra := range snapshot.ReactionStack {

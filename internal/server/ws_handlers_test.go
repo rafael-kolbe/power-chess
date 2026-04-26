@@ -848,3 +848,242 @@ func TestSubmitMoveDuplicateRequestAckedAsDuplicate(t *testing.T) {
 	// duplicate join works as per integration test pattern.
 	_ = cB // just to use it
 }
+
+// --- archmage-arsenal deck-search integration ---
+
+// archmageDeckFixture returns a DebugMatchFixturePayload with archmage-arsenal in Player A's hand
+// and knight-touch available in the deck for a deck-search test.
+func archmageDeckFixture() DebugMatchFixturePayload {
+	deck := []string{
+		"energy-gain", "energy-gain", "energy-gain",
+		"knight-touch", "knight-touch",
+		"bishop-touch", "bishop-touch",
+		"rook-touch", "rook-touch",
+		"sacrifice-of-the-masses",
+		"backstab", "backstab",
+		"extinguish", "extinguish",
+		"clairvoyance",
+		"save-it-for-later",
+		"retaliate", "retaliate",
+		"counterattack",
+		"archmage-arsenal",
+	}
+	return DebugMatchFixturePayload{
+		TestEnvironment: true,
+		White: &DebugSideFixture{
+			Deck: deck,
+			Hand: []string{"archmage-arsenal"},
+			Mana: intPtr(10),
+		},
+		Black: &DebugSideFixture{
+			Deck: deck,
+			Hand: []string{"counterattack", "extinguish"},
+			Mana: intPtr(10),
+		},
+	}
+}
+
+// TestArchmageArsenalEndToEndDeckSearch verifies the full WS flow: ignite archmage-arsenal →
+// snapshot contains deckSearchChoices → resolve_pending_effect with targetCardId → card in hand.
+func TestArchmageArsenalEndToEndDeckSearch(t *testing.T) {
+	t.Setenv("ADMIN_DEBUG_MATCH", "1")
+	_, wsURL := wsSetup(t)
+	cA, cB := joinTwoPlayers(t, wsURL, "980")
+
+	fix := archmageDeckFixture()
+	sendEnv(t, cA, Envelope{ID: "fix2", Type: MessageDebugMatchFixture, Payload: MustPayload(fix)})
+	if _, found := drainUntilType(t, cA, MessageAck, 20); !found {
+		t.Fatal("expected ack for debug fixture")
+	}
+	confirmMulliganBoth(t, cA, cB)
+
+	// Player A ignites archmage-arsenal (hand index 0).
+	sendEnv(t, cA, Envelope{
+		ID:      "ig1",
+		Type:    MessageIgniteCard,
+		Payload: MustPayload(IgniteCardPayload{HandIndex: 0}),
+	})
+	if _, found := drainUntilType(t, cA, MessageAck, 20); !found {
+		t.Fatal("expected ack for ignite_card")
+	}
+
+	// Close the ignite_reaction window so ignition resolves (ignition=0 → resolves immediately via reaction close).
+	sendEnv(t, cB, Envelope{
+		ID:      "rr1",
+		Type:    MessageResolveReaction,
+		Payload: MustPayload(map[string]any{}),
+	})
+	if _, found := drainUntilType(t, cB, MessageAck, 20); !found {
+		t.Fatal("expected ack for resolve_reactions")
+	}
+
+	// Drain snapshots until we see a pending effect with deckSearchChoices.
+	var snap StateSnapshotPayload
+	foundPending := false
+	for i := 0; i < 20; i++ {
+		env, ok := drainUntilType(t, cA, MessageStateSnapshot, 5)
+		if !ok {
+			break
+		}
+		if err := json.Unmarshal(env.Payload, &snap); err != nil {
+			t.Fatalf("unmarshal snapshot: %v", err)
+		}
+		if len(snap.PendingEffects) > 0 {
+			foundPending = true
+			break
+		}
+	}
+	if !foundPending {
+		t.Fatal("expected pending effect with deck search choices in snapshot")
+	}
+	pe := snap.PendingEffects[0]
+	if pe.CardID != "archmage-arsenal" {
+		t.Fatalf("expected archmage-arsenal pending, got %s", pe.CardID)
+	}
+	if len(pe.DeckSearchChoices) == 0 {
+		t.Fatal("expected at least one deck search choice")
+	}
+	chosenCardID := pe.DeckSearchChoices[0].CardID
+
+	// Resolve the pending effect by choosing the first eligible card.
+	sendEnv(t, cA, Envelope{
+		ID:      "rp3",
+		Type:    MessageResolvePending,
+		Payload: MustPayload(ResolvePendingPayload{TargetCardID: &chosenCardID}),
+	})
+	if _, found := drainUntilType(t, cA, MessageAck, 20); !found {
+		t.Fatal("expected ack for resolve_pending_effect")
+	}
+
+	// Drain snapshot after resolution and verify hand now contains the chosen card.
+	var finalSnap StateSnapshotPayload
+	for i := 0; i < 15; i++ {
+		env, ok := drainUntilType(t, cA, MessageStateSnapshot, 5)
+		if !ok {
+			break
+		}
+		if err := json.Unmarshal(env.Payload, &finalSnap); err != nil {
+			t.Fatalf("unmarshal final snapshot: %v", err)
+		}
+		if len(finalSnap.PendingEffects) == 0 {
+			break
+		}
+	}
+	viewerA := playerHUDForViewer(t, finalSnap, "A")
+	found := false
+	for _, h := range viewerA.Hand {
+		if h.CardID == chosenCardID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected %q in Player A hand after archmage resolution, hand=%+v", chosenCardID, viewerA.Hand)
+	}
+	_ = cB
+}
+
+// TestArchmageArsenalResolveNoTargetWhenNoneAvailable verifies that when there are no eligible
+// cards in the deck, the player can resolve the pending effect without a targetCardId (empty confirm).
+func TestArchmageArsenalResolveNoTargetWhenNoneAvailable(t *testing.T) {
+	t.Setenv("ADMIN_DEBUG_MATCH", "1")
+	_, wsURL := wsSetup(t)
+	cA, cB := joinTwoPlayers(t, wsURL, "981")
+
+	// Deck for this test: only non-eligible cards alongside archmage (cost > 3 and non-Power).
+	// Use only valid catalog cards but no Power card costing <= 3 (except archmage itself).
+	deck := []string{
+		"double-turn", "double-turn", "double-turn",
+		"mind-control", "mind-control", "mind-control",
+		"mana-burn", "mana-burn", "mana-burn",
+		"retaliate", "retaliate", "retaliate",
+		"counterattack", "counterattack", "counterattack",
+		"stop-right-there", "stop-right-there", "stop-right-there",
+		"piece-swap",
+		"archmage-arsenal",
+	}
+	fix := DebugMatchFixturePayload{
+		TestEnvironment: true,
+		White: &DebugSideFixture{
+			Deck: deck,
+			Hand: []string{"archmage-arsenal"},
+			Mana: intPtr(10),
+		},
+		Black: &DebugSideFixture{
+			Deck: deck,
+			Hand: []string{"counterattack"},
+			Mana: intPtr(10),
+		},
+	}
+	sendEnv(t, cA, Envelope{ID: "fix3", Type: MessageDebugMatchFixture, Payload: MustPayload(fix)})
+	if _, found := drainUntilType(t, cA, MessageAck, 20); !found {
+		t.Fatal("expected ack for debug fixture")
+	}
+	confirmMulliganBoth(t, cA, cB)
+
+	sendEnv(t, cA, Envelope{
+		ID:      "ig2",
+		Type:    MessageIgniteCard,
+		Payload: MustPayload(IgniteCardPayload{HandIndex: 0}),
+	})
+	if _, found := drainUntilType(t, cA, MessageAck, 20); !found {
+		t.Fatal("expected ack for ignite_card")
+	}
+	sendEnv(t, cB, Envelope{
+		ID:      "rr2",
+		Type:    MessageResolveReaction,
+		Payload: MustPayload(map[string]any{}),
+	})
+	if _, found := drainUntilType(t, cB, MessageAck, 20); !found {
+		t.Fatal("expected ack for resolve_reactions")
+	}
+
+	// Drain until pending effect snapshot.
+	var snap StateSnapshotPayload
+	for i := 0; i < 20; i++ {
+		env, ok := drainUntilType(t, cA, MessageStateSnapshot, 5)
+		if !ok {
+			break
+		}
+		if err := json.Unmarshal(env.Payload, &snap); err != nil {
+			continue
+		}
+		if len(snap.PendingEffects) > 0 {
+			break
+		}
+	}
+	if len(snap.PendingEffects) == 0 {
+		t.Fatal("expected pending effect in snapshot")
+	}
+	if len(snap.PendingEffects[0].DeckSearchChoices) != 0 {
+		t.Fatalf("expected no choices, got %d", len(snap.PendingEffects[0].DeckSearchChoices))
+	}
+
+	// Resolve with no targetCardId (nil) → should succeed.
+	sendEnv(t, cA, Envelope{
+		ID:      "rp4",
+		Type:    MessageResolvePending,
+		Payload: MustPayload(ResolvePendingPayload{}),
+	})
+	env, found := drainUntilType(t, cA, MessageAck, 20)
+	if !found {
+		t.Fatal("expected ack for empty resolve_pending")
+	}
+	var ack AckPayload
+	_ = json.Unmarshal(env.Payload, &ack)
+	if ack.Status != "ok" {
+		t.Fatalf("expected ok ack, got %s", ack.Status)
+	}
+	_ = cB
+}
+
+// playerHUDForViewer finds the viewer's PlayerHUDState in the snapshot.
+func playerHUDForViewer(t *testing.T, snap StateSnapshotPayload, pid string) PlayerHUDState {
+	t.Helper()
+	for _, p := range snap.Players {
+		if p.PlayerID == pid {
+			return p
+		}
+	}
+	t.Fatalf("player %s not found in snapshot", pid)
+	return PlayerHUDState{}
+}

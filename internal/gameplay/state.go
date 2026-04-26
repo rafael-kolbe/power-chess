@@ -277,6 +277,37 @@ func (s *MatchState) DrawCardsNoCost(pid PlayerID, count int) error {
 	return nil
 }
 
+// SearchDeckToHandByCardID finds the first card with cardID in the player's deck, moves it to hand,
+// and shuffles the remaining deck. Returns an error if the card is not found or the hand is full.
+func (s *MatchState) SearchDeckToHandByCardID(pid PlayerID, cardID CardID) error {
+	p := s.Players[pid]
+	if p == nil {
+		return errors.New("unknown player")
+	}
+	if len(p.Hand) >= DefaultMaxHandSize {
+		return errors.New(errHandFull)
+	}
+	idx := -1
+	for i, c := range p.Deck {
+		if c.CardID == cardID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("card %q not found in deck", cardID)
+	}
+	svc := NewZoneService()
+	_, nextDeck, nextHand, err := svc.MoveCardBetweenSlices(p.Deck, p.Hand, idx)
+	if err != nil {
+		return err
+	}
+	p.Deck = nextDeck
+	p.Hand = nextHand
+	shuffleCardSlice(p.Deck)
+	return nil
+}
+
 func (s *MatchState) drawCardNoCost(pid PlayerID) error {
 	p := s.Players[pid]
 	if len(p.Deck) == 0 {
