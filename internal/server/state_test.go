@@ -415,7 +415,7 @@ func TestAutoFinalizeIgniteWhenNextCannotExtend(t *testing.T) {
 	s.Started = true
 	s.CurrentTurn = gameplay.PlayerA
 	kt := gameplay.CardInstance{InstanceID: "k1", CardID: "knight-touch", ManaCost: 3, Ignition: 0, Cooldown: 2}
-	ret := gameplay.CardInstance{InstanceID: "r1", CardID: "retaliate", ManaCost: 2, Ignition: 0, Cooldown: 9}
+	ret := gameplay.CardInstance{InstanceID: "r1", CardID: "mana-burn", ManaCost: 1, Ignition: 0, Cooldown: 3}
 	ext := gameplay.CardInstance{InstanceID: "e1", CardID: "extinguish", ManaCost: 2, Ignition: 0, Cooldown: 2}
 	s.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{kt, ext}
 	s.Players[gameplay.PlayerA].Mana = 10
@@ -470,7 +470,7 @@ func TestIgniteChainFinalizesOnZeroReactionDeadline(t *testing.T) {
 	s.Started = true
 	s.CurrentTurn = gameplay.PlayerB
 	eg := gameplay.CardInstance{InstanceID: "e1", CardID: "energy-gain", ManaCost: 0, Ignition: 1, Cooldown: 2}
-	ret := gameplay.CardInstance{InstanceID: "r1", CardID: "retaliate", ManaCost: 2, Ignition: 0, Cooldown: 9}
+	ret := gameplay.CardInstance{InstanceID: "r1", CardID: "mana-burn", ManaCost: 1, Ignition: 0, Cooldown: 3}
 	s.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{eg}
 	s.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{ret}
 	s.Players[gameplay.PlayerA].Mana = 10
@@ -528,7 +528,7 @@ func TestSnapshotOpenReactionWindowAfterChainStartClearsDeadline(t *testing.T) {
 	s.Started = true
 	s.CurrentTurn = gameplay.PlayerB
 	eg := gameplay.CardInstance{InstanceID: "e1", CardID: "energy-gain", ManaCost: 0, Ignition: 1, Cooldown: 2}
-	ret := gameplay.CardInstance{InstanceID: "r1", CardID: "retaliate", ManaCost: 2, Ignition: 0, Cooldown: 9}
+	ret := gameplay.CardInstance{InstanceID: "r1", CardID: "mana-burn", ManaCost: 1, Ignition: 0, Cooldown: 3}
 	s.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{eg}
 	s.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{ret}
 	s.Players[gameplay.PlayerA].Mana = 10

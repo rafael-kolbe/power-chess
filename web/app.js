@@ -25,6 +25,15 @@ import {
    */
   let disruptionBanishFlow = null;
   /**
+   * Two-step flow for Retaliate reactions.
+   * Step 1: user selects Retaliate from hand.
+   * Step 2: user selects a valid Power card from the opponent cooldown zone.
+   * @type {{ handIndex: number } | null}
+   */
+  let retaliateTargetFlow = null;
+  /** @type {{ row: number, col: number } | null} */
+  let copiedZipLineSource = null;
+  /**
    * Keeps blue dotted targets until the matching `activate_card` is processed (success or fail).
    * @type {{ owner: string, cardId: string, pieces: { row: number, col: number }[] } | null}
    */
@@ -315,6 +324,7 @@ import {
       connectErrorPrefix: "Could not connect:",
       mulliganHint: "Tap cards to mark them red (they return to the deck). Confirm when ready.",
       disruptionBanishHint: "Select a Power card from your hand to banish as the reaction cost. Press Esc to cancel.",
+      retaliateTargetHint: "Select a valid Power card from your opponent's cooldown zone. Press Esc to cancel.",
       selectIgnitionTargetHint: "Select the card target on the board.",
       selectOwnPieceHint: "Select one of your pieces on the board.",
       selectOwnPawnHint: "Select one of your pawns to sacrifice.",
@@ -468,6 +478,8 @@ import {
       mulliganHint: "Toque nas cartas para marcar em vermelho (voltam ao deck). Confirme quando terminar.",
       disruptionBanishHint:
         "Selecione uma carta Power da mão para banir como custo de reação. Pressione Esc para cancelar.",
+      retaliateTargetHint:
+        "Selecione uma carta Power válida na recarga do oponente. Pressione Esc para cancelar.",
       selectIgnitionTargetHint: "Selecione o alvo da carta no tabuleiro.",
       selectOwnPieceHint: "Selecione uma das suas peças no tabuleiro.",
       selectOwnPawnHint: "Selecione um dos seus peões para sacrificar.",
@@ -1377,6 +1389,15 @@ import {
             disruptionBanishFlow = null;
           }
         }
+        if (retaliateTargetFlow !== null) {
+          const rw = nextSnap?.reactionWindow;
+          if (!rw?.open || !hasValidRetaliateTarget(nextSnap, playerEl.value)) {
+            retaliateTargetFlow = null;
+          }
+        }
+        if (copiedZipLineSource && !viewerPendingBoardTargetEffect(nextSnap) && !viewerZipLinePendingSource(nextSnap)) {
+          copiedZipLineSource = null;
+        }
         maybeAdvanceIgniteTargetFlow(nextSnap);
         maybeClearIgniteTargetFlow(nextSnap);
         syncIgnitionBlueHoldFromSnapshot(nextSnap);
@@ -1624,8 +1645,25 @@ import {
     if (!snapshot || !Array.isArray(snapshot.pendingEffects)) return null;
     for (const pe of snapshot.pendingEffects) {
       if (String(pe.owner || "") !== self || String(pe.cardId || "") !== "zip-line") continue;
+      if (copiedZipLineSource) return copiedZipLineSource;
       if (pe.sourceRow == null || pe.sourceCol == null) continue;
       return { row: Number(pe.sourceRow), col: Number(pe.sourceCol) };
+    }
+    return null;
+  }
+
+  /** Returns a pending copied effect that needs a board piece selection from the local player. */
+  function viewerPendingBoardTargetEffect(snapshot) {
+    const self = playerEl.value;
+    if (!snapshot || !Array.isArray(snapshot.pendingEffects)) return null;
+    for (const pe of snapshot.pendingEffects) {
+      if (String(pe.owner || "") !== self) continue;
+      const cardId = String(pe.cardId || "");
+      const def = getCardDef(cardId);
+      if ((Number(def?.targets) || 0) <= 0) continue;
+      if (cardId === "zip-line" && copiedZipLineSource) continue;
+      if (cardId === "zip-line" && pe.sourceRow != null && pe.sourceCol != null) continue;
+      return { cardId };
     }
     return null;
   }
@@ -4084,8 +4122,21 @@ import {
   }
 
   function renderCooldownZone(self, opp) {
-    renderCooldownList(pmEl.cooldownCardsSelf, self.cooldownPreview || []);
-    renderCooldownList(pmEl.cooldownCardsOpp, opp.cooldownPreview || []);
+    renderCooldownList(pmEl.cooldownCardsSelf, self.cooldownPreview || [], { isOpponentZone: false, self, opp });
+    renderCooldownList(pmEl.cooldownCardsOpp, opp.cooldownPreview || [], { isOpponentZone: true, self, opp });
+  }
+
+  function hasValidRetaliateTarget(snapshot, pid) {
+    const opp = hudForSeat(snapshot, oppositeSeat(pid));
+    if (!opp) return false;
+    return (opp.cooldownPreview || []).some((entry) => canRetaliateTargetCooldownEntry(entry, opp));
+  }
+
+  function canRetaliateTargetCooldownEntry(entry, oppHud) {
+    const def = getCardDef(entry?.cardId);
+    if (String(def?.type || "").toLowerCase() !== "power") return false;
+    const cost = Number(entry?.manaCost ?? def?.mana ?? 0);
+    return Number(oppHud?.mana || 0) >= cost;
   }
 
   /**
@@ -4094,7 +4145,7 @@ import {
    * @param {HTMLElement | null} container
    * @param {Array<{ cardId: string, turnsRemaining: number }>} allEntries
    */
-  function renderCooldownList(container, allEntries) {
+  function renderCooldownList(container, allEntries, opts = {}) {
     if (!container) return;
     container.innerHTML = "";
     const entries = sortCooldownEntriesForDisplay(allEntries || []);
@@ -4113,6 +4164,11 @@ import {
       wrap.dataset.cooldownIndex = String(i);
       wrap.dataset.cardId = entry.cardId;
       wrap.style.setProperty("--i", String(i));
+      const canRetaliateTarget =
+        retaliateTargetFlow !== null &&
+        opts.isOpponentZone === true &&
+        canRetaliateTargetCooldownEntry(entry, opts.opp);
+      wrap.classList.toggle("pm-cooldown-card-wrap--retaliate-target", canRetaliateTarget);
 
       if (def) {
         const cid = String(entry.cardId);
@@ -4143,6 +4199,18 @@ import {
       turnsEl.className = "pm-cooldown-turns";
       turnsEl.textContent = `${entry.turnsRemaining}t`;
       wrap.appendChild(turnsEl);
+      if (canRetaliateTarget) {
+        wrap.addEventListener("click", (ev) => {
+          if (ev.target instanceof Element && ev.target.closest(".power-card__toggle")) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          const handIndex = retaliateTargetFlow?.handIndex;
+          if (handIndex == null) return;
+          retaliateTargetFlow = null;
+          send("queue_reaction", { handIndex, targetCardId: entry.cardId });
+          if (lastSnapshot) renderPlaymat(lastSnapshot);
+        });
+      }
       stack.appendChild(wrap);
     }
   }
@@ -4154,9 +4222,16 @@ import {
 
   function actionPromptForSnapshot(snapshot) {
     if (disruptionBanishFlow !== null) return t("disruptionBanishHint");
+    if (retaliateTargetFlow !== null) return t("retaliateTargetHint");
     if (deckSearchOpenForCard) return t("selectDeckSearchCardHint");
     const zipLinePending = viewerZipLinePendingSource(snapshot);
     if (zipLinePending) return t("selectZipLineDestinationHint");
+    const pendingBoardTarget = viewerPendingBoardTargetEffect(snapshot);
+    if (pendingBoardTarget) {
+      if (pendingBoardTarget.cardId === "mind-control") return t("selectOpponentPieceHint");
+      if (pendingBoardTarget.cardId === "sacrifice-of-the-masses") return t("selectOwnPawnHint");
+      return t("selectOwnPieceHint");
+    }
     if (igniteTargetFlow?.stage === "picking") {
       if (igniteTargetFlow.cardId === "piece-swap") {
         return igniteTargetFlow.firstPick ? t("selectPieceSwapSecondHint") : t("selectPieceSwapFirstHint");
@@ -4383,11 +4458,13 @@ import {
       const cardType = String(getCardDef(handEntry?.cardId)?.type || "").toLowerCase();
       return cardType === "power";
     }
+    if (retaliateTargetFlow !== null) return false;
     if (isOwnIgnitionOccupied(snapshot, pid)) {
       return false;
     }
     if (isReactionWindowOpen(snapshot)) {
       if (!canPassReactionPriority(snapshot, pid)) return false;
+      if (String(handEntry?.cardId || "") === "retaliate" && !hasValidRetaliateTarget(snapshot, pid)) return false;
       return cardMatchesReactionEligibleTypes(snapshot, handEntry);
     }
     if (isReactionFirstResponseTurn(snapshot, pid)) {
@@ -4450,6 +4527,11 @@ import {
         // Step 1: enter banish selection mode — do not send yet.
         disruptionBanishFlow = { handIndex };
         return; // finishPointer handles DOM restore + re-render
+      }
+      if (String(entry?.cardId || "") === "retaliate") {
+        if (!hasValidRetaliateTarget(snapshot, playerEl.value)) return;
+        retaliateTargetFlow = { handIndex };
+        return;
       }
 
       send("queue_reaction", { handIndex });
@@ -4810,8 +4892,9 @@ import {
         const droppedType = String(getCardDef(droppedId)?.type || "").toLowerCase();
         sendHandCardAction(lastSnapshot, idx);
         const enteredBanishMode = disruptionBanishFlow !== null;
-        if (enteredBanishMode) {
-          // Banish selection mode entered: restore the dragged card to its slot instead of removing it.
+        const enteredRetaliateMode = retaliateTargetFlow !== null;
+        if (enteredBanishMode || enteredRetaliateMode) {
+          // A follow-up selection mode entered: restore the dragged card to its slot instead of removing it.
           // finishPointer will re-render below (after clearDragChrome) to show the banish mode visual.
           resetHandDragVisual(pending);
         } else {
@@ -4834,7 +4917,7 @@ import {
         }
         clearDragChrome();
         pending = null;
-        if (enteredBanishMode && lastSnapshot) {
+        if ((enteredBanishMode || enteredRetaliateMode) && lastSnapshot) {
           renderPlaymat(lastSnapshot);
         }
       } else {
@@ -4888,7 +4971,11 @@ import {
       const dropId = String(hudForSeat(lastSnapshot, playerEl.value)?.hand?.[idx]?.cardId || "");
       const dropType = String(getCardDef(dropId)?.type || "").toLowerCase();
       sendHandCardAction(lastSnapshot, idx);
-      if (lastSnapshot && dropType !== "disruption") {
+      if (lastSnapshot && retaliateTargetFlow !== null) {
+        renderPlaymat(lastSnapshot);
+        return;
+      }
+      if (lastSnapshot && dropType !== "disruption" && dropId !== "retaliate") {
         renderPlaymat(lastSnapshot);
       }
     });
@@ -4908,6 +4995,17 @@ import {
       if (disruptionBanishFlow !== null) {
         disruptionBanishFlow = null;
         if (lastSnapshot) renderPlaymat(lastSnapshot);
+        return;
+      }
+      if (retaliateTargetFlow !== null) {
+        retaliateTargetFlow = null;
+        if (lastSnapshot) renderPlaymat(lastSnapshot);
+        return;
+      }
+      if (copiedZipLineSource !== null) {
+        copiedZipLineSource = null;
+        if (lastSnapshot?.board) renderBoard(lastSnapshot.board);
+        if (lastSnapshot) renderPlayerActionBanner(lastSnapshot);
       }
     }
   });
@@ -5278,6 +5376,7 @@ import {
     if (!isGameplayInputOpen()) return false;
     if (s.turnPlayer !== playerEl.value) return false;
     if (viewerZipLinePendingSource(s)) return false;
+    if (viewerPendingBoardTargetEffect(s)) return false;
     return true;
   }
 
@@ -5533,11 +5632,50 @@ import {
 
         sq.addEventListener("click", () => {
           if (!lastSnapshot?.board || !gameStarted) return;
+          const pendingBoardTarget = viewerPendingBoardTargetEffect(lastSnapshot);
+          if (pendingBoardTarget && isGameplayInputOpen()) {
+            const targetCode = sq.dataset.code || "";
+            if (pendingBoardTarget.cardId === "mind-control") {
+              if (!targetCode || isOwnPiece(targetCode)) return;
+              const p = parseCode(targetCode);
+              if (!p || p.type === "K" || p.type === "Q") return;
+              send("resolve_pending_effect", { pieceRow: r, pieceCol: c });
+              return;
+            }
+            if (pendingBoardTarget.cardId === "sacrifice-of-the-masses") {
+              if (!targetCode || !isOwnPiece(targetCode)) return;
+              const p = parseCode(targetCode);
+              if (!p || p.type !== "P") return;
+              send("resolve_pending_effect", { pieceRow: r, pieceCol: c });
+              return;
+            }
+            if (!targetCode || !isOwnPiece(targetCode)) return;
+            if (pendingBoardTarget.cardId === "zip-line") {
+              const p = parseCode(targetCode);
+              if (!p || p.type === "K") return;
+              copiedZipLineSource = { row: r, col: c };
+              renderBoard(lastSnapshot.board);
+              renderPlayerActionBanner(lastSnapshot);
+              return;
+            }
+            send("resolve_pending_effect", { pieceRow: r, pieceCol: c });
+            return;
+          }
           const zlPick = viewerZipLinePendingSource(lastSnapshot);
           if (zlPick && isGameplayInputOpen()) {
             const zd = zipLineDestKeySet(lastSnapshot.board, zlPick);
             if (zd.has(posKey(r, c)) && !code) {
-              send("resolve_pending_effect", { destRow: r, destCol: c });
+              if (copiedZipLineSource) {
+                send("resolve_pending_effect", {
+                  pieceRow: copiedZipLineSource.row,
+                  pieceCol: copiedZipLineSource.col,
+                  destRow: r,
+                  destCol: c,
+                });
+                copiedZipLineSource = null;
+              } else {
+                send("resolve_pending_effect", { destRow: r, destCol: c });
+              }
               return;
             }
           }

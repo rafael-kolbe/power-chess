@@ -814,6 +814,10 @@ func (c *Client) handleQueueReaction(env Envelope) error {
 		pos := chess.Pos{Row: *p.PieceRow, Col: *p.PieceCol}
 		target.PiecePos = &pos
 	}
+	if p.TargetCardID != nil {
+		id := gameplay.CardID(*p.TargetCardID)
+		target.TargetCard = &id
+	}
 	if !c.room.BothPlayersConnected() {
 		return protocolError{code: ErrorActionFailed, message: "waiting_for_opponent"}
 	}

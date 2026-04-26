@@ -207,6 +207,8 @@ type QueueReactionPayload struct {
 	BanishHandIndex *int `json:"banishHandIndex,omitempty"`
 	PieceRow        *int `json:"pieceRow,omitempty"`
 	PieceCol        *int `json:"pieceCol,omitempty"`
+	// TargetCardID identifies card targets for reaction effects such as Retaliate.
+	TargetCardID *string `json:"targetCardId,omitempty"`
 }
 
 // AckPayload confirms processing status for a received request.

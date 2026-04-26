@@ -142,7 +142,7 @@ globalThis.__POWER_CHESS_CARD_METADATA__ = [
     "targets": 0,
     "effectDuration": 0,
     "name": "Retaliate",
-    "description": "Target a card on your opponent's cooldown slot, burn x mana from your opponent, where x is the mana cost of the targeted card, and if you do, activate that card (in your ignition slot) for yourself.",
+    "description": "Target a \"Power\" card on your opponent's cooldown slot, burn x mana from your opponent, where x is the mana cost of the targeted card, and if you do, activate that card's effect for yourself.",
     "example": "1. Opponent has a \"Knight Touch\" on their cooldown slot.\n2. Opponent activates any \"Power\" card.\n3. You activate \"Retaliate\" as retribution.\n4. You target the opponent's \"Knight Touch\", burning 3 mana from your opponent successfully.\n5. You then activate the \"Knight Touch\" for yourself, buffing your rook on a1.\n6. On your next turn you move the rook on a1 to c2."
   },
   {
