@@ -2701,7 +2701,7 @@ pre {
    ============================================================================= */
 
 .deck-search-overlay {
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: 220;
   display: flex;

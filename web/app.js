@@ -1379,7 +1379,6 @@ import {
         }
         maybeAdvanceIgniteTargetFlow(nextSnap);
         maybeClearIgniteTargetFlow(nextSnap);
-        maybeUpdateDeckSearchModal(nextSnap);
         syncIgnitionBlueHoldFromSnapshot(nextSnap);
         const viewer = nextSnap.viewerPlayerId;
         if ((viewer === "A" || viewer === "B") && playerEl && playerEl.value !== viewer) {
@@ -1525,6 +1524,7 @@ import {
           if (!doReactionResolve && !skipDupPlaymatAnim && hasEffectAnimationDelta(prevSnap, nextSnap)) {
             blockGameplayInputForEffects(900);
           }
+          maybeUpdateDeckSearchModal(nextSnap);
           renderPlaymat(nextSnap);
           pmPrevSnapshot = nextSnap;
           syncPlayerRoleLabels(nextSnap);
