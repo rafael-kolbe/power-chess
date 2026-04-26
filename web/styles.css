@@ -717,6 +717,7 @@ button:disabled {
 }
 
 .edge-label {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -725,6 +726,48 @@ button:disabled {
   font-size: clamp(10px, 1.8vmin, 13px);
   font-weight: 600;
   color: rgb(230 232 236);
+}
+
+.edge-label--action {
+  color: #f8fbff;
+  text-shadow:
+    0 0 6px var(--board-action-glow),
+    0 0 14px var(--board-action-glow);
+}
+
+.edge-label--action::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: 5px;
+  background: linear-gradient(180deg, var(--board-action-fill), transparent 78%);
+  box-shadow:
+    inset 0 0 0 1px var(--board-action-border),
+    0 0 12px var(--board-action-glow);
+  pointer-events: none;
+  animation: board-action-edge-pulse 1.4s ease-in-out infinite;
+}
+
+.edge-label--action-own {
+  --board-action-fill: rgb(42 170 255 / 44%);
+  --board-action-border: rgb(125 220 255 / 78%);
+  --board-action-glow: rgb(48 175 255 / 74%);
+}
+
+.edge-label--action-opponent {
+  --board-action-fill: rgb(235 58 74 / 42%);
+  --board-action-border: rgb(255 112 124 / 78%);
+  --board-action-glow: rgb(240 58 76 / 72%);
+}
+
+@keyframes board-action-edge-pulse {
+  0%, 100% {
+    opacity: 0.62;
+  }
+
+  50% {
+    opacity: 1;
+  }
 }
 
 .grid-cell {
