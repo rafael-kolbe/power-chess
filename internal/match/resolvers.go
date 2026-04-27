@@ -3,6 +3,7 @@ package match
 import (
 	"power-chess/internal/gameplay"
 	matchresolvers "power-chess/internal/match/resolvers"
+	"power-chess/internal/match/resolvers/counter"
 	"power-chess/internal/match/resolvers/disruption"
 	"power-chess/internal/match/resolvers/power"
 	"power-chess/internal/match/resolvers/retribution"
@@ -38,6 +39,8 @@ func DefaultResolvers() map[gameplay.CardID]EffectResolver {
 	m[CardZipLine] = power.ZipLineResolver{}
 	m[CardSacrificeMass] = power.SacrificeOfTheMassesResolver{}
 	m[CardArchmageArsenal] = power.ArchmageArsenalResolver{}
+	m[CardCounterattack] = counter.CounterattackResolver{}
+	m[CardBlockade] = counter.BlockadeResolver{}
 	m[CardExtinguish] = disruption.ExtinguishResolver{}
 	m[CardManaBurn] = retribution.ManaBurnResolver{}
 	m[CardRetaliate] = retribution.RetaliateResolver{}

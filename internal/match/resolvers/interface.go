@@ -57,6 +57,13 @@ type EffectTarget struct {
 	TargetIndex *int
 }
 
+// CaptureAttempt describes the capture move currently waiting for Counter resolution.
+type CaptureAttempt struct {
+	Actor gameplay.PlayerID
+	From  chess.Pos
+	To    chess.Pos
+}
+
 // ResolverEngine is the subset of Engine operations that card resolvers are permitted to call.
 // Engine implements this interface; resolver subpackages depend only on this interface, not on
 // the concrete Engine type, which prevents circular import dependencies.
@@ -103,6 +110,14 @@ type ResolverEngine interface {
 	// SearchDeckToHand moves the first card with cardID from the owner's deck to their hand
 	// and shuffles the remaining deck. Returns an error if the card is not found or the hand is full.
 	SearchDeckToHand(owner gameplay.PlayerID, cardID gameplay.CardID) error
+	// PendingCaptureAttempt returns the capture move currently waiting for Counter resolution.
+	PendingCaptureAttempt() (CaptureAttempt, bool)
+	// PendingCaptureAttackerHasActivePowerEffect reports whether the pending attacker has a live Power buff.
+	PendingCaptureAttackerHasActivePowerEffect() bool
+	// ResolveCounterattack captures the pending attacking piece instead of applying its capture.
+	ResolveCounterattack(owner gameplay.PlayerID) error
+	// ResolveBlockade negates a pending attacker-removal Counter and locks the attacking piece.
+	ResolveBlockade(owner gameplay.PlayerID) error
 }
 
 // EffectResolver is the execution contract for card effects.

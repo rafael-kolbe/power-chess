@@ -39,7 +39,7 @@
 - Qualquer jogador pode alterar o toggle **a qualquer momento**; a partir desse instante o **servidor** deve respeitar o **novo** estado (autoridade no backend, não só preferência de UI).
 - **OFF**: enquanto o oponente age, **não** conceder direito de reação — e **não abrir** janelas só para o oponente “dar pass”. O jogador da vez joga **sem micro-interrupções** por reação.
 - **ON**: oponente recebe direito de reação nas ações elegíveis **mesmo** que não tenha resposta viável (mana/cartas/condições).
-- **AUTO**: direito de reação só se for **identificável** que o jogador pode responder: cartas na **mão**, **mana atual**, **regra de cópia na recarga** (não pode **ignitar** uma carta se já existir **cópia** dela na zona de recarga), e **tipo** de carta permitido na janela. As **condições textuais** das Counter cards no AUTO ficam para **implementação futura**; `TODO` em `internal/match/reactions.go`.
+- **AUTO**: direito de reação só se for **identificável** que o jogador pode responder: cartas na **mão**, **mana atual**, **regra de cópia na recarga** (não pode **ignitar** uma carta se já existir **cópia** dela na zona de recarga), e **tipo** de carta permitido na janela. As **condições textuais** das Counter cards são validadas ao tentar jogar e ao resolver a carta; a elegibilidade AUTO de `capture_attempt` ainda é conservadora por economia/tipo.
 
 ### Tempo: sem relógio de turno e sem timeout automático de reação
 
@@ -98,6 +98,8 @@ Fluxo típico de ativação:
 - **Abrem janela:** ignição de **Power**, **Continuous** e **Disruption** (fluxo `ignite_reaction`); **Retribution** só entra como resposta e encadeia esse fluxo; tentativa de **captura** no xadrez abre `capture_attempt`.
 - **Respondem:** **Retribution** e **Disruption** quando listadas em `reactionWindow.eligibleTypes` (tipicamente `ignite_reaction`). **Counter** em **`capture_attempt`** (primeira resposta só Counter) e em **`ignite_reaction`** quando `MaybeCaptureAttemptOnIgnition` for **true** na carta ignitada.
 - Na cadeia em `ignite_reaction`: após **Retribution/Disruption**, só **Retribution** ou **Disruption**; após **Counter**, só **Counter** quando permitido. Em `capture_attempt`, a cadeia é **só Counter** (ex.: **Counterattack** / **Blockade**). Resolução **LIFO** após confirmação explícita (`resolve_reactions`) do responder atual.
+- **Counterattack:** só pode ser jogada quando a peça atacante da captura pendente tem um efeito **Power** ativo; se resolver com sucesso, a peça atacante é capturada no lugar da peça defendida e a tentativa de captura consome o movimento do atacante.
+- **Blockade:** só pode responder a um Counter do oponente que capturaria/removeria a peça atacante; se resolver com sucesso, nega esse Counter, cancela a captura original, mantém o turno do atacante para escolher outra peça e bloqueia a peça atacante original por 1 turno.
 
 ### Tipo Disruption — custo de ignição como resposta
 

@@ -16,7 +16,8 @@ type PersistedEngineState struct {
 	ReactionStack       []PersistedReactionAction     `json:"reactionStack"`
 	PendingMove         *PendingMoveAction            `json:"pendingMove,omitempty"`
 	MovementGrants      []MovementGrant               `json:"movementGrants,omitempty"`
-	MindControlEffects  []PieceControlEffect           `json:"mindControlEffects,omitempty"`
+	BlockadeEffects     []BlockadeEffect              `json:"blockadeEffects,omitempty"`
+	MindControlEffects  []PieceControlEffect          `json:"mindControlEffects,omitempty"`
 	IgnitionTargetLocks []PersistedIgnitionTargetLock `json:"ignitionTargetLocks,omitempty"`
 }
 
@@ -31,8 +32,8 @@ type PersistedIgnitionTargetLock struct {
 type PersistedPendingEffect struct {
 	Owner     gameplay.PlayerID `json:"owner"`
 	CardID    gameplay.CardID   `json:"cardId"`
-	SourceRow *int               `json:"sourceRow,omitempty"`
-	SourceCol *int               `json:"sourceCol,omitempty"`
+	SourceRow *int              `json:"sourceRow,omitempty"`
+	SourceCol *int              `json:"sourceCol,omitempty"`
 }
 
 // PersistedReactionAction stores stack items in serializable form.
@@ -57,9 +58,9 @@ func (e *Engine) ExportState() PersistedEngineState {
 				Owner:  pe.Owner,
 				CardID: pe.CardID,
 			}
-		if pe.CardID == CardZipLine && pe.TeleportFrom != nil {
-			r := pe.TeleportFrom.Row
-			c := pe.TeleportFrom.Col
+			if pe.CardID == CardZipLine && pe.TeleportFrom != nil {
+				r := pe.TeleportFrom.Row
+				c := pe.TeleportFrom.Col
 				pp.SourceRow = &r
 				pp.SourceCol = &c
 			}
@@ -83,6 +84,7 @@ func (e *Engine) ExportState() PersistedEngineState {
 		out.PendingMove = &pm
 	}
 	out.MovementGrants = append(out.MovementGrants, e.movementGrants...)
+	out.BlockadeEffects = append(out.BlockadeEffects, e.blockadeEffects...)
 	out.MindControlEffects = append(out.MindControlEffects, e.pieceControlEffects...)
 	for _, pid := range []gameplay.PlayerID{gameplay.PlayerA, gameplay.PlayerB} {
 		cardID, ok := e.ignitionTargetCard[pid]
@@ -118,6 +120,7 @@ func NewEngineFromState(snapshot PersistedEngineState) (*Engine, error) {
 		e.pendingMove = &pm
 	}
 	e.movementGrants = append([]MovementGrant(nil), snapshot.MovementGrants...)
+	e.blockadeEffects = append([]BlockadeEffect(nil), snapshot.BlockadeEffects...)
 	e.pieceControlEffects = append([]PieceControlEffect(nil), snapshot.MindControlEffects...)
 	for _, pe := range snapshot.PendingEffects {
 		resolver, ok := e.resolvers[pe.CardID]

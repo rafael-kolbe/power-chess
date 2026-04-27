@@ -26,7 +26,12 @@
 
 - Qualquer jogador pode alterar o toggle **a qualquer momento**. O toggle não é compartilhado; cada jogador tem o seu.
 - O servidor respeita o **novo** estado imediatamente.
-- Condições textuais das Counter no AUTO: implementação futura (`TODO` em `internal/match/reactions.go`).
+- Condições textuais das Counter são validadas ao jogar e ao resolver a carta; o AUTO de `capture_attempt` continua conservador por economia/tipo.
+
+## Counters implementadas
+
+- **Counterattack:** em `capture_attempt`, exige que a peça atacante tenha efeito **Power** ativo. Se resolver, a peça atacante é capturada em vez da peça defendida e o movimento do atacante é consumido.
+- **Blockade:** responde a um Counter que capturaria/removeria a peça atacante. Se resolver, nega esse Counter, cancela a captura original, mantém o turno do atacante para mover outra peça e bloqueia a peça atacante original por 1 turno.
 
 ## Regra de cópia na recarga
 
