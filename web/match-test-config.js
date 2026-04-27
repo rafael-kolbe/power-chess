@@ -57,7 +57,7 @@ export const DEFAULT_DECK_20 = Object.freeze([
   "bishop-touch",
   "bishop-touch",
   "rook-touch",
-  "rook-touch",
+  "blockade",
   "sacrifice-of-the-masses",
   "backstab",
   "double-turn",
@@ -82,7 +82,7 @@ export function buildMatchDebugFixturePayload() {
     test_environment: true,
     white: {
       deck: [...DEFAULT_DECK_20],
-      hand: ["archmage-arsenal", "sacrifice-of-the-masses", "extinguish"],
+      hand: ["archmage-arsenal", "sacrifice-of-the-masses", "blockade"],
       mana: 8,
       maxMana: 10,
       energizedMana: 0,
@@ -90,7 +90,7 @@ export function buildMatchDebugFixturePayload() {
     },
     black: {
       deck: [...DEFAULT_DECK_20],
-      hand: ["extinguish", "retaliate", "mana-burn"],
+      hand: ["extinguish", "retaliate", "counterattack"],
       mana: 8,
       maxMana: 10,
       energizedMana: 0,

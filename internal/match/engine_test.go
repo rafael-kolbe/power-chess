@@ -655,7 +655,46 @@ func TestIgniteReactionEligibleRetributionOnlyUntilMaybeCaptureAttempt(t *testin
 	}
 }
 
-func TestCounterChainNoOpThenCaptureStillApplies(t *testing.T) {
+func TestCounterattackCapturesPowerBuffedAttacker(t *testing.T) {
+	counterattack := gameplay.CardInstance{InstanceID: "c1", CardID: CardCounterattack, ManaCost: 1, Ignition: 0, Cooldown: 6}
+	state, _ := gameplay.NewMatchState(testDeckWith(counterattack), testDeckWith(counterattack))
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{}
+	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{counterattack}
+	state.Players[gameplay.PlayerB].Mana = 10
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 5, Col: 5}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
+	e := NewEngine(state, board)
+	markInPlayForTest(state)
+	e.AddMovementGrant(gameplay.PlayerA, CardKnightTouch, chess.Pos{Row: 6, Col: 4}, MovementGrantKnightPattern, 1)
+
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 4}, To: chess.Pos{Row: 5, Col: 5}}); err != nil {
+		t.Fatalf("capture attempt: %v", err)
+	}
+	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err != nil {
+		t.Fatalf("counter should queue on any capture attempt: %v", err)
+	}
+	if err := e.ResolveReactionStack(); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if !board.PieceAt(chess.Pos{Row: 6, Col: 4}).IsEmpty() {
+		t.Fatal("attacking piece should be captured by Counterattack")
+	}
+	if board.PieceAt(chess.Pos{Row: 5, Col: 5}).Type != chess.Pawn || board.PieceAt(chess.Pos{Row: 5, Col: 5}).Color != chess.Black {
+		t.Fatal("defending piece should remain on the target square")
+	}
+	if state.CurrentTurn != gameplay.PlayerB {
+		t.Fatalf("successful Counterattack should consume the attacker's move and pass turn, got %s", state.CurrentTurn)
+	}
+	gy := state.Players[gameplay.PlayerB].Graveyard
+	if len(gy) != 1 || gy[0] != (gameplay.PieceRef{Color: "w", Type: "P"}) {
+		t.Fatalf("counterattacker graveyard should record captured attacking pawn, got %+v", gy)
+	}
+}
+
+func TestCounterattackRequiresPowerBuffedAttacker(t *testing.T) {
 	counterattack := gameplay.CardInstance{InstanceID: "c1", CardID: CardCounterattack, ManaCost: 1, Ignition: 0, Cooldown: 6}
 	state, _ := gameplay.NewMatchState(testDeckWith(counterattack), testDeckWith(counterattack))
 	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{}
@@ -672,18 +711,19 @@ func TestCounterChainNoOpThenCaptureStillApplies(t *testing.T) {
 	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 4}, To: chess.Pos{Row: 5, Col: 5}}); err != nil {
 		t.Fatalf("capture attempt: %v", err)
 	}
-	if err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{}); err != nil {
-		t.Fatalf("counter should queue on any capture attempt: %v", err)
+	err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{})
+	if err == nil || !strings.Contains(err.Error(), "Counterattack requires the attacking piece to have an active Power effect") {
+		t.Fatalf("expected Counterattack prerequisite rejection, got %v", err)
 	}
 	if err := e.ResolveReactionStack(); err != nil {
-		t.Fatalf("resolve: %v", err)
+		t.Fatalf("empty stack should apply original capture: %v", err)
 	}
 	if board.PieceAt(chess.Pos{Row: 5, Col: 5}).Type != chess.Pawn || board.PieceAt(chess.Pos{Row: 5, Col: 5}).Color != chess.White {
-		t.Fatal("capture should complete after noop Counter effects")
+		t.Fatal("original capture should apply when Counterattack cannot be queued")
 	}
 }
 
-func TestCounterChainTwoCountersThenCaptureCompletes(t *testing.T) {
+func TestBlockadeNegatesCounterattackAndBlocksOriginalAttacker(t *testing.T) {
 	counterattack := gameplay.CardInstance{InstanceID: "c1", CardID: CardCounterattack, ManaCost: 1, Ignition: 0, Cooldown: 6}
 	blockade := gameplay.CardInstance{InstanceID: "b1", CardID: CardBlockade, ManaCost: 0, Ignition: 0, Cooldown: 3}
 	state, _ := gameplay.NewMatchState(testDeckWith(counterattack), testDeckWith(counterattack))
@@ -698,6 +738,7 @@ func TestCounterChainTwoCountersThenCaptureCompletes(t *testing.T) {
 	board.SetPiece(chess.Pos{Row: 5, Col: 5}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
 	e := NewEngine(state, board)
 	markInPlayForTest(state)
+	e.AddMovementGrant(gameplay.PlayerA, CardKnightTouch, chess.Pos{Row: 6, Col: 4}, MovementGrantKnightPattern, 1)
 
 	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 4}, To: chess.Pos{Row: 5, Col: 5}}); err != nil {
 		t.Fatalf("capture attempt: %v", err)
@@ -711,8 +752,28 @@ func TestCounterChainTwoCountersThenCaptureCompletes(t *testing.T) {
 	if err := e.ResolveReactionStack(); err != nil {
 		t.Fatalf("resolve stack: %v", err)
 	}
-	if board.PieceAt(chess.Pos{Row: 5, Col: 5}).Type != chess.Pawn || board.PieceAt(chess.Pos{Row: 5, Col: 5}).Color != chess.White {
-		t.Fatal("pending capture should still apply after counter chain")
+	if board.PieceAt(chess.Pos{Row: 6, Col: 4}).Type != chess.Pawn || board.PieceAt(chess.Pos{Row: 6, Col: 4}).Color != chess.White {
+		t.Fatal("Blockade should keep the attacking piece on its original square")
+	}
+	if board.PieceAt(chess.Pos{Row: 5, Col: 5}).Type != chess.Pawn || board.PieceAt(chess.Pos{Row: 5, Col: 5}).Color != chess.Black {
+		t.Fatal("Blockade should leave the defender on the target square")
+	}
+	if state.CurrentTurn != gameplay.PlayerA {
+		t.Fatalf("Blockade should let the attacker choose another piece this turn, got %s", state.CurrentTurn)
+	}
+	blocked := e.CloneBlockadeEffects()
+	if len(blocked) != 1 || blocked[0].Owner != gameplay.PlayerA || blocked[0].Target != (chess.Pos{Row: 6, Col: 4}) || blocked[0].RemainingOwnerTurns != 1 {
+		t.Fatalf("expected one 1-turn Blockade effect on original attacker, got %+v", blocked)
+	}
+	err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 4}, To: chess.Pos{Row: 5, Col: 4}})
+	if err == nil || !strings.Contains(err.Error(), "Blockade prevents that piece from moving") {
+		t.Fatalf("expected Blockade movement rejection, got %v", err)
+	}
+	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 7, Col: 4}, To: chess.Pos{Row: 7, Col: 3}}); err != nil {
+		t.Fatalf("Blockade should allow a different piece to move: %v", err)
+	}
+	if got := e.CloneBlockadeEffects(); len(got) != 0 {
+		t.Fatalf("Blockade effect should expire after owner turn ends, got %+v", got)
 	}
 }
 
@@ -733,6 +794,7 @@ func TestResolveReactionStackSequentialActivationFX(t *testing.T) {
 	board.SetPiece(chess.Pos{Row: 5, Col: 5}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
 	e := NewEngine(state, board)
 	markInPlayForTest(state)
+	e.AddMovementGrant(gameplay.PlayerA, CardKnightTouch, chess.Pos{Row: 6, Col: 4}, MovementGrantKnightPattern, 1)
 
 	if err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 4}, To: chess.Pos{Row: 5, Col: 5}}); err != nil {
 		t.Fatalf("capture attempt: %v", err)
@@ -754,8 +816,8 @@ func TestResolveReactionStackSequentialActivationFX(t *testing.T) {
 	if ev[0].Owner != gameplay.PlayerA || ev[0].CardID != CardBlockade || !ev[0].Success {
 		t.Fatalf("expected first fx Blockade from A, got %+v", ev[0])
 	}
-	if ev[1].Owner != gameplay.PlayerB || ev[1].CardID != CardCounterattack || !ev[1].Success {
-		t.Fatalf("expected second fx Counterattack from B, got %+v", ev[1])
+	if ev[1].Owner != gameplay.PlayerB || ev[1].CardID != CardCounterattack || ev[1].Success {
+		t.Fatalf("expected second fx negated Counterattack from B, got %+v", ev[1])
 	}
 	if len(e.PullActivationFXEvents()) != 0 {
 		t.Fatal("expected PullActivationFXEvents to drain")

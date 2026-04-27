@@ -1839,6 +1839,22 @@ import {
     return result;
   }
 
+  /**
+   * Returns active counter-type per-piece effects that apply to the square at (r, c).
+   */
+  function pieceActiveCounterAuras(snapshot, r, c) {
+    const fx = snapshot?.activePieceEffects;
+    if (!Array.isArray(fx)) return [];
+    const result = [];
+    for (const e of fx) {
+      if (Number(e.turnsRemaining || 0) <= 0) continue;
+      if (Number(e.row) !== r || Number(e.col) !== c) continue;
+      const t = String(getCardDef(e.cardId)?.type || "").toLowerCase();
+      if (t === "counter") result.push(e);
+    }
+    return result;
+  }
+
   function fileLetterFromDisplayEdge(displayRow, displayCol) {
     const { col } = displayToLogical(displayRow, displayCol);
     return String.fromCharCode(97 + col);
@@ -2577,6 +2593,7 @@ import {
   function showCardPreview(cardData, anchorEl) {
     if (!pmEl.matchCardPreview || !cardData) return;
     pmEl.matchCardPreview.innerHTML = "";
+    pmEl.matchCardPreview.classList.remove("pm-card-preview--effects");
     const cid = cardData.id != null ? String(cardData.id) : "";
     if (cid) {
       pmEl.matchCardPreview.dataset.cardId = cid;
@@ -2615,13 +2632,13 @@ import {
     if (!pmEl.matchCardPreview || !effects || effects.length === 0) return;
     pmEl.matchCardPreview.innerHTML = "";
     delete pmEl.matchCardPreview.dataset.cardId;
+    pmEl.matchCardPreview.classList.add("pm-card-preview--effects");
 
     for (const { cardData, turnsRemaining } of effects) {
       if (!cardData) continue;
       const cid = cardData.id != null ? String(cardData.id) : "";
       const wrapper = document.createElement("div");
-      wrapper.style.position = "relative";
-      wrapper.style.display = "inline-block";
+      wrapper.className = "pm-card-preview-effect";
       const card = createPowerCard({
         type: cardData.type,
         name: cardData.name,
@@ -2679,6 +2696,7 @@ import {
     if (!pmEl.matchCardPreview) return;
     pmEl.matchCardPreview.classList.add("hidden");
     pmEl.matchCardPreview.innerHTML = "";
+    pmEl.matchCardPreview.classList.remove("pm-card-preview--effects");
     delete pmEl.matchCardPreview.dataset.cardId;
     pmPreviewCard = null;
   }
@@ -4837,13 +4855,13 @@ import {
     stack.addEventListener("pointerdown", (ev) => {
       if (ev.button !== 0) return;
       if (!isGameplayInputOpen()) return;
-      clearDanglingHandDragCards();
       // Let the description/example toggle receive a normal click cycle; pointer capture
       // on the stack would steal pointerup/click from the button.
       const t = ev.target;
       if (t instanceof Element && t.closest(".power-card__toggle")) {
         return;
       }
+      clearDanglingHandDragCards();
       const snap = lastSnapshot;
       const localPID = playerEl.value;
       const self = snap?.players?.find((p) => p.playerId === localPID);
@@ -5609,15 +5627,22 @@ import {
             if (psValidTargetSet?.has(posKey(r, c))) sq.classList.add("ps-target");
           }
         }
-        const auraFxArr = code ? pieceActivePowerAuras(lastSnapshot, r, c) : [];
-        const hasMindControlDebuff = auraFxArr.some((e) => String(e.cardId || "") === "mind-control");
+        const powerAuraFxArr = code ? pieceActivePowerAuras(lastSnapshot, r, c) : [];
+        const counterAuraFxArr = code ? pieceActiveCounterAuras(lastSnapshot, r, c) : [];
+        const auraFxArr = powerAuraFxArr.concat(counterAuraFxArr);
+        const hasMindControlDebuff = powerAuraFxArr.some((e) => String(e.cardId || "") === "mind-control");
         // Double Turn grants an extra move to all pieces of the affected player.
         // The highlight is visible to both players: check piece color vs seat, not isOwnPiece.
         const dtSeat = lastSnapshot?.doubleTurnActiveFor; // "A" | "B" | undefined
         const isDoubleTurnPiece = !!(code && dtSeat && seatForPieceCode(code) === dtSeat);
-        const hasAura = auraFxArr.length > 0 || isDoubleTurnPiece;
-        if (hasAura) {
+        const hasPowerAura = powerAuraFxArr.length > 0 || isDoubleTurnPiece;
+        const hasCounterAura = counterAuraFxArr.length > 0;
+        const hasAura = hasPowerAura || hasCounterAura;
+        if (hasPowerAura) {
           sq.classList.add("piece-effect-aura-power");
+        }
+        if (hasCounterAura) {
+          sq.classList.add("piece-effect-aura-counter");
         }
         if (hasMindControlDebuff) {
           sq.classList.add("piece-effect-outline-mind-control");

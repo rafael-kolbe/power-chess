@@ -913,6 +913,20 @@ button:disabled {
     0 0 10px 2px rgb(86 214 132 / 40%);
 }
 
+.sq.piece-effect-aura-counter {
+  box-shadow:
+    inset 0 0 0 2px rgb(255 115 190 / 92%),
+    0 0 10px 2px rgb(255 115 190 / 42%);
+}
+
+.sq.piece-effect-aura-power.piece-effect-aura-counter {
+  box-shadow:
+    inset 0 0 0 2px rgb(86 214 132 / 92%),
+    inset 0 0 0 5px rgb(255 115 190 / 88%),
+    0 0 10px 2px rgb(86 214 132 / 35%),
+    0 0 14px 3px rgb(255 115 190 / 35%);
+}
+
 .sq.piece-effect-outline-mind-control::before {
   content: "";
   position: absolute;
@@ -947,7 +961,8 @@ button:disabled {
   transition: opacity 0.12s ease;
 }
 
-.board-frame.effect-duration-badges-hover-only .sq.piece-effect-aura-power:hover .sq-effect-turn-badge {
+.board-frame.effect-duration-badges-hover-only .sq.piece-effect-aura-power:hover .sq-effect-turn-badge,
+.board-frame.effect-duration-badges-hover-only .sq.piece-effect-aura-counter:hover .sq-effect-turn-badge {
   opacity: 1;
 }
 
@@ -2532,6 +2547,19 @@ pre {
   z-index: 2500;
   pointer-events: none;
   max-width: min(92vw, 340px);
+}
+
+.pm-card-preview--effects {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: calc(100vw - 20px);
+}
+
+.pm-card-preview-effect {
+  position: relative;
+  flex: 0 0 auto;
 }
 
 .pm-card-preview .power-card {

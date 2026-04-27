@@ -51,15 +51,18 @@ type Engine struct {
 	Chess *chess.Game
 	State *gameplay.MatchState
 
-	pendingEffects map[gameplay.PlayerID][]PendingEffect
-	resolvers      map[gameplay.CardID]EffectResolver
-	ReactionWindow *ReactionWindow
-	reactions      *ReactionRuntime
-	pendingMove    *PendingMoveAction
+	pendingEffects        map[gameplay.PlayerID][]PendingEffect
+	resolvers             map[gameplay.CardID]EffectResolver
+	ReactionWindow        *ReactionWindow
+	reactions             *ReactionRuntime
+	pendingMove           *PendingMoveAction
+	pendingCaptureOutcome captureResolutionOutcome
 	// pendingActivationFX holds server→client activate_card events (effect step after ignition reaches 0).
 	pendingActivationFX []ActivationFXEvent
 	// movementGrants stores active movement modifiers granted by resolved card effects.
 	movementGrants []MovementGrant
+	// blockadeEffects stores per-piece movement locks created by Blockade.
+	blockadeEffects []BlockadeEffect
 	// pieceControlEffects stores temporary enemy-piece control effects.
 	pieceControlEffects []PieceControlEffect
 	// ignitionTargets stores locked piece targets for the currently ignited card owner.
@@ -75,7 +78,18 @@ type Engine struct {
 	// pendingManaBurns is kept only for backward-compatibility with persisted/runtime paths that
 	// still call FlushPendingManaBurns; burns are now applied immediately on successful resolution.
 	pendingManaBurns []pendingManaBurn
+	// pendingAttackerRemovalNegations tracks Blockade-style negations for lower Counter effects
+	// in the currently resolving capture_attempt stack.
+	pendingAttackerRemovalNegations int
 }
+
+type captureResolutionOutcome int
+
+const (
+	captureOutcomeApplyOriginal captureResolutionOutcome = iota
+	captureOutcomeCancelKeepTurn
+	captureOutcomeCancelEndTurn
+)
 
 // ActivationFXEvent is one ignition resolution for client animations (glow + fly to cooldown).
 type ActivationFXEvent struct {
@@ -132,6 +146,11 @@ func (e *Engine) appendActivationFXNegating(owner gameplay.PlayerID, id gameplay
 // CloneMovementGrants returns a shallow copy of active movement grants for snapshots and persistence.
 func (e *Engine) CloneMovementGrants() []MovementGrant {
 	return append([]MovementGrant(nil), e.movementGrants...)
+}
+
+// CloneBlockadeEffects returns a shallow copy of active Blockade movement locks.
+func (e *Engine) CloneBlockadeEffects() []BlockadeEffect {
+	return append([]BlockadeEffect(nil), e.blockadeEffects...)
 }
 
 // NewEngine wires chess state, gameplay state and card resolvers into a single match runtime.
@@ -749,6 +768,9 @@ func (e *Engine) SubmitMove(pid gameplay.PlayerID, m chess.Move) error {
 	if e.Chess.Turn != color {
 		return errors.New("chess turn out of sync with match turn")
 	}
+	if err := e.blockadeMoveError(pid, m.From); err != nil {
+		return err
+	}
 	if e.pendingMove != nil {
 		return errors.New("cannot submit another move while capture reaction window is pending")
 	}
@@ -761,6 +783,8 @@ func (e *Engine) SubmitMove(pid gameplay.PlayerID, m chess.Move) error {
 			return err
 		}
 		e.pendingMove = &PendingMoveAction{PlayerID: pid, Move: m}
+		e.pendingCaptureOutcome = captureOutcomeApplyOriginal
+		e.pendingAttackerRemovalNegations = 0
 		e.OpenReactionWindow("capture_attempt", pid, []gameplay.CardType{gameplay.CardTypeCounter})
 		return nil
 	}
@@ -893,6 +917,7 @@ func (e *Engine) ActivatePlayerSkill(pid gameplay.PlayerID) error {
 		return err
 	}
 	e.expireMovementGrantsAfterOwnerTurn(pid)
+	e.expireBlockadeEffectsAfterOwnerTurn(pid)
 	e.expirePieceControlEffectsAfterOwnerTurn(pid)
 	delete(e.extraMovesRemaining, pid)
 	delete(e.doubleTurnEffectTurnsLeft, pid)
@@ -970,8 +995,11 @@ func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 	if captureForMana {
 		e.State.GrantManaForChessCapture(pid)
 	}
-	// If the player has an extra move remaining (granted by Double Turn), consume it
-	// without ending the turn. Restore Chess.Turn so the same player moves again.
+	return e.finishMoveTurn(pid)
+}
+
+// finishMoveTurn consumes extra-move state or advances the turn after a move-like action resolves.
+func (e *Engine) finishMoveTurn(pid gameplay.PlayerID) error {
 	if e.extraMovesRemaining[pid] > 0 {
 		e.extraMovesRemaining[pid]--
 		e.Chess.Turn = toColor(pid)
@@ -979,6 +1007,7 @@ func (e *Engine) applyMoveCore(pid gameplay.PlayerID, m chess.Move) error {
 		return nil
 	}
 	e.expireMovementGrantsAfterOwnerTurn(pid)
+	e.expireBlockadeEffectsAfterOwnerTurn(pid)
 	e.expirePieceControlEffectsAfterOwnerTurn(pid)
 	if err := e.State.EndTurn(pid); err != nil {
 		return err

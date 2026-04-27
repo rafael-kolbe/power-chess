@@ -271,6 +271,54 @@ func TestCaptureReactionSkippedWhenOpponentReactionOff(t *testing.T) {
 	}
 }
 
+// TestStateSnapshotIncludesBlockadeEffect verifies Blockade locks are exposed for board auras.
+func TestStateSnapshotIncludesBlockadeEffect(t *testing.T) {
+	room, err := NewRoomSession("room-blockade-snapshot")
+	if err != nil {
+		t.Fatalf(newRoomFailedFmt, err)
+	}
+	s := room.Engine.State
+	s.MulliganPhaseActive = false
+	s.Started = true
+	s.CurrentTurn = gameplay.PlayerA
+	counterattack := gameplay.CardInstance{InstanceID: "c1", CardID: match.CardCounterattack, ManaCost: 1, Ignition: 0, Cooldown: 6}
+	blockade := gameplay.CardInstance{InstanceID: "b1", CardID: match.CardBlockade, ManaCost: 0, Ignition: 0, Cooldown: 3}
+	s.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{blockade}
+	s.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{counterattack}
+	s.Players[gameplay.PlayerA].Mana = 10
+	s.Players[gameplay.PlayerB].Mana = 10
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 4}, chess.Piece{Type: chess.Pawn, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 5, Col: 5}, chess.Piece{Type: chess.Pawn, Color: chess.Black})
+	room.Engine.Chess = board
+	room.Engine.AddMovementGrant(gameplay.PlayerA, match.CardKnightTouch, chess.Pos{Row: 6, Col: 4}, match.MovementGrantKnightPattern, 1)
+
+	if err := room.Execute(func() error {
+		if err := room.Engine.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 4}, To: chess.Pos{Row: 5, Col: 5}}); err != nil {
+			return err
+		}
+		if err := room.Engine.QueueReactionCard(gameplay.PlayerB, 0, -1, match.EffectTarget{}); err != nil {
+			return err
+		}
+		if err := room.Engine.QueueReactionCard(gameplay.PlayerA, 0, -1, match.EffectTarget{}); err != nil {
+			return err
+		}
+		return room.Engine.ResolveReactionStack()
+	}); err != nil {
+		t.Fatalf("resolve blockade chain: %v", err)
+	}
+
+	snap := room.SnapshotForPlayer(gameplay.PlayerA)
+	for _, fx := range snap.ActivePieceEffects {
+		if fx.Owner == string(gameplay.PlayerA) && fx.CardID == string(match.CardBlockade) && fx.Row == 6 && fx.Col == 4 && fx.TurnsRemaining == 1 {
+			return
+		}
+	}
+	t.Fatalf("expected blockade activePieceEffects entry, got %+v", snap.ActivePieceEffects)
+}
+
 // TestIgniteReactionSkippedWhenOpponentReactionOff closes ignite_reaction immediately when the responder uses OFF.
 func TestIgniteReactionSkippedWhenOpponentReactionOff(t *testing.T) {
 	room, err := NewRoomSession("room-ignite-off")

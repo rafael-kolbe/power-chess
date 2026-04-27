@@ -577,6 +577,18 @@ func (r *RoomSession) SnapshotForPlayer(viewerPID gameplay.PlayerID) StateSnapsh
 			TurnsRemaining: g.RemainingOwnerTurns,
 		})
 	}
+	for _, fx := range r.Engine.CloneBlockadeEffects() {
+		if fx.RemainingOwnerTurns <= 0 {
+			continue
+		}
+		payload.ActivePieceEffects = append(payload.ActivePieceEffects, ActivePieceEffectSnapshot{
+			Owner:          string(fx.Owner),
+			CardID:         string(fx.SourceCardID),
+			Row:            fx.Target.Row,
+			Col:            fx.Target.Col,
+			TurnsRemaining: fx.RemainingOwnerTurns,
+		})
+	}
 	for _, mc := range r.Engine.ClonePieceControlEffects() {
 		if mc.RemainingTurnEnds <= 0 {
 			continue

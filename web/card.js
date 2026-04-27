@@ -204,9 +204,6 @@
       footer.appendChild(toggleBtn);
       body.appendChild(textStack);
       body.appendChild(footer);
-      if (opts.showExampleInitially) {
-        setPowerCardExampleMode(article, true);
-      }
     } else {
       body.appendChild(textStack);
     }
@@ -227,6 +224,10 @@
     article.appendChild(typeEl);
     article.appendChild(ignEl);
     article.appendChild(cdEl);
+
+    if (opts.showExampleInitially) {
+      setPowerCardExampleMode(article, true);
+    }
 
     queueMicrotask(() => finalizePowerCardLayout(article));
 

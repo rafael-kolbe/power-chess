@@ -162,6 +162,9 @@ func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, banishH
 	if err := e.validateReactionTarget(pid, card.CardID, target); err != nil {
 		return err
 	}
+	if err := e.validateCounterPrerequisite(pid, card.CardID); err != nil {
+		return err
+	}
 	resolver, ok := e.resolvers[card.CardID]
 	if !ok {
 		return errors.New("card has no resolver")
@@ -375,9 +378,21 @@ func (e *Engine) ResolveReactionStack() error {
 	}
 	if e.pendingMove != nil {
 		pm := *e.pendingMove
+		outcome := e.pendingCaptureOutcome
 		e.pendingMove = nil
-		if err := e.applyMoveCore(pm.PlayerID, pm.Move); err != nil {
-			return err
+		e.pendingCaptureOutcome = captureOutcomeApplyOriginal
+		e.pendingAttackerRemovalNegations = 0
+		switch outcome {
+		case captureOutcomeCancelKeepTurn:
+			// Blockade rewinds the attempted capture and lets the actor pick another piece.
+		case captureOutcomeCancelEndTurn:
+			if err := e.finishMoveTurn(pm.PlayerID); err != nil {
+				return err
+			}
+		default:
+			if err := e.applyMoveCore(pm.PlayerID, pm.Move); err != nil {
+				return err
+			}
 		}
 	}
 	// ignite_reaction close: ignition-0 Power/Continuous finalize here. Continuous with TurnsRemaining > 0
