@@ -201,16 +201,27 @@ func (e *Engine) ActivateCardWithTargets(pid gameplay.PlayerID, handIndex int, t
 	if handIndex < 0 || handIndex >= len(p.Hand) {
 		return errors.New("invalid hand index")
 	}
-	def, ok := gameplay.CardDefinitionByID(p.Hand[handIndex].CardID)
+	card := p.Hand[handIndex]
+	def, ok := gameplay.CardDefinitionByID(card.CardID)
 	if !ok {
 		return errors.New("unknown card definition")
+	}
+	reactionOpen := e.ReactionWindow != nil && e.ReactionWindow.Open
+	if !reactionOpen && p.Ignition.Occupied {
+		return errors.New("your ignition slot is already occupied")
+	}
+	if p.Mana < card.ManaCost {
+		return fmt.Errorf("not enough mana to activate %s: need %d, you have %d", cardDisplayName(card.CardID), card.ManaCost, p.Mana)
+	}
+	if e.cardOnCooldown(pid, card.CardID) {
+		return fmt.Errorf("%s is still on cooldown", cardDisplayName(card.CardID))
 	}
 	// While a reaction window is open, plays resolve through the reaction stack (including the
 	// actor's opponent on ignite_reaction), never through ignition activation — ActivateCard on
 	// MatchState requires CurrentTurn == pid, which is false for the responder.
 	// Disruption reactions require banishHandIndex >= 0 via QueueReactionCard directly; this
 	// path passes -1 (no banish) and is only reached for non-Disruption types in practice.
-	if e.ReactionWindow != nil && e.ReactionWindow.Open {
+	if reactionOpen {
 		return e.QueueReactionCard(pid, handIndex, -1, EffectTarget{})
 	}
 	if def.Type == gameplay.CardTypeDisruption {
@@ -358,6 +369,28 @@ func (e *Engine) validateIgnitionTargetPieces(pid gameplay.PlayerID, cardID game
 		}
 	}
 	return nil
+}
+
+// cardOnCooldown reports whether pid already has a copy of cardID in their cooldown zone.
+func (e *Engine) cardOnCooldown(pid gameplay.PlayerID, cardID gameplay.CardID) bool {
+	p := e.State.Players[pid]
+	if p == nil {
+		return false
+	}
+	for _, cd := range p.Cooldowns {
+		if cd.Card.CardID == cardID {
+			return true
+		}
+	}
+	return false
+}
+
+// cardDisplayName returns the catalog name for player-facing rejection messages.
+func cardDisplayName(cardID gameplay.CardID) string {
+	if def, ok := gameplay.CardDefinitionByID(cardID); ok && def.Name != "" {
+		return def.Name
+	}
+	return string(cardID)
 }
 
 // validateMindControlTarget validates one opponent piece target for Mind Control.
@@ -724,8 +757,8 @@ func (e *Engine) SubmitMove(pid gameplay.PlayerID, m chess.Move) error {
 	}
 
 	if e.isCaptureAttempt(pid, m) {
-		if !e.moveWouldApplyAuthoritatively(pid, m) {
-			return fmt.Errorf("illegal move")
+		if err := e.moveApplicationError(pid, m); err != nil {
+			return err
 		}
 		e.pendingMove = &PendingMoveAction{PlayerID: pid, Move: m}
 		e.OpenReactionWindow("capture_attempt", pid, []gameplay.CardType{gameplay.CardTypeCounter})
@@ -989,7 +1022,7 @@ func (e *Engine) applyAuthorizedMove(pid gameplay.PlayerID, m chess.Move) error 
 	if e.canUseAugmentedMovement(pid, m) {
 		return e.Chess.ApplyPseudoLegalMove(m)
 	}
-	return fmt.Errorf("illegal move")
+	return e.Chess.MoveRejectionReason(m)
 }
 
 // isStandardLegalMove checks whether m is currently legal under standard chess rules.
@@ -1006,14 +1039,19 @@ func (e *Engine) isStandardLegalMove(m chess.Move) bool {
 // king-in-check rules) without mutating engine state. Used so capture_attempt is not opened for
 // pseudo-legal or pinned captures that are still illegal chess.
 func (e *Engine) moveWouldApplyAuthoritatively(pid gameplay.PlayerID, m chess.Move) bool {
+	return e.moveApplicationError(pid, m) == nil
+}
+
+// moveApplicationError reports the reason a move would fail without mutating engine state.
+func (e *Engine) moveApplicationError(pid gameplay.PlayerID, m chess.Move) error {
 	if e.isStandardLegalMove(m) {
-		return true
+		return nil
 	}
 	if !e.canUseAugmentedMovement(pid, m) {
-		return false
+		return e.Chess.MoveRejectionReason(m)
 	}
 	cp := e.Chess.Clone()
-	return cp.ApplyPseudoLegalMove(m) == nil
+	return cp.ApplyPseudoLegalMove(m)
 }
 
 // PendingMoveAction represents a not-yet-applied move waiting for reaction window resolution.

@@ -1908,6 +1908,34 @@ pre {
     0 0 18px rgb(255 150 40 / 18%);
 }
 
+.pm-server-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  border-radius: var(--pm-zone-radius);
+  border: 1px solid rgb(255 90 90 / 78%);
+  background: linear-gradient(180deg, rgb(70 12 14 / 96%), rgb(22 10 12 / 96%));
+  color: rgb(255 220 220);
+  text-align: center;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 12%),
+    0 0 18px rgb(255 40 40 / 24%);
+}
+
+.pm-server-error-banner.hidden {
+  display: none;
+}
+
+.pm-server-error-banner-hint {
+  font-size: clamp(12px, 1.45vmin, 15px);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 68%);
+}
+
 .pm-action-banner.hidden {
   display: none;
 }
@@ -1969,8 +1997,6 @@ pre {
 
 /* Queued reaction card (stack top); may fill the slot or sit above an existing ignition card. */
 .pm-ignition-card.pm-ignition-staged {
-  outline: 2px dashed rgba(120, 200, 255, 0.9);
-  outline-offset: 3px;
   border-radius: 10px;
 }
 
@@ -2140,6 +2166,12 @@ pre {
 .playmat-col--left .pm-hand-stack .pm-hand-card-wrap {
   left: auto;
   right: calc(var(--i) * var(--cd-step));
+}
+
+/* In right-anchored cooldown rows, later cards must sit above earlier ones so
+   their bottom-right cooldown badges are not hidden by the card closer to board. */
+.playmat-col--left .pm-cooldown-card-wrap {
+  z-index: calc(10 + var(--i));
 }
 
 .pm-hand-card-wrap--peek {

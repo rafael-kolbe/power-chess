@@ -1,6 +1,8 @@
 package match
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"power-chess/internal/chess"
@@ -91,6 +93,63 @@ func TestSubmitMoveReconcilesPersistedTurnMismatch(t *testing.T) {
 		To:   chess.Pos{Row: 3, Col: 4},
 	}); err != nil {
 		t.Fatalf("submit move should auto-reconcile mismatch: %v", err)
+	}
+}
+
+func TestSubmitMoveRejectsDirectKingCaptureWithSpecificReason(t *testing.T) {
+	state, _ := gameplay.NewMatchState(
+		testDeckWith(gameplay.CardInstance{InstanceID: "a", CardID: CardDoubleTurn, ManaCost: 1, Ignition: 1, Cooldown: 1}),
+		testDeckWith(gameplay.CardInstance{InstanceID: "b", CardID: CardDoubleTurn, ManaCost: 1, Ignition: 1, Cooldown: 1}),
+	)
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 1, Col: 4}, chess.Piece{Type: chess.Rook, Color: chess.White})
+	e := NewEngine(state, board)
+	markInPlayForTest(state)
+
+	err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 1, Col: 4}, To: chess.Pos{Row: 0, Col: 4}})
+	if !errors.Is(err, chess.ErrKingCannotBeCaptured) {
+		t.Fatalf("expected king-capture rejection, got %v", err)
+	}
+}
+
+func TestSubmitMoveRejectsPinnedPieceWithSpecificReason(t *testing.T) {
+	state, _ := gameplay.NewMatchState(
+		testDeckWith(gameplay.CardInstance{InstanceID: "a", CardID: CardDoubleTurn, ManaCost: 1, Ignition: 1, Cooldown: 1}),
+		testDeckWith(gameplay.CardInstance{InstanceID: "b", CardID: CardDoubleTurn, ManaCost: 1, Ignition: 1, Cooldown: 1}),
+	)
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 4}, chess.Piece{Type: chess.Rook, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 3, Col: 4}, chess.Piece{Type: chess.Rook, Color: chess.Black})
+	e := NewEngine(state, board)
+	markInPlayForTest(state)
+
+	err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 4}, To: chess.Pos{Row: 6, Col: 5}})
+	if err == nil || !strings.Contains(err.Error(), "pinned") {
+		t.Fatalf("expected pinned-piece rejection, got %v", err)
+	}
+}
+
+func TestSubmitMoveRejectsMoveThatDoesNotResolveCheckWithSpecificReason(t *testing.T) {
+	state, _ := gameplay.NewMatchState(
+		testDeckWith(gameplay.CardInstance{InstanceID: "a", CardID: CardDoubleTurn, ManaCost: 1, Ignition: 1, Cooldown: 1}),
+		testDeckWith(gameplay.CardInstance{InstanceID: "b", CardID: CardDoubleTurn, ManaCost: 1, Ignition: 1, Cooldown: 1}),
+	)
+	board := chess.NewEmptyGame(chess.White)
+	board.SetPiece(chess.Pos{Row: 7, Col: 4}, chess.Piece{Type: chess.King, Color: chess.White})
+	board.SetPiece(chess.Pos{Row: 0, Col: 0}, chess.Piece{Type: chess.King, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 0, Col: 4}, chess.Piece{Type: chess.Rook, Color: chess.Black})
+	board.SetPiece(chess.Pos{Row: 6, Col: 0}, chess.Piece{Type: chess.Pawn, Color: chess.White})
+	e := NewEngine(state, board)
+	markInPlayForTest(state)
+
+	err := e.SubmitMove(gameplay.PlayerA, chess.Move{From: chess.Pos{Row: 6, Col: 0}, To: chess.Pos{Row: 5, Col: 0}})
+	if err == nil || !strings.Contains(err.Error(), "does not resolve check") {
+		t.Fatalf("expected unresolved-check rejection, got %v", err)
 	}
 }
 
@@ -298,6 +357,58 @@ func TestActivateCardDuringIgniteReactionQueuesLikeQueueReaction(t *testing.T) {
 	_, sz, ok := e.ReactionWindowSnapshot()
 	if !ok || sz != 1 {
 		t.Fatalf("expected one queued reaction, ok=%v sz=%d", ok, sz)
+	}
+}
+
+func TestActivateCardRejectsNotEnoughManaWithCardName(t *testing.T) {
+	kt := gameplay.CardInstance{InstanceID: "kt1", CardID: CardKnightTouch, ManaCost: 3, Ignition: 0, Cooldown: 2}
+	state, _ := gameplay.NewMatchState(testDeckWith(kt), testDeckWith(kt))
+	state.CurrentTurn = gameplay.PlayerA
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{kt}
+	state.Players[gameplay.PlayerA].Mana = 2
+	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	markInPlayForTest(state)
+
+	err := e.ActivateCard(gameplay.PlayerA, 0)
+	if err == nil || !strings.Contains(err.Error(), "not enough mana to activate Knight Touch: need 3, you have 2") {
+		t.Fatalf("expected detailed mana rejection, got %v", err)
+	}
+}
+
+func TestActivateCardRejectsCardOnCooldownWithCardName(t *testing.T) {
+	eg := gameplay.CardInstance{InstanceID: "eg1", CardID: CardEnergyGain, ManaCost: 0, Ignition: 1, Cooldown: 2}
+	state, _ := gameplay.NewMatchState(testDeckWith(eg), testDeckWith(eg))
+	state.CurrentTurn = gameplay.PlayerA
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{eg}
+	state.Players[gameplay.PlayerA].Cooldowns = []gameplay.CooldownEntry{{Card: eg, TurnsRemaining: 1}}
+	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	markInPlayForTest(state)
+
+	err := e.ActivateCard(gameplay.PlayerA, 0)
+	if err == nil || !strings.Contains(err.Error(), "Energy Gain is still on cooldown") {
+		t.Fatalf("expected cooldown rejection, got %v", err)
+	}
+}
+
+func TestQueueReactionRejectsCardOnCooldownWithCardName(t *testing.T) {
+	eg := gameplay.CardInstance{InstanceID: "eg1", CardID: CardEnergyGain, ManaCost: 0, Ignition: 1, Cooldown: 2}
+	mb := gameplay.CardInstance{InstanceID: "mb1", CardID: CardManaBurn, ManaCost: 1, Ignition: 0, Cooldown: 3}
+	state, _ := gameplay.NewMatchState(testDeckWith(eg), testDeckWith(mb))
+	state.CurrentTurn = gameplay.PlayerA
+	state.Players[gameplay.PlayerA].Hand = []gameplay.CardInstance{eg}
+	state.Players[gameplay.PlayerA].Mana = 10
+	state.Players[gameplay.PlayerB].Hand = []gameplay.CardInstance{mb}
+	state.Players[gameplay.PlayerB].Mana = 10
+	state.Players[gameplay.PlayerB].Cooldowns = []gameplay.CooldownEntry{{Card: mb, TurnsRemaining: 1}}
+	e := NewEngine(state, chess.NewEmptyGame(chess.White))
+	markInPlayForTest(state)
+
+	if err := e.ActivateCard(gameplay.PlayerA, 0); err != nil {
+		t.Fatalf("activate energy gain: %v", err)
+	}
+	err := e.QueueReactionCard(gameplay.PlayerB, 0, -1, EffectTarget{})
+	if err == nil || !strings.Contains(err.Error(), "Mana Burn is still on cooldown") {
+		t.Fatalf("expected reaction cooldown rejection, got %v", err)
 	}
 }
 
