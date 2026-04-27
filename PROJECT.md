@@ -218,6 +218,7 @@ Ordem aproximada; itens podem ser paralelizados onde fizer sentido.
 - **Hover** nas cartas (preview, escala, borda).  
 - **Drag and drop**: peças no tabuleiro; cartas da mão / para ignição (onde o protocolo permitir).  
 - **Mana e mana energizada**: barras, ticks, feedback ao gastar/ganhar.  
+- **Erros acionáveis do servidor:** toda nova validação que rejeite uma ação de jogador deve retornar uma mensagem específica e voltada ao jogador, sem prefixos genéricos como `Erro:`. Evitar respostas vagas como `illegal move` ou `requirements not met` quando o backend conhece a causa; preferir motivos como `not enough mana to activate Knight Touch: need 3, you have 2`, `Mana Burn is still on cooldown`, `piece is pinned; moving it would expose your king`, `move does not resolve check`, ou `king cannot be captured`. O frontend deve exibir essa causa diretamente no banner vermelho de alerta.
 - **Animações** de ativação de cartas e transição entre zonas (mão → ignição → recarga → banido).
 
 ### Cadeias e resolução

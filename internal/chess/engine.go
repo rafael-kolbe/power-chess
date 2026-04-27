@@ -128,6 +128,17 @@ func (g *Game) SetPiece(p Pos, piece Piece) {
 
 // ApplyMove validates and applies a regular chess move.
 func (g *Game) ApplyMove(m Move) error {
+	if err := g.MoveRejectionReason(m); err != nil {
+		return err
+	}
+	g.applyUnchecked(m)
+	g.Turn = g.Turn.Opponent()
+	return nil
+}
+
+// MoveRejectionReason validates a regular chess move without mutating the game and returns
+// a player-facing reason when the move is not legal.
+func (g *Game) MoveRejectionReason(m Move) error {
 	if !m.From.InBounds() || !m.To.InBounds() {
 		return fmt.Errorf("move out of bounds")
 	}
@@ -141,21 +152,33 @@ func (g *Game) ApplyMove(m Move) error {
 	if t := g.PieceAt(m.To); !t.IsEmpty() && t.Type == King && t.Color != p.Color {
 		return ErrKingCannotBeCaptured
 	}
-
-	legal := false
 	for _, cand := range g.LegalMovesFrom(m.From) {
 		if moveMatchesCandidate(m, cand) {
-			legal = true
-			break
+			return nil
 		}
 	}
-	if !legal {
+	target := g.PieceAt(m.To)
+	if !target.IsEmpty() && target.Color == p.Color {
+		return fmt.Errorf("cannot capture own piece")
+	}
+	for _, cand := range g.pseudoMovesFrom(m.From) {
+		if !moveMatchesCandidate(m, cand) {
+			continue
+		}
+		cp := g.clone()
+		cp.applyUnchecked(m)
+		if cp.IsCheck(p.Color) {
+			if p.Type == King {
+				return fmt.Errorf("king cannot move into check")
+			}
+			if g.IsCheck(p.Color) {
+				return fmt.Errorf("move does not resolve check")
+			}
+			return fmt.Errorf("piece is pinned; moving it would expose your king")
+		}
 		return fmt.Errorf("illegal move")
 	}
-
-	g.applyUnchecked(m)
-	g.Turn = g.Turn.Opponent()
-	return nil
+	return fmt.Errorf("illegal move")
 }
 
 // ApplyPseudoLegalMove applies a power-modified movement after caller-side pattern validation.

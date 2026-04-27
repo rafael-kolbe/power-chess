@@ -59,6 +59,8 @@ import {
   let activationFxQueue = [];
   /** @type {Promise<void> | null} */
   let activationFxWorkerPromise = null;
+  /** @type {number | null} */
+  let serverActionErrorTimer = null;
   /** @type {boolean} */
   let gameStarted = false;
   let joinedRoom = false;
@@ -241,6 +243,7 @@ import {
       reactionModeOn: "On",
       reactionModeAuto: "Auto",
       reactionPassOk: "Confirm Play",
+      serverActionRejected: "Server rejected the action: {reason}",
       toggleOn: "On",
       toggleOff: "Off",
       coordsLabel: "Coords",
@@ -393,6 +396,7 @@ import {
       reactionModeOn: "Ligado",
       reactionModeAuto: "Automático",
       reactionPassOk: "Confirmar Jogada",
+      serverActionRejected: "O servidor rejeitou a ação: {reason}",
       toggleOn: "Ligado",
       toggleOff: "Desligado",
       coordsLabel: "Coords",
@@ -1274,6 +1278,41 @@ import {
     return errMessage.includes("already occupied");
   }
 
+  /** Returns a readable reason from a websocket error payload. */
+  function serverErrorReason(msg) {
+    const raw = String(msg?.payload?.message || msg?.payload?.code || "").trim();
+    return raw || "action rejected";
+  }
+
+  /** Shows the latest server-side gameplay rejection above the normal action prompt. */
+  function showServerActionError(msg) {
+    if (!joinedRoom || !gameShellEl || gameShellEl.classList.contains("hidden")) return;
+    const reason = serverErrorReason(msg);
+    const banner = pmEl?.serverActionErrorBanner;
+    const hint = pmEl?.serverActionErrorHint;
+    if (!banner || !hint) return;
+    hint.textContent = reason;
+    banner.classList.remove("hidden");
+    if (serverActionErrorTimer !== null) {
+      clearTimeout(serverActionErrorTimer);
+    }
+    serverActionErrorTimer = setTimeout(() => {
+      hideServerActionError();
+    }, 6000);
+  }
+
+  /** Hides the server rejection banner and clears its dismissal timer. */
+  function hideServerActionError() {
+    if (serverActionErrorTimer !== null) {
+      clearTimeout(serverActionErrorTimer);
+      serverActionErrorTimer = null;
+    }
+    const banner = pmEl?.serverActionErrorBanner;
+    const hint = pmEl?.serverActionErrorHint;
+    if (hint) hint.textContent = "";
+    if (banner) banner.classList.add("hidden");
+  }
+
   function socketBaseURL() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     return `${proto}//${location.host}/ws`;
@@ -1288,6 +1327,28 @@ import {
     const u = new URL(base);
     u.searchParams.set("token", tok);
     return u.toString();
+  }
+
+  /** Handles websocket messages that are not state snapshots or animation events. */
+  function handleNonSnapshotMessage(msg) {
+    if (isJoinOccupiedSideError(msg) && !joinedRoom && pendingJoinAttempt && !pendingJoinAttempt.attemptedFallback) {
+      pendingJoinAttempt.attemptedFallback = true;
+      pendingJoinAttempt.pieceType = oppositePieceType(pendingJoinAttempt.pieceType);
+      playerEl.value = desiredPlayerForPieceType(pendingJoinAttempt.pieceType);
+      syncPlayerRoleLabels();
+      send("join_match", {
+        roomId: pendingJoinAttempt.roomId,
+        roomName: pendingJoinAttempt.roomName,
+        pieceType: pendingJoinAttempt.pieceType,
+        playerId: playerEl.value,
+        isPrivate: pendingJoinAttempt.isPrivate,
+        password: pendingJoinAttempt.password,
+      });
+      return;
+    }
+    if (msg?.type === "error") {
+      showServerActionError(msg);
+    }
   }
 
   /**
@@ -1557,20 +1618,7 @@ import {
         });
         return;
       }
-      if (isJoinOccupiedSideError(msg) && !joinedRoom && pendingJoinAttempt && !pendingJoinAttempt.attemptedFallback) {
-        pendingJoinAttempt.attemptedFallback = true;
-        pendingJoinAttempt.pieceType = oppositePieceType(pendingJoinAttempt.pieceType);
-        playerEl.value = desiredPlayerForPieceType(pendingJoinAttempt.pieceType);
-        syncPlayerRoleLabels();
-        send("join_match", {
-          roomId: pendingJoinAttempt.roomId,
-          roomName: pendingJoinAttempt.roomName,
-          pieceType: pendingJoinAttempt.pieceType,
-          playerId: playerEl.value,
-          isPrivate: pendingJoinAttempt.isPrivate,
-          password: pendingJoinAttempt.password,
-        });
-      }
+      handleNonSnapshotMessage(msg);
     };
   }
 
@@ -2412,6 +2460,8 @@ import {
     ignitionOpp: document.getElementById("ignitionOpp"),
     playerActionBanner: document.getElementById("playerActionBanner"),
     playerActionHint: document.getElementById("playerActionHint"),
+    serverActionErrorBanner: document.getElementById("serverActionErrorBanner"),
+    serverActionErrorHint: document.getElementById("serverActionErrorHint"),
     mulliganBar: document.getElementById("mulliganBar"),
     mulliganHint: document.getElementById("mulliganHint"),
     mulliganTimer: document.getElementById("mulliganTimer"),
@@ -4487,6 +4537,10 @@ import {
       const self = hudForSeat(snapshot, pid);
       if ((self?.hand || []).length >= 5) return false;
     }
+    if (String(getCardDef(handEntry?.cardId)?.type || "").toLowerCase() === "disruption") {
+      const opp = hudForSeat(snapshot, oppositeSeat(pid));
+      if (!opp?.ignitionOn) return false;
+    }
     return true;
   }
 
@@ -4548,6 +4602,12 @@ import {
       highlightedMoves = [];
       if (snapshot?.board) renderBoard(snapshot.board);
       if (lastSnapshot) renderPlaymat(lastSnapshot);
+      return;
+    }
+    if (String(getCardDef(cardId)?.type || "").toLowerCase() === "disruption") {
+      const opp = hudForSeat(snapshot, oppositeSeat(playerEl.value));
+      if (!opp?.ignitionOn) return;
+      send("ignite_card", { handIndex });
       return;
     }
     send("ignite_card", { handIndex });
@@ -4871,6 +4931,14 @@ import {
         stack.releasePointerCapture(ev.pointerId);
       } catch (_) {
         /* ignore */
+      }
+      if (!pending.armed && disruptionBanishFlow !== null && isGameplayInputOpen()) {
+        const idx = pending.idx;
+        pending = null;
+        clearDragChrome();
+        sendHandCardAction(lastSnapshot, idx);
+        if (lastSnapshot) renderPlaymat(lastSnapshot);
+        return;
       }
       let droppedOnIgnition = false;
       if (pending.armed) {
@@ -6028,11 +6096,12 @@ import {
     }
     if (!matchEndCountdownEl) return;
     function tick() {
-      if (!payload?.matchEnded) {
+      const current = lastSnapshot?.matchEnded ? lastSnapshot : payload;
+      if (!current?.matchEnded) {
         matchEndCountdownEl.classList.add("hidden");
         return;
       }
-      const ms = Number(payload.postMatchMsLeft || 0);
+      const ms = Number(current.postMatchMsLeft || 0);
       const s = Math.max(0, Math.ceil(ms / 1000));
       matchEndCountdownEl.textContent = s > 0 ? t("autoCloseIn", { s }) : t("autoCloseNow");
       matchEndCountdownEl.classList.remove("hidden");
@@ -6159,6 +6228,7 @@ import {
     pendingActivateCardPayloads = [];
     activationFxQueue = [];
     activationFxWorkerPromise = null;
+    hideServerActionError();
     hideMatchEndOverlay();
     hideOpponentDisconnectOverlay();
     updateReactionPassButton(null);

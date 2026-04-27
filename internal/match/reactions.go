@@ -2,6 +2,7 @@ package match
 
 import (
 	"errors"
+	"fmt"
 
 	"power-chess/internal/gameplay"
 	matchresolvers "power-chess/internal/match/resolvers"
@@ -82,7 +83,13 @@ func (e *Engine) QueueReactionCard(pid gameplay.PlayerID, handIndex int, banishH
 		}
 	}
 	if !allowed {
-		return errors.New("card type not allowed in current reaction window")
+		return fmt.Errorf("%s cannot be played in this reaction window", cardDisplayName(card.CardID))
+	}
+	if p.Mana < card.ManaCost {
+		return fmt.Errorf("not enough mana to play %s: need %d, you have %d", cardDisplayName(card.CardID), card.ManaCost, p.Mana)
+	}
+	if e.cardOnCooldown(pid, card.CardID) {
+		return fmt.Errorf("%s is still on cooldown", cardDisplayName(card.CardID))
 	}
 	if e.ReactionWindow.Trigger == "capture_attempt" && e.reactions.Len() == 0 {
 		if pid == e.ReactionWindow.Actor {

@@ -20,6 +20,7 @@ alwaysApply: true
 ## Backend (Go)
 - Keep authoritative game rules on the server.
 - WebSocket events are the source of truth for turn, mana, strikes, ignition, and cooldown state.
+- Player-action rejections must return specific, actionable, player-facing causes when the backend knows the reason. Avoid vague messages like `illegal move`, `requirements not met`, or generic `not enough mana` when a more precise reason is available (e.g. card name, required/current mana, cooldown duplicate, pinned piece, unresolved check, direct king capture). Do not prefix these messages with `Error:`; the frontend displays the cause directly in the red alert banner.
 - Write clear, testable code with explicit naming and small functions.
 - Design the power/ability system for extensibility (new cards and effects without refactoring core turn logic).
 - Prefer effect-based architecture (card definition + resolver + validation pipeline) over hard-coded per-card branching in many places.
